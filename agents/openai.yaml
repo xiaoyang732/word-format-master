@@ -1,0 +1,7 @@
+interface:
+  display_name: "Word Format Master"
+  short_description: "依据国家标准学术规范（GB/T 7713.1、GB/T 7714-2015）进行学位论文/毕业设计排版与格式验证"
+  default_prompt: "Use $word-format-master to analyze this Word template and open the formatting dashboard."
+
+policy:
+  allow_implicit_invocation: true

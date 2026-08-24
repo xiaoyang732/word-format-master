@@ -1,0 +1,606 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Word Format Master</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">W</span>
+      <div>
+        <h1>Word Format Master</h1>
+        <p id="statusText">正在载入预设</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button id="exportButton" class="button secondary" type="button">导出 JSON</button>
+      <button id="applyButton" class="button primary" type="button" disabled>应用并下载 DOCX</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <aside class="settings-panel" aria-label="参数">
+      <nav class="settings-nav" aria-label="设置分类">
+        <div class="settings-tablist" role="tablist" aria-label="设置分类">
+          <button class="settings-tab active" type="button" role="tab" aria-selected="true" data-settings-tab="source">来源</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="page">页面</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="body">正文</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="lists">列表</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="headings">标题</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="toc">目录</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="captions">图表</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="headers">页眉页码</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="references">文献</button>
+          <button class="settings-tab" type="button" role="tab" aria-selected="false" data-settings-tab="verification">验收</button>
+        </div>
+      </nav>
+      <section class="setting-section" data-setting-panel="source">
+        <div class="section-heading">
+          <h2>格式来源</h2>
+          <span id="modeBadge" class="badge neutral">参数预设</span>
+        </div>
+        <label class="control">
+          <span>预设</span>
+          <select id="presetSelect"></select>
+        </label>
+        <p id="authorityNote" class="authority-note"></p>
+        <div id="templateWorkflow" class="template-workflow" hidden>
+          <div class="template-workflow-header">
+            <span class="badge warning">需要官方模板</span>
+            <a id="officialTemplateLink" class="source-link" href="#" target="_blank" rel="noreferrer">打开官方模板页</a>
+          </div>
+          <p id="templateScopeNote" class="authority-note"></p>
+          <ol id="templateWorkflowSteps" class="workflow-steps"></ol>
+          <div id="localTemplateLinks" class="template-links"></div>
+        </div>
+      </section>
+
+      <section class="setting-section" data-setting-panel="page">
+        <h2>页面</h2>
+        <div class="control-grid two">
+          <label class="control">
+            <span>纸张</span>
+            <select data-spec-path="page.size">
+              <option value="A4">A4</option>
+              <option value="Letter">Letter</option>
+              <option value="Custom">自定义</option>
+            </select>
+          </label>
+          <label class="control">
+            <span>方向</span>
+            <select data-spec-path="page.orientation">
+              <option value="portrait">纵向</option>
+              <option value="landscape">横向</option>
+            </select>
+          </label>
+        </div>
+        <div class="control-grid two">
+          <label class="control"><span>宽度 mm</span><input type="number" min="50" max="500" step="1" data-spec-path="page.width_mm"></label>
+          <label class="control"><span>高度 mm</span><input type="number" min="50" max="500" step="1" data-spec-path="page.height_mm"></label>
+        </div>
+        <div class="control-grid two">
+          <label class="control"><span>上边距 mm</span><input type="number" min="0" max="100" step="1" data-spec-path="page.margin_top_mm"></label>
+          <label class="control"><span>下边距 mm</span><input type="number" min="0" max="100" step="1" data-spec-path="page.margin_bottom_mm"></label>
+          <label class="control"><span>左边距 mm</span><input type="number" min="0" max="100" step="1" data-spec-path="page.margin_left_mm"></label>
+          <label class="control"><span>右边距 mm</span><input type="number" min="0" max="100" step="1" data-spec-path="page.margin_right_mm"></label>
+        </div>
+      </section>
+
+      <section class="setting-section" data-setting-panel="body">
+        <div class="section-heading">
+          <h2>正文段落</h2>
+          <span id="bodyRoleSummary" class="role-summary"></span>
+        </div>
+        <label class="control"><span>中文字体</span><input type="text" data-spec-path="body.font_east_asia"></label>
+        <label class="control"><span>西文字体</span><input type="text" data-spec-path="body.font_latin"></label>
+        <div class="control-grid two">
+          <label class="control">
+            <span>字号 (中文/磅)</span>
+            <select id="bodyFontSizeSelect">
+              <option value="42">初号 (42 pt)</option>
+              <option value="36">小初 (36 pt)</option>
+              <option value="26">一号 (26 pt)</option>
+              <option value="24">小一 (24 pt)</option>
+              <option value="22">二号 (22 pt)</option>
+              <option value="18">小二 (18 pt)</option>
+              <option value="16">三号 (16 pt)</option>
+              <option value="15">小三 (15 pt)</option>
+              <option value="14">四号 (14 pt)</option>
+              <option value="12">小四 (12 pt)</option>
+              <option value="10.5">五号 (11 pt)</option>
+              <option value="9">小五 (9 pt)</option>
+              <option value="7.5">六号 (8 pt)</option>
+              <option value="6.5">小六 (7 pt)</option>
+              <option value="5.5">七号 (6 pt)</option>
+              <option value="5">八号 (5 pt)</option>
+              <option value="custom">自定义磅值...</option>
+            </select>
+          </label>
+          <label class="control">
+            <span>对齐</span>
+            <select data-spec-path="body.alignment">
+              <option value="left">左对齐</option>
+              <option value="justify">两端对齐</option>
+              <option value="center">居中</option>
+              <option value="right">右对齐</option>
+            </select>
+          </label>
+        </div>
+        <div class="control-grid two" id="bodyCustomFontSizeRow" hidden>
+          <label class="control"><span>自定义字号 pt</span><input id="bodyFontSizeInput" type="number" min="5" max="96" step="1" data-spec-path="body.font_size_pt"></label>
+        </div>
+        <div class="control-grid two">
+          <label class="control">
+            <span>行距类型</span>
+            <select id="bodyLineSpacingKindSelect">
+              <option value="exact">固定值 (磅)</option>
+              <option value="multiple">多倍行距</option>
+              <option value="single">单倍行距</option>
+              <option value="1.5">1.5 倍行距</option>
+              <option value="double">2 倍行距</option>
+              <option value="at_least">最小值 (磅)</option>
+            </select>
+          </label>
+          <label class="control">
+            <span id="bodyLineSpacingLabel">行距 (磅 pt)</span>
+            <input id="lineSpacingInput" type="number" min="1" max="100" step="1">
+          </label>
+        </div>
+        <div class="control-grid two">
+          <label class="control">
+            <span>首行缩进单位</span>
+            <select id="bodyFirstLineIndentUnitSelect">
+              <option value="chars">字符</option>
+              <option value="pt">磅 (pt)</option>
+              <option value="mm">毫米 (mm)</option>
+              <option value="cm">厘米 (cm)</option>
+            </select>
+          </label>
+          <label class="control">
+            <span id="bodyFirstLineIndentValueLabel">首行缩进 (字符)</span>
+            <input id="bodyFirstLineIndentValueInput" type="number" min="0" max="500" step="1" placeholder="2">
+          </label>
+        </div>
+        <p id="bodyIndentConversionHint" class="authority-note" style="margin-top: 4px; font-size: 11px;">换算：2 字符 = 24 磅 (8 mm)</p>
+        <div class="control-grid two">
+          <label class="control"><span>段前 pt</span><input type="number" min="0" max="100" step="1" data-spec-path="body.space_before_pt"></label>
+          <label class="control"><span>段后 pt</span><input type="number" min="0" max="100" step="1" data-spec-path="body.space_after_pt"></label>
+        </div>
+      </section>
+
+      <section class="setting-section" data-setting-panel="lists">
+        <div class="section-heading">
+          <h2>序号与列表样式</h2>
+          <span class="badge neutral">层级序号</span>
+        </div>
+        <label class="control">
+          <span>一级标题序号样式 (章)</span>
+          <select data-spec-path="lists.headings.level1">
+            <option value="arabic">1、2、3、（阿拉伯数字带顿号）</option>
+            <option value="chinese">第一章、第二章、第三章（中文大写章序）</option>
+            <option value="arabic-space">1 2 3（阿拉伯数字无顿号）</option>
+            <option value="keep">保持原样（不改动正文文字）</option>
+          </select>
+        </label>
+        <label class="control">
+          <span>二级标题序号样式 (节)</span>
+          <select data-spec-path="lists.headings.level2">
+            <option value="arabic">1.1、1.2、2.1（无顿号）</option>
+            <option value="keep">保持原样（不改动正文文字）</option>
+          </select>
+        </label>
+        <label class="control">
+          <span>三级标题序号样式 (小节)</span>
+          <select data-spec-path="lists.headings.level3">
+            <option value="arabic">1.1.1、1.1.2（无顿号）</option>
+            <option value="keep">保持原样（不改动正文文字）</option>
+          </select>
+        </label>
+        <label class="control" style="margin-top: 8px;">
+          <span>正文列表标号样式</span>
+          <select data-spec-path="lists.numbered.style">
+            <option value="decimal-period">1. 2. 3.</option>
+            <option value="decimal-parenthesis">1) 2) 3)</option>
+            <option value="decimal-parentheses">(1) (2) (3)</option>
+            <option value="decimal-fullwidth-parentheses">（1）（2）（3）</option>
+            <option value="chinese-period">一、二、三、</option>
+            <option value="chinese-parentheses">（一）（二）（三）</option>
+            <option value="upper-alpha-period">A. B. C.</option>
+            <option value="lower-alpha-parenthesis">a) b) c)</option>
+            <option value="upper-roman-period">I. II. III.</option>
+          </select>
+        </label>
+        <div class="control-grid two">
+          <label class="control"><span>起始编号</span><input type="number" min="1" max="999" step="1" data-spec-path="lists.numbered.start"></label>
+          <label class="control"><span>左缩进 mm</span><input type="number" min="0" max="100" step="1" data-spec-path="lists.numbered.left_indent_mm"></label>
+          <label class="control"><span>悬挂缩进 mm</span><input type="number" min="0" max="50" step="1" data-spec-path="lists.numbered.hanging_indent_mm"></label>
+        </div>
+        <p class="authority-note">章节标题序号样式控制正文各级标题序号；正文列表标号样式应用到正文条目与小点列表。</p>
+      </section>
+
+      <section class="setting-section" data-setting-panel="headings">
+        <div class="section-heading">
+          <h2>标题层级</h2>
+          <span id="headingDefinitionBadge" class="badge neutral">预设已定义</span>
+        </div>
+        <div id="headingLevelTabs" class="heading-level-tabs" role="tablist" aria-label="标题层级">
+          <button class="heading-level-button active" type="button" role="tab" aria-selected="true" data-heading-level="1">H1</button>
+          <button class="heading-level-button" type="button" role="tab" aria-selected="false" data-heading-level="2">H2</button>
+          <button class="heading-level-button" type="button" role="tab" aria-selected="false" data-heading-level="3">H3</button>
+        </div>
+        <label class="control"><span>中文字体</span><input id="headingEastAsiaInput" type="text"></label>
+        <label class="control"><span>西文字体</span><input id="headingLatinInput" type="text"></label>
+        <div class="control-grid two">
+          <label class="control">
+            <span>字号 (中文/磅)</span>
+            <select id="headingFontSizeSelect">
+              <option value="42">初号 (42 pt)</option>
+              <option value="36">小初 (36 pt)</option>
+              <option value="26">一号 (26 pt)</option>
+              <option value="24">小一 (24 pt)</option>
+              <option value="22">二号 (22 pt)</option>
+              <option value="18">小二 (18 pt)</option>
+              <option value="16">三号 (16 pt)</option>
+              <option value="15">小三 (15 pt)</option>
+              <option value="14">四号 (14 pt)</option>
+              <option value="12">小四 (12 pt)</option>
+              <option value="10.5">五号 (11 pt)</option>
+              <option value="9">小五 (9 pt)</option>
+              <option value="7.5">六号 (8 pt)</option>
+              <option value="6.5">小六 (7 pt)</option>
+              <option value="5.5">七号 (6 pt)</option>
+              <option value="5">八号 (5 pt)</option>
+              <option value="custom">自定义磅值...</option>
+            </select>
+          </label>
+          <label class="control">
+            <span>对齐</span>
+            <select id="headingAlignInput">
+              <option value="left">左对齐</option>
+              <option value="center">居中</option>
+              <option value="right">右对齐</option>
+              <option value="justify">两端对齐</option>
+            </select>
+          </label>
+        </div>
+        <div class="control-grid two" id="headingCustomFontSizeRow" hidden>
+          <label class="control"><span>自定义字号 pt</span><input id="headingSizeInput" type="number" min="5" max="96" step="1"></label>
+        </div>
+        <div class="control-grid two">
+          <label class="control"><span>段前 pt</span><input id="headingSpaceBeforeInput" type="number" min="0" max="100" step="1"></label>
+          <label class="control"><span>段后 pt</span><input id="headingSpaceAfterInput" type="number" min="0" max="100" step="1"></label>
+        </div>
+        <div class="control-grid two">
+          <label class="control">
+            <span id="headingIndentLabel">首行缩进 (字符)</span>
+            <input id="headingFirstLineIndentInput" type="number" min="0" max="20" step="0.5" placeholder="0">
+          </label>
+          <label class="control">
+            <span>左缩进 (字符)</span>
+            <input id="headingLeftIndentInput" type="number" min="0" max="20" step="0.5" placeholder="0">
+          </label>
+        </div>
+        <div class="inline-checks">
+          <label class="check-control"><input id="headingBoldInput" type="checkbox"><span>加粗</span></label>
+          <label class="check-control"><input id="headingItalicInput" type="checkbox"><span>斜体</span></label>
+        </div>
+        <label class="check-control">
+          <input id="clearDirectInput" type="checkbox">
+          <span>清除直接字体格式</span>
+        </label>
+      </section>
+
+      <section class="setting-section" data-setting-panel="captions">
+        <h2>图表题注</h2>
+        <div class="control-grid two">
+          <label class="control"><span>图标签</span><input type="text" data-spec-path="captions.figure.label"></label>
+          <label class="control"><span>图题位置</span><select data-spec-path="captions.figure.position"><option value="below">图下</option><option value="above">图上</option></select></label>
+          <label class="control">
+            <span>图题字号</span>
+            <select id="captionFigureFontSizeSelect">
+              <option value="16">三号 (16 pt)</option>
+              <option value="15">小三 (15 pt)</option>
+              <option value="14">四号 (14 pt)</option>
+              <option value="12">小四 (12 pt)</option>
+              <option value="10.5">五号 (11 pt)</option>
+              <option value="9">小五 (9 pt)</option>
+              <option value="7.5">六号 (8 pt)</option>
+              <option value="custom">自定义磅值...</option>
+            </select>
+          </label>
+          <label class="control"><span>图题对齐</span><select data-spec-path="captions.figure.alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option><option value="justify">两端对齐</option></select></label>
+          <div id="captionFigureCustomSizeRow" style="grid-column: 1 / -1;" hidden>
+            <label class="control"><span>自定义图题字号 pt</span><input id="captionFigureSizeInput" type="number" min="5" max="96" step="1" data-spec-path="captions.figure.font_size_pt"></label>
+          </div>
+          <label class="control"><span>表标签</span><input type="text" data-spec-path="captions.table.label"></label>
+          <label class="control"><span>表题位置</span><select data-spec-path="captions.table.position"><option value="above">表上</option><option value="below">表下</option></select></label>
+          <label class="control">
+            <span>表题字号</span>
+            <select id="captionTableFontSizeSelect">
+              <option value="16">三号 (16 pt)</option>
+              <option value="15">小三 (15 pt)</option>
+              <option value="14">四号 (14 pt)</option>
+              <option value="12">小四 (12 pt)</option>
+              <option value="10.5">五号 (11 pt)</option>
+              <option value="9">小五 (9 pt)</option>
+              <option value="7.5">六号 (8 pt)</option>
+              <option value="custom">自定义磅值...</option>
+            </select>
+          </label>
+          <label class="control"><span>表题对齐</span><select data-spec-path="captions.table.alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option><option value="justify">两端对齐</option></select></label>
+          <div id="captionTableCustomSizeRow" style="grid-column: 1 / -1;" hidden>
+            <label class="control"><span>自定义表题字号 pt</span><input id="captionTableSizeInput" type="number" min="5" max="96" step="1" data-spec-path="captions.table.font_size_pt"></label>
+          </div>
+        </div>
+      </section>
+
+      <section class="setting-section" data-setting-panel="toc">
+        <div class="section-heading">
+          <h2>目录</h2>
+          <span class="badge neutral">Word 域</span>
+        </div>
+        <label class="check-control"><input type="checkbox" data-spec-path="table_of_contents.enabled"><span>插入可更新目录</span></label>
+        <div class="control-grid two">
+          <label class="control"><span>目录标题</span><input type="text" data-spec-path="table_of_contents.title"></label>
+          <label class="control"><span>包含到标题级别</span><input type="number" min="1" max="9" step="1" data-spec-path="table_of_contents.max_heading_level"></label>
+        </div>
+        <label class="check-control"><input type="checkbox" data-spec-path="table_of_contents.page_break_after"><span>目录后分页</span></label>
+      </section>
+
+      <section class="setting-section" data-setting-panel="headers">
+        <h2>页眉与页脚</h2>
+        <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.preserve_existing"><span>保留原文档已有页眉</span></label>
+        <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.header.enabled"><span>自定义/覆盖页眉文字</span></label>
+        <div class="control-grid two">
+          <label class="control"><span>页眉文字</span><input type="text" data-spec-path="headers_footers.header.text" placeholder="留空或关闭则保留原样"></label>
+          <label class="control"><span>页眉对齐</span><select data-spec-path="headers_footers.header.alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+        </div>
+        <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.footer.enabled"><span>写入页脚文字</span></label>
+        <div class="control-grid two">
+          <label class="control"><span>页脚文字</span><input type="text" data-spec-path="headers_footers.footer.text"></label>
+          <label class="control"><span>页脚对齐</span><select data-spec-path="headers_footers.footer.alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+        </div>
+        <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.different_first_page"><span>首页不同</span></label>
+      </section>
+
+      <section class="setting-section" data-setting-panel="headers">
+        <h2>页码</h2>
+        <label class="check-control"><input type="checkbox" data-spec-path="page_numbers.enabled"><span>插入真实 PAGE 域</span></label>
+        <div class="control-grid two">
+          <label class="control"><span>位置</span><select data-spec-path="page_numbers.location"><option value="header">页眉</option><option value="footer">页脚</option></select></label>
+          <label class="control"><span>对齐</span><select data-spec-path="page_numbers.alignment"><option value="left">左</option><option value="center">中</option><option value="right">右</option></select></label>
+          <label class="control"><span>显示格式</span><select data-spec-path="page_numbers.format"><option value="number">1</option><option value="page-number">Page 1</option><option value="page-x-of-y">Page 1 of 8</option></select></label>
+          <label class="control"><span>起始页码</span><input type="number" min="0" max="9999" step="1" data-spec-path="page_numbers.start"></label>
+        </div>
+        <label class="check-control"><input type="checkbox" data-spec-path="page_numbers.show_on_first_page"><span>首页显示页码</span></label>
+      </section>
+
+      <section class="setting-section" data-setting-panel="references">
+        <h2>参考文献</h2>
+        <div class="setting-meta">
+          <span>引用规范</span>
+          <strong id="referenceSystemValue">未指定</strong>
+          <span class="badge advisory">仅识别</span>
+        </div>
+        <div class="control-grid two">
+          <label class="control">
+            <span>字号 (中文/磅)</span>
+            <select id="referenceFontSizeSelect">
+              <option value="16">三号 (16 pt)</option>
+              <option value="15">小三 (15 pt)</option>
+              <option value="14">四号 (14 pt)</option>
+              <option value="12">小四 (12 pt)</option>
+              <option value="10.5">五号 (11 pt)</option>
+              <option value="9">小五 (9 pt)</option>
+              <option value="7.5">六号 (8 pt)</option>
+              <option value="custom">自定义磅值...</option>
+            </select>
+          </label>
+          <div id="referenceCustomSizeRow" style="grid-column: 1 / -1;" hidden>
+            <label class="control"><span>自定义参考文献字号 pt</span><input id="referenceSizeInput" type="number" min="5" max="96" step="1" data-spec-path="references.font_size_pt"></label>
+          </div>
+        </div>
+        <div class="control-grid two">
+          <label class="control">
+            <span>悬挂缩进单位</span>
+            <select id="referenceHangingIndentUnitSelect">
+              <option value="chars">字符</option>
+              <option value="pt">磅 (pt)</option>
+              <option value="mm">毫米 (mm)</option>
+              <option value="cm">厘米 (cm)</option>
+            </select>
+          </label>
+          <label class="control">
+            <span id="referenceHangingIndentValueLabel">悬挂缩进 (字符)</span>
+            <input id="referenceHangingIndentValueInput" type="number" min="0" max="500" step="1" placeholder="2">
+          </label>
+        </div>
+        <p id="referenceIndentConversionHint" class="authority-note" style="margin-top: 4px; font-size: 11px;">换算：2 字符 = 21 磅 (7 mm)</p>
+        <div class="control-grid two">
+          <label class="control">
+            <span>行距类型</span>
+            <select id="referenceLineSpacingKindSelect">
+              <option value="exact">固定值 (磅)</option>
+              <option value="multiple">多倍行距</option>
+              <option value="single">单倍行距</option>
+              <option value="1.5">1.5 倍行距</option>
+              <option value="double">2 倍行距</option>
+              <option value="at_least">最小值 (磅)</option>
+            </select>
+          </label>
+          <label class="control">
+            <span id="referenceLineSpacingLabel">行距 (磅 pt)</span>
+            <input id="referenceSpacingInput" type="number" min="1" max="100" step="1">
+          </label>
+          <label class="control"><span>对齐</span><select data-spec-path="references.alignment"><option value="left">左对齐</option><option value="justify">两端对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+        </div>
+        <div class="citation-preprocess">
+          <div><strong id="citationParagraphCount">0</strong><span>正文锚点</span></div>
+          <div><strong id="citationReferenceCount">0</strong><span>参考文献</span></div>
+          <span id="citationReadyBadge" class="badge neutral">等待文档</span>
+        </div>
+        <button id="citationRequestButton" class="button citation-request-button" type="button" title="请求 AI 在正文中分析并插入引用标号" disabled>在正文中引用</button>
+        <p id="citationWorkflowStatus" class="workflow-status">载入 DOCX 后可请求 AI 分析正文并在段落中插入引用</p>
+      </section>
+
+      <section class="setting-section" data-setting-panel="verification">
+        <div class="section-heading">
+          <h2>修改后验收</h2>
+          <span class="badge success">结构验收开启</span>
+        </div>
+        <label class="check-control switch-control">
+          <input id="visualReviewToggle" type="checkbox" disabled>
+          <span>启用逐页视觉验收</span>
+        </label>
+        <div id="customVisualModelControl" hidden>
+          <select id="visualModelSelect">
+            <option value="auto" selected>自动选择支持图片输入的模型</option>
+            <option value="current">使用当前模型</option>
+            <option value="custom">自定义模型 ID</option>
+          </select>
+          <input id="customVisualModelInput" type="text" autocomplete="off" placeholder="输入模型 ID">
+        </div>
+        <p id="visualReviewStatus" class="workflow-status">视觉验收未开启</p>
+        <div id="renderRuntimePanel" class="runtime-panel">
+          <div class="runtime-heading">
+            <strong>页面渲染环境</strong>
+            <span id="renderRuntimeBadge" class="badge neutral">检测中</span>
+          </div>
+          <label class="control runtime-method-control">
+            <span>渲染方式</span>
+            <select id="renderMethodSelect">
+              <option value="auto">自动选择（Word 优先）</option>
+              <option value="word">Microsoft Word</option>
+              <option value="libreoffice">LibreOffice</option>
+            </select>
+          </label>
+          <p id="renderRuntimeStatus" class="workflow-status">正在检测 Microsoft Word 和 LibreOffice。</p>
+          <div class="runtime-method-list" aria-label="渲染器检测结果">
+            <div class="runtime-method" data-runtime-method="word">
+              <div><strong>Microsoft Word</strong><span>最高 Word 保真度</span></div>
+              <span id="wordRuntimeBadge" class="badge neutral">检测中</span>
+            </div>
+            <div class="runtime-method" data-runtime-method="libreoffice">
+              <div><strong>LibreOffice</strong><span>本地开源渲染</span></div>
+              <span id="libreOfficeRuntimeBadge" class="badge neutral">检测中</span>
+            </div>
+          </div>
+          <div class="runtime-install-block">
+            <div class="runtime-install-heading"><strong>准备 LibreOffice</strong><span id="renderRuntimeProgressText">等待检测</span></div>
+            <div class="runtime-progress" role="progressbar" aria-label="LibreOffice 下载进度" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+              <span id="renderRuntimeProgress"></span>
+            </div>
+            <div class="runtime-progress-meta"><span>官方 Windows 运行包</span><span id="renderRuntimeProgressBytes"></span></div>
+            <div id="renderRuntimeActions" class="runtime-actions">
+              <a id="libreOfficeOfficialLink" class="source-link" href="https://www.libreoffice.org/download/download-libreoffice/" target="_blank" rel="noreferrer">官网下载</a>
+              <button id="aiDownloadRuntimeButton" class="button primary" type="button">交给 Agent 安装</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </aside>
+
+    <section class="preview-panel" aria-label="预览">
+      <div class="preview-toolbar">
+        <div>
+          <h2>排版预览</h2>
+          <span id="pageLabel">A4 · 210 × 297 mm</span>
+        </div>
+        <span class="badge advisory">示意</span>
+      </div>
+      <div class="paper-stage">
+        <article id="paperPreview" class="paper">
+          <header class="paper-header"><span id="previewHeaderText">论文题目</span><span id="previewHeaderPage">1</span></header>
+          <div id="paperContent" class="paper-content">
+            <div class="preview-title-block">
+              <h2 id="previewTitle" class="preview-title">城市绿色基础设施对夏季热暴露的缓解效应</h2>
+              <p id="previewAuthor" class="preview-author">张明　李然</p>
+              <p id="previewAffiliation" class="preview-affiliation">城市环境与空间分析实验室</p>
+              <div class="preview-abstract-block">
+                <p class="preview-abstract"><strong id="previewAbstractLabel">摘要：</strong><span id="previewAbstractText">本研究融合遥感、街区传感器与地表覆盖数据，评估不同尺度绿色基础设施对高温暴露的影响。</span></p>
+                <p class="preview-keywords"><strong id="previewKeywordsLabel">关键词：</strong><span id="previewKeywordsText">绿色基础设施；热暴露；空间分析</span></p>
+              </div>
+            </div>
+            <div id="previewMainBody" class="preview-main-body">
+              <h3 id="previewHeading1" class="preview-heading" data-preview-heading="1">1 研究背景</h3>
+              <p id="previewBody1" class="preview-body">快速城市化改变了地表能量平衡。连续观测显示，树冠覆盖与遮阴连通性能够降低午后行人层热暴露。</p>
+              <h4 id="previewHeading2" class="preview-heading" data-preview-heading="2">1.1 数据与方法</h4>
+              <p id="previewBody2" class="preview-body">研究在典型居住区布设微气候节点，并以同一时间窗的卫星地表温度校正传感器观测。</p>
+              <h5 id="previewHeading3" class="preview-heading" data-preview-heading="3">1.1.1 指标构建</h5>
+              <p id="previewBody3" class="preview-body">模型纳入树冠率、天空可视因子与不透水面比例，采用分层交叉验证比较预测误差。</p>
+              <ol id="previewList" class="preview-list"><li>街区尺度环境特征</li><li>逐小时热暴露指标</li><li>空间缓冲区设置</li><li>稳健性检验方案</li><li>结果复核记录</li></ol>
+              <p id="previewEquation" class="preview-equation">HI = 0.62T + 0.38RH</p>
+              <p id="previewBody4" class="preview-body">在不同缓冲半径与缺失值处理方案下，主要效应方向保持一致。</p>
+              <p id="previewTableCaption" class="preview-caption">表 1　模型比较结果</p>
+            <div class="sample-table">
+                <div class="sample-row header-row"><span id="previewTableHeader1">模型</span><span id="previewTableHeader2">RMSE</span></div>
+                <div class="sample-row"><span id="previewTableCell11">基线模型</span><span id="previewTableCell12">2.41</span></div>
+                <div class="sample-row"><span id="previewTableCell21">融合模型</span><span id="previewTableCell22">1.76</span></div>
+              </div>
+              <div id="previewFigure" class="sample-figure" role="img" aria-label="三种情景的热暴露指数比较">
+                <div class="figure-bar-group"><span class="figure-bar low"></span><small id="previewFigureLabel1">基线</small></div>
+                <div class="figure-bar-group"><span class="figure-bar high"></span><small id="previewFigureLabel2">树冠</small></div>
+                <div class="figure-bar-group"><span class="figure-bar mid"></span><small id="previewFigureLabel3">复合</small></div>
+              </div>
+              <p id="previewFigureCaption" class="preview-caption">图 1　不同情景下的热暴露指数</p>
+              <h3 id="previewReferencesHeading" class="preview-references-heading">参考文献</h3>
+              <p id="previewReference1" class="preview-reference">[1] 中国标准化研究院. 学术论文编写规则: GB/T 7713.2—2022[S]. 北京: 中国标准出版社, 2022.</p>
+              <p id="previewReference2" class="preview-reference">[2] Oke T R, Mills G, Christen A, et al. Urban Climates[M]. Cambridge: Cambridge University Press, 2017.</p>
+            </div>
+          </div>
+          <footer class="paper-footer"><span id="previewFooterText">Word Format Master</span><span id="previewFooterPage"></span></footer>
+        </article>
+      </div>
+    </section>
+
+    <aside class="sidebar-input-panel" aria-label="格式要求与规范输入">
+      <section class="sidebar-section text-input-section">
+        <div class="sidebar-section-header">
+          <span class="source-tag text-tag">文字识别</span>
+          <h2>输入文字要求</h2>
+        </div>
+        <p class="sidebar-tip">在此输入或粘贴格式文字，自动识别并生成自定义模板：</p>
+        <textarea id="requirementsText" rows="6" placeholder="例如：正文宋体小四，固定值22磅行距；一级标题小三黑体居中，段前段后3磅；上边距3.5cm，下边距2.6cm，左2.7cm，右2.7cm..."></textarea>
+        <button id="analyzeTextButton" class="button primary analyze-btn" type="button">识别文字并生成模板</button>
+      </section>
+
+      <section class="sidebar-section file-input-section">
+        <div class="sidebar-section-header">
+          <span class="source-tag file-tag">文件识别</span>
+          <h2>上传规范/模板文件</h2>
+        </div>
+        <p class="sidebar-tip">上传后由当前对话 AI 分析，结果会自动填入模板设置；文档内容不会发送到第三方模型 API。</p>
+        <div class="local-ai-status" role="status">
+          <span class="badge success">当前对话 AI</span>
+          <span>本地任务交接已启用</span>
+        </div>
+
+        <label id="dropZone" class="drop-zone" for="fileInput">
+          <input id="fileInput" type="file" accept=".docx,.dotx">
+          <div class="drop-zone-info">
+            <span id="fileName">点击或拖拽上传 DOCX / DOTX 规范文件</span>
+            <small>支持学校规范或模板文档 · 最大 30 MB</small>
+          </div>
+        </label>
+        <button id="analyzeFileButton" class="button primary analyze-btn" type="button" disabled style="margin-top: 10px; width: 100%;">🤖 开始 AI 格式分析</button>
+        <div id="crossValidationCard" class="cross-validation-card" hidden style="margin-top: 12px;">
+          <div class="cv-header">
+            <div class="cv-title">
+              <span class="badge success">双轨印证通过</span>
+              <strong id="cvEngineTitle">AI 与程序双轨印证报告</strong>
+            </div>
+            <span id="cvConfidenceBadge" class="badge derived">置信度 99%</span>
+          </div>
+          <p id="cvAiSummary" class="cv-ai-summary" hidden style="font-size: 11px; color: #2e593e; margin: 4px 0 8px; line-height: 1.4; background: #eaf4ed; padding: 6px; border-radius: 4px;"></p>
+          <div id="cvCorroborationsList" class="cv-list"></div>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>

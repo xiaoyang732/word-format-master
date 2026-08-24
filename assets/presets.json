@@ -1,0 +1,201 @@
+{
+  "schema_version": "1.0",
+  "verified_on": "2026-08-23",
+  "presets": [
+    {
+      "id": "thesis-standard",
+      "name": "标准学位论文/毕业论文规范模板",
+      "mode": "parameterized",
+      "template_required": false,
+      "authority": {
+        "level": "institution-standard",
+        "sources": [
+          "GB/T 7713.1 学位论文编写规则",
+          "GB/T 7714-2015 信息与文献 参考文献著录规则",
+          "国家学术学位论文通用规范"
+        ],
+        "override_note": "本模板严格依据 GB/T 7713.1、GB/T 7714-2015 与国家学术学位论文通用排版规范设计。"
+      },
+      "page": {
+        "size": "A4",
+        "width_mm": 210,
+        "height_mm": 297,
+        "orientation": "portrait",
+        "margin_top_mm": 25.4,
+        "margin_right_mm": 25.0,
+        "margin_bottom_mm": 25.4,
+        "margin_left_mm": 25.0,
+        "gutter_mm": 0.0,
+        "header_distance_mm": 15.0,
+        "footer_distance_mm": 15.0
+      },
+      "body": {
+        "font_latin": "Times New Roman",
+        "font_east_asia": "宋体",
+        "font_size_pt": 12,
+        "alignment": "justify",
+        "line_spacing": {
+          "kind": "multiple",
+          "value": 1.5
+        },
+        "space_before_pt": 0,
+        "space_after_pt": 0,
+        "first_line_indent_mm": 7.4,
+        "first_line_indent_chars": 2,
+        "widow_control": true
+      },
+      "lists": {
+        "headings": {
+          "level1": "chinese",
+          "level2": "arabic",
+          "level3": "arabic"
+        },
+        "numbered": {
+          "style": "decimal-period",
+          "start": 1,
+          "left_indent_mm": 7.4,
+          "hanging_indent_mm": 4.5
+        }
+      },
+      "headings": [
+        {
+          "level": 1,
+          "font_latin": "Times New Roman",
+          "font_east_asia": "黑体",
+          "font_size_pt": 16,
+          "bold": true,
+          "alignment": "center",
+          "first_line_indent_chars": 0,
+          "first_line_indent_mm": 0,
+          "space_before_pt": 18,
+          "space_after_pt": 12,
+          "line_spacing": {
+            "kind": "multiple",
+            "value": 1.5
+          },
+          "keep_with_next": true
+        },
+        {
+          "level": 2,
+          "font_latin": "Times New Roman",
+          "font_east_asia": "黑体",
+          "font_size_pt": 14,
+          "bold": true,
+          "alignment": "left",
+          "first_line_indent_chars": 0,
+          "first_line_indent_mm": 0,
+          "space_before_pt": 12,
+          "space_after_pt": 6,
+          "line_spacing": {
+            "kind": "multiple",
+            "value": 1.5
+          },
+          "keep_with_next": true
+        },
+        {
+          "level": 3,
+          "font_latin": "Times New Roman",
+          "font_east_asia": "黑体",
+          "font_size_pt": 12,
+          "bold": true,
+          "alignment": "left",
+          "first_line_indent_chars": 0,
+          "first_line_indent_mm": 0,
+          "space_before_pt": 6,
+          "space_after_pt": 6,
+          "line_spacing": {
+            "kind": "multiple",
+            "value": 1.5
+          },
+          "keep_with_next": true
+        }
+      ],
+      "captions": {
+        "figure": {
+          "style_name": "Figure Caption",
+          "label": "图",
+          "position": "below",
+          "font_east_asia": "宋体",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 10.5,
+          "alignment": "center",
+          "space_before_pt": 6,
+          "space_after_pt": 6,
+          "numbering_mode": "seq"
+        },
+        "table": {
+          "style_name": "Table Caption",
+          "label": "表",
+          "position": "above",
+          "font_east_asia": "宋体",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 10.5,
+          "alignment": "center",
+          "space_before_pt": 6,
+          "space_after_pt": 6,
+          "numbering_mode": "seq"
+        }
+      },
+      "headers_footers": {
+        "preserve_existing": true,
+        "different_first_page": false,
+        "header": {
+          "enabled": false,
+          "text": "",
+          "alignment": "center",
+          "font_east_asia": "宋体",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 9
+        },
+        "footer": {
+          "enabled": false,
+          "text": "",
+          "alignment": "center"
+        }
+      },
+      "page_numbers": {
+        "enabled": true,
+        "location": "footer",
+        "alignment": "center",
+        "format": "number",
+        "start": 1,
+        "show_on_first_page": true
+      },
+      "table_of_contents": {
+        "enabled": true,
+        "title": "目　　录",
+        "max_heading_level": 3,
+        "page_break_after": true
+      },
+      "references": {
+        "citation_system": "GB/T 7714-2015",
+        "citation_mode": "numeric",
+        "numbering_mode": "word-numbering",
+        "font_east_asia": "宋体",
+        "font_latin": "Times New Roman",
+        "font_size_pt": 10.5,
+        "alignment": "justify",
+        "left_indent_mm": 0,
+        "left_indent_chars": 0,
+        "hanging_indent_mm": 7.4,
+        "hanging_indent_chars": 2,
+        "line_spacing": {
+          "kind": "single"
+        },
+        "space_after_pt": 0
+      },
+      "notes": [
+        "依据 GB/T 7713.1、GB/T 7714-2015 学位论文标准规范。",
+        "页面设置：标准 A4 纵向，页边距上 25.4mm、下 25.4mm、左 25.0mm、右 25.0mm，装订线 0mm，页眉/页脚距边界 15.0mm。",
+        "正文排版：中文小四号宋体（12pt），西文小四号 Times New Roman，1.5 倍行距，段前段后 0 磅，首行缩进 2 字符（7.4mm），两端对齐。",
+        "标题层级：一级标题（章）三号（16pt）黑体居中加粗，1.5 倍行距，段前 18 磅、段后 12 磅；二级标题（节）四号（14pt）黑体左对齐加粗，1.5 倍行距，段前 12 磅、段后 6 磅；三级标题（小节）小四号（12pt）黑体左对齐加粗，1.5 倍行距，段前 6 磅、段后 6 磅；各级标题支持独立控制首行缩进。",
+        "编号规范：目录、绪论、摘要等前置模块不进行章节多级编号，多级章节编号从目录后正文第一章开始（第1章/第一章）。",
+        "页码规范：封面、摘要、目录等前置模块不编页码，正文（从目录后面第一章起）开始编页码，从第 1 页开始；页眉居中宋体小五号'毕业设计（论文）'，页脚设置阿拉伯数字页码居中。",
+        "图表规范：图名在图下，表名在表上（标准三线表），文字五号宋体/Times New Roman（10.5pt），居中对齐，段前段后 6 磅。",
+        "目录规范：标题'目　　录'（黑体三号居中），按三级标题生成，正文小四号宋体，1.5 倍行距；目录本身不参与编号与目录项索引。",
+        "参考文献：采用 GB/T 7714-2015 顺序编码制，正文五号宋体/Times New Roman（10.5pt），单倍行距，悬挂缩进 2 字符（7.4mm）。"
+      ]
+    }
+  ],
+  "template_workflows": []
+}

@@ -1,0 +1,8 @@
+__pycache__/
+*.py[cod]
+.tmp/
+.runtime/
+scratch_perfect_render/
+*.log
+.DS_Store
+Thumbs.db
