@@ -1,12 +1,72 @@
 # Word Format Master
 
-以确定性代码为核心的本地 Word 格式工具。支持两种使用方式：直接告诉 AI 修改要求，或在网页配置参数后交给 AI 执行。两种入口共享 `scripts/word_format/` 格式核心，生成新的 DOCX，保留源文档。
+**用自然语言调整 Word 格式，让论文和报告排版更省心。**
 
-适用于论文、学位论文和科研报告的格式调整，也支持某章、某段和局部文字的精确修改。AI 负责理解要求并调用本地工具；格式引擎本身不调用大模型，也不操作网页。
+[![CI](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## 安装
+Word Format Master 是一个面向 Word 排版的本地工具与 AI Skill。你可以直接告诉 AI 要改哪里，也可以在网页中调整参数后交给 AI 执行。从整篇论文规范化到一个段落的行距、几个字的字号，都可以按明确要求处理，生成新的 Word 文件并保留原稿。
 
-运行环境为 Windows 10/11、Python 3.10 及以上。格式修改和结构校验无需安装 Word；最终分页与视觉验收需要 Microsoft Word 或 LibreOffice。
+> “只把第三章正文改为宋体、小四，行距 1.5 倍，其他格式保持。”
+>
+> “正文页眉显示当前章节标题，偶数页显示论文题目，字号小五。”
+
+[功能介绍](#功能介绍) · [快速开始](#快速开始) · [请求示例](#请求示例) · [常见问题](#常见问题)
+
+## 适合哪些场景？
+
+- **论文交稿前统一排版**：按照学校模板或明确要求，调整正文、各级标题、目录、图表和参考文献。
+- **只修改指定位置**：单独处理某章、某段、表格中的文字或一段选定文字，保留其他位置的格式。
+- **复用已有模板**：从 DOCX/DOTX 模板提取支持的格式设置，在网页中查看并调整。
+- **处理复杂页眉**：为摘要、正文、参考文献设置不同内容，配置动态章节标题、首页和奇偶页页眉。
+- **检查格式问题**：先审查文档，查看格式差异，再决定是否修改。
+
+## 功能介绍
+
+| 功能 | 可以做什么 |
+|---|---|
+| 字体与字号 | 分别设置中文、西文字体，调整字号、粗体、斜体和颜色 |
+| 段落排版 | 调整对齐、行距、段前段后距、首行/悬挂/左右缩进和段落分页控制 |
+| 页面布局 | 设置纸张大小、方向、页边距、装订线及页眉页脚距离；支持指定节 |
+| 标题与列表 | 设置各级标题格式，按明确要求使用 Word 自动编号和多级标题编号 |
+| 目录 | 基于真实标题生成 Word 目录字段，配置目录标题、级数及目录后的分页 |
+| 图表与题注 | 调整图名、表名格式与位置，设置表格对齐、重复标题行和三线表 |
+| 参考文献与引用 | 调整文献段落格式与编号；在明确请求时，让 AI 分析引用位置并使用已有文献插入引用 |
+| 页眉页脚与页码 | 设置固定文字或动态章节标题、题目与章节组合、分节页眉、首页/奇偶页不同和页码字段 |
+| 模板与格式检查 | 提取 DOCX/DOTX 的支持格式、识别文档模块，检查修改结果；可配合 Word/LibreOffice 逐页视觉验收 |
+
+### 整篇处理，也能精确修改
+
+可以按正文、标题、参考文献等类型批量调整，也可以只修改指定章节、段落或文字。位置与要求明确时，AI 直接执行；遇到同名章节、重复文字或冲突要求时，会先澄清。
+
+例如，只要求改字号时，会保留已有文字、粗体和段落设置。目录生成、编号转换、引用插入和新建分节等操作，需要明确提出。
+
+### 两种方式，按习惯选择
+
+| 使用方式 | 适合什么时候 | 如何操作 |
+|---|---|---|
+| **直接告诉 AI** | 修改要求已经明确，或只需改一个局部位置 | 提供文档路径、修改范围和要求，由 AI 调用本地工具完成 |
+| **网页配置** | 希望逐项查看参数、调整模板或预览排版示意 | 让 AI 打开配置页，由你调整并点击“确认设置并交给 AI” |
+
+直接模式无需打开网页。网页模式由你确认设置，AI 接收确认结果后执行。
+
+### 复用学校模板与排版要求
+
+可以提供学校的 Word 模板，也可以粘贴字体、字号、页边距等文字要求。模板提取和文字识别会得到可调整的设置，无法确定的部分留待确认。
+
+项目提供一个学位论文排版预设，适合作为起点。**学校、期刊的正式模板和明确要求优先**；内置预设与通用排版建议不能保证满足所有机构的交稿要求。
+
+### 保留原稿，检查结果
+
+修改会另存为新的 DOCX，不覆盖源文件。输出前会检查请求的格式是否写入，并核对未请求修改的内容和属性；检查失败时不发布半成品。
+
+还可选择 Microsoft Word 或 LibreOffice 渲染，检查实际分页、页眉、表格和字形。网页预览是排版示意，最终效果以文档渲染为准。
+
+## 快速开始
+
+### 1. 准备环境
+
+目前面向 **Windows 10/11、Python 3.10 及以上**。格式修改和结构检查无需安装 Word；实际分页与视觉验收需要 Microsoft Word 或 LibreOffice。
 
 ```powershell
 git clone https://github.com/xiaoyang732/word-format-master.git
@@ -15,126 +75,117 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-以下命令中的 `python` 应使用上述虚拟环境解释器，或其他已安装依赖的 Python。可在 PowerShell 中执行 `.\.venv\Scripts\Activate.ps1` 激活环境。
+### 2. 在 AI 会话中使用
 
-## 方式一：直接告诉 AI
+使用具备本地文件读取和命令执行能力的 AI 工具。项目的 Skill 入口是 [SKILL.md](SKILL.md)；可按所用工具的技能加载方式添加，也可直接让 AI 读取该文件并按其中的流程操作。
 
-在具备本地文件和命令执行能力的 AI 会话中，使用本项目的 [SKILL.md](SKILL.md)，提供文档路径、修改位置与格式要求，例如：
-
-- “把这份文档的正文改为宋体、小四，其他格式保持。”
-- “将第三章正文的段后距设为 6 磅。”
-- “只把指定段落中的‘重要结论’改为 14 磅并加粗。”
-
-AI 先检查当前文档，解析明确的目标，再生成计划、调用代码并回读验证。目标和参数明确时直接执行；文字重复、章节不唯一或要求冲突时需要澄清。直接模式无需启动网页或取得网页 Handoff。
-
-### 直接 CLI 示例
-
-先检查文档对象与格式能力：
-
-```powershell
-New-Item -ItemType Directory -Force .tmp/format | Out-Null
-python scripts/format_cli.py capabilities --output .tmp/format/capabilities.json
-python scripts/format_cli.py inspect .\paper.docx --output .tmp/format/inspect.json
-```
-
-确认检查结果中的正文范围后，创建请求。以下示例将识别为正文的段落字号设为 12 磅：
-
-```powershell
-@'
-{
-  "schema_version": "2.0",
-  "origin": "direct",
-  "operations": [
-    {
-      "action": "font.size.set",
-      "target": {"type": "paragraph", "role": "body", "all": true},
-      "params": {"value": 12, "unit": "pt"}
-    }
-  ]
-}
-'@ | Set-Content -Encoding utf8 .tmp/format/request.json
-
-python scripts/format_cli.py plan .\paper.docx .\paper-formatted.docx --request .tmp/format/request.json --output .tmp/format/plan.json
-python scripts/format_cli.py apply --plan .tmp/format/plan.json --report .tmp/format/report.json
-python scripts/format_cli.py verify --plan .tmp/format/plan.json --report .tmp/format/report.json
-```
-
-段落和章节 ID 必须取自当前 `inspect` 结果。已有输出默认拒绝覆盖；显式传入 `apply --overwrite` 可替换输出，源文件始终不能作为输出。请求格式、选择器、单位和错误状态见 [直接格式 API](references/direct-format-api.md)。
-
-## 方式二：网页配置后交给 AI
-
-```powershell
-python scripts/serve_dashboard.py --input .\paper.docx --output .\paper-formatted.docx
-```
-
-服务仅监听 `127.0.0.1`，自动选择可用端口并打开浏览器。用户调整参数后点击“确认设置并交给 AI”；AI 读取已确认的 `HANDOFF.json`，调用本地格式代码执行并验收。AI 不代替用户操作网页确认。
-
-使用 `--no-open` 可禁止自动打开浏览器；使用 `--port 8765` 可指定端口。只运行 `python scripts/serve_dashboard.py` 可查看配置界面，但执行交接需要通过 `--input` 和 `--output` 创建目标文档会话。
-
-网页可配置页面、正文、标题、列表、题注、目录、参考文献、表格、页眉页脚和页码，也支持从 DOCX/DOTX 模板提取格式。模板未定义的值不会由预设自动补齐。
-
-## 格式核心与验收
-
-```mermaid
-flowchart LR
-    A[直接要求] --> B[检查文档与结构化请求]
-    C[网页参数] --> D[用户确认 Handoff]
-    B --> E[共享计划与能力注册表]
-    D --> E
-    E --> F[确定性格式写入]
-    F --> G[回读与结构校验]
-    G --> H[新的 DOCX 和执行报告]
-    H --> I[本地渲染与逐页视觉检查]
-```
-
-每项格式在 `registry.py` 登记参数校验、执行 handler、读取方法和验收方法；原子属性由 `properties.py` 统一读写。网页旧规范由 `spec.py` 转换为相同操作。
-
-| 类别 | 支持内容 |
-|---|---|
-| 字体 | 中文/西文字体、字号、粗体、斜体、颜色 |
-| 段落 | 对齐、段前/段后距、行距、首行/悬挂/左右缩进、分页控制 |
-| 页面与表格 | 所选节的页面尺寸、方向、边距；表格对齐、标题行重复、三线表 |
-| 显式结构操作 | 编号、目录、题注、引用、页眉页脚、页码 |
-| 修改范围 | 整篇选定角色、章节、段落、表格段落、文字范围、节、共享段落样式 |
-
-单独修改字号只写入指定字号；目录、编号和引用转换需明确请求。计划绑定源文件 SHA-256 和对象指纹；保存到临时文件后回读校验，通过后才发布输出，失败不发布半成品。具体边界见 [安全说明](SECURITY.md)。
-
-结构校验通过不代表视觉验收通过。最终分页、字形、表格溢出、目录和页眉页脚位置需要用 `scripts/render_docx.py` 渲染并检查全部页面；缺少这一步时应报告视觉验收未完成。
-
-页眉现支持分节内容、动态章节标题（STYLEREF）、题目与章节组合、首页/奇偶页不同、节间链接和独立格式修改。网页与直接请求都进入已登记操作，规则来源及逐项代码/验收对应见 [页眉契约](references/header-requirements.md)。下一页分节需明确请求，建立边界后重新检查节编号。学校和期刊要求优先于通用建议。
-
-## 仓库结构
+首次使用时，可以这样说：
 
 ```text
-word-format-master/
-├── .github/workflows/ci.yml   # Windows 自动化验证
-├── agents/openai.yaml        # AI 技能入口配置
-├── assets/
-│   ├── presets.json          # 格式预设
-│   └── ui/                   # Dashboard 页面、脚本与样式
-├── references/               # API、规范、架构、技术依据与标准说明
-├── scripts/
-│   ├── format_cli.py         # 直接调用入口
-│   ├── word_format/          # 共享核心：检查、选择、计划、写入、验收
-│   ├── apply_spec.py         # 网页 Handoff 适配与结构操作
-│   ├── serve_dashboard.py    # 本地网页服务
-│   ├── analyze_docx.py       # 文档/模板格式提取
-│   ├── document_structure.py # 模块和段落角色识别
-│   ├── render_docx.py        # Word/LibreOffice 渲染
-│   ├── verify_output.py      # 结构与视觉报告校验
-│   └── ...                   # 会话、引用、运行环境与测试工具
-├── tests/                    # 格式核心单测和网页回归测试
-├── SKILL.md                  # AI 工作流
-├── SECURITY.md               # 安全边界与剩余风险
-├── requirements.txt          # Python 依赖
-└── LICENSE                   # MIT
+请读取 <项目目录>/SKILL.md，使用 word-format-master 处理文档。
+
+文档：C:/Documents/论文.docx
+要求：只将第三章正文设为宋体、小四、1.5 倍行距。
+保留其他格式，输出到 C:/Documents/论文-排版后.docx。
 ```
 
-运行生成的 `.runtime/`、开发产物 `.tmp/`、Python 缓存和虚拟环境由 Git 忽略。测试截图保存到 `.tmp/dashboard-ui/`，生产文档和执行报告建议保存在仓库之外。
+将示例路径替换为实际路径。AI 会检查文档、定位修改范围、执行并返回结果与验收说明。
 
-维护资料：[架构](references/architecture.md) · [直接 API](references/direct-format-api.md) · [格式规范](references/format-spec.md) · [技术依据](references/project-research.md) · [标准与预设](references/standards-registry.md)。
+### 3. 如果更喜欢网页配置
 
-## 开发验证
+直接告诉 AI：
+
+```text
+使用 word-format-master 打开这份论文的网页配置页。
+我会在网页里调整参数，确认后再执行。
+```
+
+也可手动启动配置页：
+
+```powershell
+.\.venv\Scripts\python.exe scripts/serve_dashboard.py --input "C:/Documents/论文.docx" --output "C:/Documents/论文-排版后.docx"
+```
+
+浏览器会打开本地页面。你可以选择预设、导入模板、输入文字要求并调整参数，点击“确认设置并交给 AI”后，由正在使用本技能的 AI 会话接续执行。单独启动网页不会自动连接一个新的 AI 服务。
+
+## 请求示例
+
+以下示例均需同时提供实际文档路径。
+
+**按学校要求统一论文格式**
+
+```text
+按照我提供的学校模板整理整篇论文。
+先检查模板中可识别的格式；无法确定的要求列出来，不要自行补齐。
+另存为新文件。
+```
+
+**只改一段文字**
+
+```text
+在“研究方法”章节中，只将“本研究采用混合方法”这几个字改为 14 磅并加粗。
+其他文字和段落格式保持。
+```
+
+**设置分章与奇偶页页眉**
+
+```text
+正文奇数页页眉显示当前章节标题，偶数页显示“城市热环境研究”。
+中文宋体，西文 Times New Roman，字号小五；奇数页右对齐，偶数页左对齐。
+先检查现有分节；需要新增分节的位置请指出。
+```
+
+**整理目录与标题编号**
+
+```text
+把正文章标题设置为 Word 原生三级自动编号，并生成三级目录。
+摘要、参考文献、致谢不参与章节编号。
+```
+
+**先检查，不修改**
+
+```text
+检查这份论文的正文、标题、图表和参考文献格式是否符合我提供的要求。
+列出不一致的位置，本次不要修改文件。
+```
+
+## 常见问题
+
+**必须通过网页才能修改吗？**
+
+不需要。直接模式下，告诉 AI 文档、位置和要求即可。网页适合想逐项调整参数时使用。
+
+**会改写正文吗？**
+
+普通格式调整保留文字内容。明确要求的编号转换、题注、目录和引用操作会按各自规则处理。正文润色和改写不属于本项目的自动格式功能。
+
+**文档会上传到外部服务吗？**
+
+项目的分析与格式处理在本地运行，网页仅监听本机地址，格式工具本身不调用大模型 API。所用 AI 工具如何处理会话及文档上下文，取决于该工具的配置和隐私政策。
+
+**支持哪些 Word 文件？**
+
+支持 DOCX 格式修改，以及 DOCX/DOTX 模板分析。旧版 DOC 需先转换为 DOCX；宏文档和 Strict OOXML 写入暂不支持。
+
+**能保证与 Word 中显示完全一致吗？**
+
+最终效果需要实际渲染检查。目录、页码和动态章节页眉等字段需要 Word 或支持的渲染器刷新；Word 与 LibreOffice 的分页可能不同。当前不支持直接按“第几页”定位修改，含复杂字段、修订或绘图的局部文字范围可能被拒绝。
+
+## 更多文档
+
+- [Skill 使用流程](SKILL.md)：AI 如何检查、修改和交付 Word 文档。
+- [页眉设置指南](references/header-requirements.md)：分节、动态章节、首页与奇偶页要求。
+- [标准与预设](references/standards-registry.md)：排版依据及学校模板优先级。
+- [直接调用指南](references/direct-format-api.md)：命令行与精确修改请求。
+- [格式参数说明](references/format-spec.md)：支持的设置与单位。
+- [安全说明](SECURITY.md) · [项目架构](references/architecture.md)：保护边界与开发实现。
+
+<details>
+<summary>参与开发与运行检查</summary>
+
+欢迎通过 [Issues](https://github.com/xiaoyang732/word-format-master/issues) 反馈问题或建议功能。格式问题请说明期望效果、实际效果、操作范围和运行环境；分享样例前请移除个人信息。
+
+在已安装依赖的 Python 环境中运行：
 
 ```powershell
 python -B scripts/validate_project.py
@@ -144,30 +195,9 @@ node --check assets/ui/app.js
 git diff --check
 ```
 
-CI 在 `windows-latest` 上验证 Python 3.10、3.11、3.12、3.13 和 3.14，执行项目契约校验、DOCX smoke 和格式核心单测。
+网页回归还需 Node.js、Playwright 和 Microsoft Edge，详见 [网页测试脚本](tests/test_dashboard_ui.cjs)。每项新格式能力应同时提供参数约束、对应修改代码和回读验收。
 
-网页回归测试另需 Node.js、Playwright 和 Microsoft Edge。安装开发依赖并在另一个终端启动无文档的测试 Dashboard：
-
-```powershell
-npm install --no-save --package-lock=false playwright
-python -B scripts/serve_dashboard.py --no-open --port 8765
-```
-
-在测试终端执行：
-
-```powershell
-node tests/test_dashboard_ui.cjs http://127.0.0.1:8765/
-```
-
-测试默认使用 Edge，也可通过 `WFM_BROWSER_CHANNEL` 指定 Playwright 浏览器通道。UI 测试和真实文档全页视觉验收目前不在 CI 中自动执行。
-
-## 已知限制
-
-- 旧版 `.doc` 需先转换为 `.docx`；DOCM/DOTM 和 Strict OOXML 写入不支持。
-- 局部文字支持可确定映射的普通文字与超链接 run；含复杂域、绘图、制表符、换行或修订的范围会拒绝。按页定位尚不支持；分节仅支持明确的顶层段落后下一页分节。
-- TOC、REF、PAGEREF、PAGE 等字段可写入，但 `python-docx` 无法计算字段结果；交付前需在 Word 或支持的渲染器中刷新。
-- 浏览器预览仅用于配置反馈。Word 与 LibreOffice 的分页和字段结果可能不同；指定渲染器时不会静默切换。
-- Dashboard 会话和分析任务不在服务重启后恢复。LibreOffice 托管下载的独立官方哈希/签名验证仍待增强。
+</details>
 
 ## 开源协议
 
