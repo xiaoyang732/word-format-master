@@ -52,6 +52,7 @@ Do not combine formatting with content rewriting unless the user explicitly requ
 
 - Read [references/format-spec.md](references/format-spec.md) before creating, merging, or applying a specification.
 - Read [references/standards-registry.md](references/standards-registry.md) when selecting an academic preset or interpreting an authority hierarchy.
+- Read [references/header-requirements.md](references/header-requirements.md) for section-scoped headers, first/even page variants, dynamic chapter fields and explicit section boundaries. Use registered header actions; insert requested boundaries in a separate plan and inspect the new section IDs before setting headers.
 - Read [references/project-research.md](references/project-research.md) only when extending the implementation or choosing a new engine.
 - Read [references/architecture.md](references/architecture.md) before changing API routes, session lifecycle, module boundaries, or data-contract versions.
 
@@ -103,7 +104,7 @@ When the user selects **标准学位论文/毕业论文规范模板** (`thesis-s
 - **正文排版**：中文小四号宋体（12pt），西文小四号 Times New Roman，1.5 倍行距，段前段后 0 磅，首行缩进 2 字符（7.4mm），两端对齐。
 - **标题层级**：一级标题（章）三号（16pt）黑体居中加粗，1.5 倍行距，段前 18 磅、段后 12 磅；二级标题（节）四号（14pt）黑体左对齐加粗，1.5 倍行距，段前 12 磅、段后 6 磅；三级标题（小节）小四号（12pt）黑体左对齐加粗，1.5 倍行距，段前 6 磅、段后 6 磅；各级标题支持独立控制首行缩进。
 - **标题编号**：必须采用 Word 原生多级列表自动编号（`w:numPr` 绑定到 `abstractNum`），一级标题为“第X章”，二级标题为“X.X”，三级标题为“X.X.X”；标题段落纯文本中自动剥离手打序号；摘要、目录、参考文献、致谢、附录等独立章节保持无编号。
-- **页眉页脚**：页眉居中宋体小五号“毕业设计（论文）”，页脚居中插入阿拉伯数字页码。
+- **页眉页脚**：默认保留已有页眉，不自动添加固定文字。启用页眉后按明确规范选择内容、宋体/Times New Roman、五号或小五及对齐方式；分节、动态章节、首页和奇偶页独立配置。页脚居中插入阿拉伯数字页码。
 - **图表规范**：图名在图下，表名在表上（标准三线表），文字五号宋体/Times New Roman（10.5pt），居中对齐，段前段后 6 磅。
 - **目录规范**：标题“目　　录”（黑体三号居中），按三级标题生成，正文小四号宋体，1.5 倍行距。
 - **参考文献**：采用 GB/T 7714-2015 顺序编码制，五号宋体/Times New Roman（10.5pt），单倍行距，缩进-文本之前 0 字符，悬挂缩进 2 字符（7.4mm）。

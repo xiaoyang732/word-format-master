@@ -86,7 +86,19 @@ class DocumentIndex:
             pid = next((oid for oid,e in self.elements.items() if e is tbl.getparent()), None)
             self._add(f"t{i}", "table", "word/document.xml", tbl, {"parent_id":pid,"top_level":tbl.getparent() is body})
         for i, section in enumerate(document.sections):
-            self._add(f"s{i}", "section", "word/document.xml", section._sectPr, {"number":i+1})
+            from .headers import effective_root, VARIANTS
+            state = {}
+            for variant, attr in VARIANTS.items():
+                container = getattr(section, attr)
+                root = effective_root(container)
+                state[variant] = {"linked_to_previous": container.is_linked_to_previous,
+                                  "text": paragraph_text(root) if root is not None else "",
+                                  "fields": ([n.get(qn("w:instr"), "") for n in root.iter(qn("w:fldSimple"))] +
+                                             [n.text or "" for n in root.iter(qn("w:instrText"))]) if root is not None else []}
+            self._add(f"s{i}", "section", "word/document.xml", section._sectPr,
+                      {"number":i+1, "headers":state,
+                       "different_first_page":section.different_first_page_header_footer,
+                       "different_odd_even":document.settings.odd_and_even_pages_header_footer})
         for name, part in list(self.parts.items()):
             if re.fullmatch(r"word/(header|footer)\d+\.xml", name):
                 for i,p in enumerate(part.element.iter(qn("w:p"))):

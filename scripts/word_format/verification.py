@@ -21,15 +21,19 @@ def read_complex_state(index,name):
     doc=index.document
     if name=="headers_footers":
         state={"first_page":[s.different_first_page_header_footer for s in doc.sections],
-               "odd_even":doc.settings.odd_and_even_pages_header_footer,"managed":{}}
+               "odd_even":doc.settings.odd_and_even_pages_header_footer,"managed":{},"formats":{}}
         for kind in ("header","footer"):
             state["managed"][kind]=[]
+            state["formats"][kind]=[]
             for part in doc.part.package.parts:
                 if str(part.partname).startswith("/word/"+kind) and hasattr(part,"element"):
                     for p in part.element.iter(qn("w:p")):
                         ps=p.find("./"+qn("w:pPr")+"/"+qn("w:pStyle"))
-                        if ps is not None and ps.get(qn("w:val"))=="WFM"+kind.title():
+                        if (ps is not None and ps.get(qn("w:val"))=="WFM"+kind.title()) or (kind=="header" and p.get("{urn:word-format-master}managed-header")=="true"):
                             state["managed"][kind].append("".join(n.text or "" for n in p.iter(qn("w:t"))))
+                            from .properties import read_font,read_paragraph,FONT_TAGS,PARAGRAPH_TAGS
+                            state["formats"][kind].append({**{key:[read_font(doc,p,r,key) for r in p.iter(qn("w:r"))] for key in FONT_TAGS},
+                                                          **{key:read_paragraph(doc,p,key) for key in PARAGRAPH_TAGS}})
         return state
     if name=="page_numbers":
         parts={}
@@ -104,6 +108,12 @@ def verify_complex_state(actual,params,name):
             if c.get("enabled") and str(c.get("text","")).strip():
                 if not actual["managed"][kind] or any(t!=c.get("text","") for t in actual["managed"][kind]): return False
             elif "enabled" in c and any(actual["managed"][kind]): return False
+            if c.get("enabled"):
+                from .spec import token_operations
+                from .registry import REGISTRY
+                for action,expected in token_operations(c):
+                    cap=REGISTRY[action]
+                    if any(not cap.verifier(state[cap.property],expected,cap) for state in actual["formats"][kind]): return False
         return True
     if name=="page_numbers":
         if not params.get("enabled"):
@@ -242,6 +252,12 @@ def _masked_node(tag,value):
 
 def structural_snapshot(index,cap,params,refs):
     """Protect body content/objects and unrelated parts across structural writes."""
+    if cap.property == "section_break":
+        from .section_breaks import projection
+        return projection(index,refs)
+    if cap.property.startswith("header:"):
+        from .headers import header_projection
+        return header_projection(index,cap,params,refs)
     from .inspect import paragraph_text
     paragraphs=[]
     for p in index.document.element.body.iter(qn("w:p")):
@@ -251,6 +267,12 @@ def structural_snapshot(index,cap,params,refs):
         if cap.property=="table_of_contents" and (style.startswith("WFMTOC") or re.fullmatch(r"\s*(?:目\s*录|table\s+of\s+contents|contents)\s*",text,re.I)):
             continue
         clone=copy.deepcopy(p)
+        if cap.property in {"headers_footers","page_numbers"}:
+            for sect in clone.iter(qn("w:sectPr")):
+                for child in list(sect):
+                    if child.tag in {qn("w:headerReference"),qn("w:footerReference")} or (
+                        cap.property=="page_numbers" and child.tag in {qn("w:pgNumType"),qn("w:titlePg")}
+                    ): sect.remove(child)
         if cap.property=="citations":
             objects=[xml_value(n) for n in clone.iter() if n.tag in {qn("w:bookmarkStart"),qn("w:bookmarkEnd"),qn("w:drawing"),qn("w:instrText"),qn("w:fldChar")}]
             paragraphs.append((p,text,repr(objects)))
@@ -273,6 +295,16 @@ def structural_snapshot(index,cap,params,refs):
 
 
 def verify_structural_preservation(index,cap,params,refs,before):
+    if cap.property == "section_break":
+        from .section_breaks import projection
+        if before != projection(index,refs):
+            raise FormatError("Section break changed unrelated content or package parts")
+        return
+    if cap.property.startswith("header:"):
+        from .headers import header_projection
+        if before != header_projection(index,cap,params,refs):
+            raise FormatError("Header operation changed unrequested content, format, footer or section")
+        return
     from .inspect import paragraph_text
     after=structural_snapshot(index,cap,params,refs)
     by_node={p:(text,xml) for p,text,xml in after[0]}

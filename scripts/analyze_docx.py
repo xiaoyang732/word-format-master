@@ -526,7 +526,7 @@ def summarize_header_footer_parts(package: zipfile.ZipFile, names: set[str]) -> 
     return result
 
 
-def _paragraph_text_outside_fields(paragraph: ET.Element) -> str:
+def _paragraph_text_outside_fields(paragraph: ET.Element, *, strip: bool = True) -> str:
     """Return literal paragraph text without cached field results."""
     paragraph_chunks: list[str] = []
     field_state = [False]
@@ -547,7 +547,8 @@ def _paragraph_text_outside_fields(paragraph: ET.Element) -> str:
             visit(child)
 
     visit(paragraph)
-    return "".join(paragraph_chunks).strip()
+    value="".join(paragraph_chunks)
+    return value.strip() if strip else value
 
 
 def _text_outside_fields(root: ET.Element) -> str:
@@ -636,7 +637,9 @@ def infer_header_footer_tokens(
             paragraph = next(
                 (
                     item for item in root.findall(".//w:p", NS)
-                    if _paragraph_text_outside_fields(item)
+                    if _paragraph_text_outside_fields(item) or any(
+                        "STYLEREF" in str(w_attr(n,"instr") or "").upper() for n in item.findall(".//w:fldSimple",NS)
+                    )
                 ),
                 None,
             )
@@ -670,6 +673,98 @@ def infer_header_footer_tokens(
             **typography,
         }
     return tokens
+
+
+def _styleref_prefix(root: ET.Element) -> str | None:
+    """Only distill one paragraph of literal prefix followed by one field."""
+    if len(root) != 1 or root[0].tag != W + "p":
+        return None
+    paragraph = root[0]
+    prefix = []
+    state = "before"
+    for child in paragraph:
+        if child.tag == W + "pPr":
+            continue
+        if child.tag == W + "fldSimple":
+            if state != "before":
+                return None
+            state = "after"
+            continue
+        if child.tag != W + "r":
+            return None
+        for node in child:
+            if node.tag == W + "rPr":
+                continue
+            if node.tag == W + "fldChar":
+                kind = w_attr(node, "fldCharType")
+                if kind == "begin" and state == "before":
+                    state = "field"
+                elif kind == "separate" and state == "field":
+                    continue
+                elif kind == "end" and state == "field":
+                    state = "after"
+                else:
+                    return None
+            elif node.tag == W + "instrText" and state == "field":
+                continue
+            elif node.tag == W + "t":
+                if state == "before":
+                    prefix.append(node.text or "")
+                elif state == "after" and node.text:
+                    return None
+            else:
+                return None
+    return "".join(prefix) if state == "after" else None
+
+
+def infer_section_header_tokens(package, names, styles, theme_fonts, sections, parts, tokens):
+    """Keep first/even/section references separate rather than merging their text."""
+    rels=read_xml(package,"word/_rels/document.xml.rels")
+    settings=read_xml(package,"word/settings.xml")
+    odd_even=settings.find("w:evenAndOddHeaders",NS) if settings is not None else None
+    tokens["different_odd_even"]=odd_even is not None and w_attr(odd_even,"val") not in {"0","false","off"}
+    targets={}
+    if rels is not None:
+        import posixpath
+        for rel in rels:
+            if rel.get("TargetMode") == "External": continue
+            path=rel.get("Target","")
+            targets[rel.get("Id")]=posixpath.normpath(path.lstrip("/") if path.startswith("/") else "word/"+path)
+    by_part={p["part"]:p for p in parts if p["kind"]=="header"}
+    has_dynamic=any("STYLEREF" in str(n.text or w_attr(n,"instr") or "").upper()
+                    for name in by_part for root in [read_xml(package,name)] if root is not None
+                    for n in list(root.findall(".//w:instrText",NS))+list(root.findall(".//w:fldSimple",NS)))
+    refs=[r for s in sections for r in s["header_footer_references"] if r["kind"]=="header"]
+    if len(sections)==1 and not has_dynamic and all(r["type"]=="default" for r in refs): return
+    configurations=[]
+    for s in sections:
+        config={"number":s["index"],"different_first_page":s["title_page"]}
+        references={r["type"]:r for r in s["header_footer_references"] if r["kind"]=="header"}
+        for variant,key in (("default","header"),("first","first_header"),("even","even_header")):
+            reference=references.get(variant)
+            if reference is None:
+                if s["index"]>1: config[key]={"linked_to_previous":True}
+                else: config[key]={"enabled":False,"text":""}
+                continue
+            name=targets.get(reference["relationship_id"])
+            if name not in by_part: continue
+            item=infer_header_footer_tokens(package,names,styles,theme_fonts,[by_part[name]])["header"]
+            root=read_xml(package,name)
+            codes=[w_attr(n,"instr") or "" for n in root.findall(".//w:fldSimple",NS)]+[n.text or "" for n in root.findall(".//w:instrText",NS)]
+            dynamic=[re.fullmatch(r'\s*STYLEREF\s+"([^"\\]+)"\s*',code,re.I) for code in codes]
+            prefix = _styleref_prefix(root) if len(codes)==1 and dynamic[0] else None
+            if prefix is not None:
+                item.pop("text",None)
+                item.update(enabled=True,mode="chapter_title",style_name=dynamic[0][1],prefix=prefix)
+            elif codes and any("STYLEREF" in c.upper() for c in codes):
+                # Preserve and report complex fields; never convert their cache to literal text.
+                tokens.setdefault("unsupported_headers",[]).append(f'section {s["index"]} / {variant}: unsupported STYLEREF switches, suffix, objects or paragraph combination')
+                item={}
+            item["linked_to_previous"]=False
+            config[key]=item
+        configurations.append(config)
+    tokens["header"]={"enabled":False,"text":""}
+    tokens["sections"]=configurations
 
 
 def semantic_style_summary(styles: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
@@ -1214,7 +1309,7 @@ def analyze_docx(path: str | Path, semantic_spec: dict[str, Any] | None = None) 
             "macros": any(name.endswith("vbaProject.bin") for name in names),
         }
         unsupported = [key for key, present in features.items() if present is True and key in {"tracked_changes", "drawings", "text_boxes", "content_controls", "equations", "macros"}]
-        unsupported_field_types = sorted(set(fields["types"]) - {"PAGE", "NUMPAGES", "TOC"})
+        unsupported_field_types = sorted(set(fields["types"]) - {"PAGE", "NUMPAGES", "TOC", "STYLEREF"})
         if unsupported_field_types:
             unsupported.append(f"fields: {', '.join(unsupported_field_types)}")
         for style in styles:
@@ -1226,6 +1321,8 @@ def analyze_docx(path: str | Path, semantic_spec: dict[str, Any] | None = None) 
             theme_fonts,
             header_footer_parts,
         )
+        infer_section_header_tokens(package,names,styles_by_id,theme_fonts,sections,header_footer_parts,header_footer_tokens)
+        unsupported.extend(header_footer_tokens.pop("unsupported_headers",[]))
         inferred_spec = infer_spec(
             styles_by_id,
             sections,

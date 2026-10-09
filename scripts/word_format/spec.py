@@ -90,14 +90,33 @@ def validate_section(section,data):
         if section=="references" and "numbering_mode" in data and data["numbering_mode"] not in {"none","word-numbering"}:
             raise FormatError("references.numbering_mode must be none or word-numbering")
     elif section=="headers_footers":
-        require_keys(data,{"preserve_existing","different_first_page","different_odd_even","header","footer","detected_parts"},label=section)
+        require_keys(data,{"preserve_existing","different_first_page","different_odd_even","header","footer","even_header","first_header","section_number","sections","detected_parts"},label=section)
+        if "section_number" in data:
+            number(data["section_number"],1,10000,"header section number",True)
+            if data.get("preserve_existing") is False:
+                raise FormatError("A selected header section cannot clear all headers/footers; enable preserve_existing")
         for key in ("preserve_existing","different_first_page","different_odd_even"):
             if key in data: boolean(data[key],key)
-        for key in ("header","footer"):
+        for key in ("header","footer","even_header","first_header"):
             if key in data:
-                config=data[key];validate_tokens(config,{"enabled","text"})
+                config=data[key];validate_tokens(config,{"enabled","text","mode","style_name","prefix","linked_to_previous"} if key!="footer" else {"enabled","text"})
                 if "enabled" in config: boolean(config["enabled"],key+".enabled")
                 if "text" in config: text_value(config["text"],key+".text",True)
+                if "linked_to_previous" in config: boolean(config["linked_to_previous"],key+".linked_to_previous")
+                if key!="footer" and "mode" in config and config.get("enabled"):
+                    from .headers import content_params
+                    mode=config["mode"]
+                    content_params({"mode":mode, **({"text":config.get("text","")} if mode=="text" else
+                        {"style_name":config.get("style_name","Heading 1"),"prefix":config.get("prefix","")})})
+        if "sections" in data:
+            if not isinstance(data["sections"],list): raise FormatError("headers_footers.sections must be an array")
+            seen=set()
+            for item in data["sections"]:
+                require_keys(item,{"number","header","even_header","first_header","different_first_page"},{"number"},"section header")
+                number(item["number"],1,10000,"section number",True)
+                if item["number"] in seen: raise FormatError("Duplicate section header number")
+                seen.add(item["number"])
+                validate_section("headers_footers",{k:v for k,v in item.items() if k!="number"})
     elif section=="page_numbers":
         validate_tokens(data,{"enabled","location","format","start","show_on_first_page","prefix","total_separator"})
         for key in ("enabled","show_on_first_page"):
@@ -188,6 +207,7 @@ def validate_spec(spec):
 def spec_request(index,spec,clear_direct=False):
     """Expand a full legacy spec once; execution always uses REGISTRY."""
     validate_spec(spec)
+    from .registry import REGISTRY
     operations=[]
     def add(action,ids,params):
         if not ids: return
@@ -243,7 +263,12 @@ def spec_request(index,spec,clear_direct=False):
     if dims: values.update(width_mm=dims[0],height_mm=dims[1])
     if values.get("orientation")=="landscape" and "width_mm" in values and "height_mm" in values:
         values["width_mm"],values["height_mm"]=max(values["width_mm"],values["height_mm"]),min(values["width_mm"],values["height_mm"])
-    for key,value in values.items(): add(PAGE[key],[oid for oid,r in index.records.items() if r["kind"]=="section"],{"value":value})
+    for key,value in values.items():
+        ids=[oid for oid,r in index.records.items() if r["kind"]=="section"]
+        if key=="header_distance_mm" and "section_number" in spec.get("headers_footers",{}):
+            ids=[f's{int(spec["headers_footers"]["section_number"])-1}']
+            if ids[0] not in index.records: raise FormatError("Requested header section does not exist","needs_clarification")
+        add(PAGE[key],ids,{"value":value})
     tables=spec.get("tables",{})
     for oid,r in index.records.items():
         if r["kind"]=="table":
@@ -251,7 +276,52 @@ def spec_request(index,spec,clear_direct=False):
                 if key in tables: add(action,[oid],{"value":tables[key]})
         if r.get("role")=="table_text":
             for action,params in token_operations({k:v for k,v in tables.items() if k in FONT}): add(action,[oid],params)
-    for section,action in (("headers_footers","header_footer.configure"),("page_numbers","page_number.configure"),("table_of_contents","toc.configure")):
+    hf=spec.get("headers_footers",{})
+    if hf:
+        base={k:v for k,v in hf.items() if k in {"preserve_existing","footer"}}
+        has_header_write=any(hf.get(key,{}).get("enabled") for key in ("header","first_header","even_header")) or any(
+            key in item for item in hf.get("sections",[]) for key in ("header","first_header","even_header"))
+        if hf.get("header",{}).get("enabled") is False and "section_number" not in hf and not has_header_write:
+            base["header"]={"enabled":False}
+        if base: add("header_footer.configure",["document"],base)
+        def expand_header(config,ids,variant):
+            if "enabled" in config:
+                mode=config.get("mode","text")
+                params={"mode":mode,"variant":variant}
+                if not config["enabled"] or mode=="text": params.update(mode="text",text=config.get("text","") if config["enabled"] else "")
+                else: params.update(style_name=config.get("style_name","Heading 1"),prefix=config.get("prefix",""))
+                add("header.content.set",ids,params)
+            if config.get("enabled") is not False:
+                for action,params in token_operations({k:v for k,v in config.items() if k in TOKENS}):
+                    header_action="header."+action if action.startswith("font.") else "header."+action.removeprefix("paragraph.")
+                    if header_action not in REGISTRY: header_action=None
+                    if header_action: add(header_action,ids,{**params,"variant":variant})
+                    else: raise FormatError(f"Header format requires registered header handler: {action}","unsupported")
+            if "linked_to_previous" in config:
+                if config["linked_to_previous"] and (config.get("enabled") or any(k in TOKENS and v is not None for k,v in config.items())):
+                    raise FormatError("Choose linked header or independent content, not both", "needs_clarification")
+                add("header.link_previous.set",ids,{"value":config["linked_to_previous"],"variant":variant})
+        section_ids=[oid for oid,r in index.records.items() if r["kind"]=="section"]
+        if "section_number" in hf:
+            oid=f's{int(hf["section_number"])-1}'
+            if oid not in section_ids: raise FormatError("Requested header section does not exist", "needs_clarification")
+            section_ids=[oid]
+        if "different_odd_even" in hf: add("header.odd_even_different.set",["document"],{"value":hf["different_odd_even"]})
+        if "different_first_page" in hf:
+            overridden={f's{int(item["number"])-1}' for item in hf.get("sections",[]) if "different_first_page" in item}
+            add("header.first_page_different.set",[oid for oid in section_ids if oid not in overridden],{"value":hf["different_first_page"]})
+        for key,variant in (("header","default"),("even_header","even"),("first_header","first")):
+            config=hf.get(key,{})
+            if key=="header" and config.get("enabled") is False and "section_number" not in hf: continue
+            overridden={f's{int(item["number"])-1}' for item in hf.get("sections",[]) if key in item}
+            if config: expand_header(config,[oid for oid in section_ids if oid not in overridden],variant)
+        for item in hf.get("sections",[]):
+            oid=f's{int(item["number"])-1}'
+            if oid not in index.records or index.records[oid]["kind"]!="section": raise FormatError("Requested header section does not exist; insert boundaries then inspect again", "needs_clarification")
+            if "different_first_page" in item: add("header.first_page_different.set",[oid],{"value":item["different_first_page"]})
+            for key,variant in (("header","default"),("even_header","even"),("first_header","first")):
+                if key in item: expand_header(item[key],[oid],variant)
+    for section,action in (("page_numbers","page_number.configure"),("table_of_contents","toc.configure")):
         if spec.get(section): add(action,["document"],spec[section])
     lists=spec.get("lists",{})
     if lists.get("headings") or spec.get("headings_numbering_format"):
@@ -294,4 +364,16 @@ def legacy_paths():
                   "headers_footers.footer.enabled":"header_footer.configure","headers_footers.footer.text":"header_footer.configure",
                   "document_structure":"module role selectors expanded into registered properties",
                   "clear_direct_font_formatting":"requested property overrides only"})
+    for prefix in ("headers_footers.header","headers_footers.even_header","headers_footers.first_header","headers_footers.sections.*.header","headers_footers.sections.*.even_header","headers_footers.sections.*.first_header"):
+        for key in ("enabled","text","mode","style_name","prefix"): paths[prefix+"."+key]="header.content.set"
+        for key,action in (("font_east_asia","header.font.east_asia.set"),("font_latin","header.font.latin.set"),("font_size_pt","header.font.size.set"),("alignment","header.alignment.set"),("linked_to_previous","header.link_previous.set")):
+            paths[prefix+"."+key]=action
+        for key,action in (FONT|PARA).items():
+            paths[prefix+"."+key]="header."+(action if action.startswith("font.") else action.removeprefix("paragraph."))
+        for name in INDENTS:
+            for unit in ("chars","mm"): paths[prefix+"."+name+"_"+unit]="header."+name+".set"
+    paths["headers_footers.different_first_page"]="header.first_page_different.set"
+    paths["headers_footers.different_odd_even"]="header.odd_even_different.set"
+    paths["headers_footers.section_number"]="section selector for registered header operations"
+    paths["headers_footers.sections.*.different_first_page"]="header.first_page_different.set"
     return paths

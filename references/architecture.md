@@ -21,6 +21,7 @@
 - `registry.py`：可执行能力表，每项对应参数校验、唯一 handler、独立 reader、verifier 和测试。
 - `properties.py`：字体和段落原子 XML 属性的唯一写入所有者。
 - `operations.py`：每项操作的命名 handler；复杂结构操作调用已有明确职责的实现。
+- `headers.py`：独立节/页型的内容、STYLEREF、链接、格式与读回；`section_breaks.py`：显式下一页分节及保护校验。规则和对应表见 [header-requirements.md](header-requirements.md)。
 - `inspect.py` / `selectors.py`：源文件对象索引和严格位置解析。
 - `spec.py`：旧 Format Spec 展开器与旧网页字段映射，不能新增第二套格式实现。
 - `api.py`：请求、计划指纹、冲突检测、执行和临时文件验收后发布。

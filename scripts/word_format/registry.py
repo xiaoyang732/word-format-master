@@ -29,9 +29,9 @@ class Capability:
 
     def public(self):
         return {"action":self.action,"property":self.property,"targets":sorted(self.targets),
-                "handler":self.handler.__name__,"reader":self.reader.__name__,"verifier":self.verifier.__name__,
+                "handler":self.handler.__name__,"validator":self.validator.__name__,"reader":self.reader.__name__,"verifier":self.verifier.__name__,
                 "parameters":self.parameters,"structural":self.structural,"effects":list(self.effects),
-                "test":"tests/test_format_core.py"}
+                "test":"tests/test_headers.py" if self.property.startswith("header:") or self.property=="section_break" else "tests/test_format_core.py"}
 
 
 REGISTRY: dict[str,Capability] = {}
@@ -178,6 +178,9 @@ def complex_validator(section):
     def validate(params):
         from .spec import validate_section
         validate_section(section,params)
+        if section=="headers_footers" and (set(params)&{"even_header","first_header","sections","section_number"} or
+            set(params.get("header",{}))&{"mode","prefix","linked_to_previous"}):
+            raise FormatError("Use registered header.* operations or a spec for section/page-variant header configuration", "unsupported")
         return dict(params)
     return validate
 
@@ -208,5 +211,50 @@ for action,prop,handler,section,effects in (
 
 def capabilities():
     return {"schema_version":"2.0","operations":[c.public() for c in REGISTRY.values()],
-            "unsupported":["page-based selectors without renderer anchors","new sections","complex text ranges","automatic prose rewriting"],
+            "unsupported":["page-based selectors without renderer anchors","complex text ranges","automatic prose rewriting"],
             "legacy_spec":"1.0 via the same planner and executor"}
+
+
+from . import headers
+from . import section_breaks
+
+REGISTRY["section.break.next_page.insert"] = Capability(
+    "section.break.next_page.insert", "section_break", frozenset({"paragraph"}),
+    section_breaks.insert, section_breaks.validate, section_breaks.read, section_breaks.verify,
+    {}, True, ("next-page section boundary after selected top-level paragraph; pagination changes",))
+
+
+def header_variant(validator):
+    return lambda params: headers.variant_params(params, validator)
+
+
+for action, prop, targets, handler, validator, parameters in (
+    ("header.content.set", "content", {"section"}, headers.set_content, headers.content_params,
+     {"mode": ["text", "chapter_title"], "text": "literal or empty", "style_name": "existing heading style", "prefix": "optional literal"}),
+    ("header.link_previous.set", "link", {"section"}, headers.set_link, header_variant(scalar("boolean")), {"value": "boolean"}),
+    ("header.first_page_different.set", "first_page", {"section"}, headers.set_first_page, scalar("boolean"), {"value": "boolean"}),
+    ("header.odd_even_different.set", "odd_even", {"document"}, headers.set_odd_even, scalar("boolean"), {"value": "boolean"}),
+    ("header.font.east_asia.set", "font_east_asia", {"section"}, headers.set_east_asia, header_variant(scalar("text")), {"value": "font name"}),
+    ("header.font.latin.set", "font_latin", {"section"}, headers.set_latin, header_variant(scalar("text")), {"value": "font name"}),
+    ("header.font.size.set", "font_size_pt", {"section"}, headers.set_size, header_variant(scalar("number", 5, 96, "pt")), {"value": "5..96 in half-point steps", "unit": "pt"}),
+    ("header.alignment.set", "alignment", {"section"}, headers.set_alignment, header_variant(scalar("text", enum=("left", "center", "right"))), {"value": ["left", "center", "right"]}),
+    ("header.font.bold.set", "bold", {"section"}, headers.set_bold, header_variant(scalar("boolean")), {"value":"boolean"}),
+    ("header.font.italic.set", "italic", {"section"}, headers.set_italic, header_variant(scalar("boolean")), {"value":"boolean"}),
+    ("header.font.color.set", "color", {"section"}, headers.set_color, header_variant(color), {"value":"RGB or auto"}),
+    ("header.spacing_before.set", "space_before_pt", {"section"}, headers.set_spacing_before, header_variant(scalar("number",0,500,"pt")), {"value":"0..500","unit":"pt"}),
+    ("header.spacing_after.set", "space_after_pt", {"section"}, headers.set_spacing_after, header_variant(scalar("number",0,500,"pt")), {"value":"0..500","unit":"pt"}),
+    ("header.line_spacing.set", "line_spacing", {"section"}, headers.set_line_spacing, header_variant(line_spacing), {"kind":["multiple","exact","at_least"],"value":"positive","unit":"multiple or pt"}),
+    ("header.first_line_indent.set", "first_line_indent", {"section"}, headers.set_first_indent, header_variant(indent), {"value":"nonnegative","unit":["chars","mm"]}),
+    ("header.left_indent.set", "left_indent", {"section"}, headers.set_left_indent, header_variant(indent), {"value":"nonnegative","unit":["chars","mm"]}),
+    ("header.right_indent.set", "right_indent", {"section"}, headers.set_right_indent, header_variant(indent), {"value":"nonnegative","unit":["chars","mm"]}),
+    ("header.hanging_indent.set", "hanging_indent", {"section"}, headers.set_hanging_indent, header_variant(indent), {"value":"nonnegative","unit":["chars","mm"]}),
+    ("header.keep_with_next.set", "keep_with_next", {"section"}, headers.set_keep_next, header_variant(scalar("boolean")), {"value":"boolean"}),
+    ("header.keep_together.set", "keep_together", {"section"}, headers.set_keep_together, header_variant(scalar("boolean")), {"value":"boolean"}),
+    ("header.page_break_before.set", "page_break_before", {"section"}, headers.set_page_break, header_variant(scalar("boolean")), {"value":"boolean"}),
+    ("header.widow_control.set", "widow_control", {"section"}, headers.set_widow, header_variant(scalar("boolean")), {"value":"boolean"}),
+):
+    REGISTRY[action] = Capability(action, "header:" + prop, frozenset(targets), handler, validator,
+                                 headers.read_header, headers.verify_header,
+                                 {**parameters, **({"variant": ["default", "first", "even"]} if prop not in {"first_page", "odd_even"} else {})},
+                                 True, ("selected header variant; following inherited header isolated",) if prop not in {"first_page", "odd_even"} else
+                                 ("Word page flag affects both header and footer display",))

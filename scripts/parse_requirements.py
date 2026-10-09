@@ -334,21 +334,38 @@ def parse_requirements(text: str) -> dict[str, Any]:
         for segment in segments:
             if not re.search(pattern, segment, re.I):
                 continue
+            key=kind
+            if kind=="header":
+                if re.search(r"偶数?页|even[- ]page",segment,re.I): key="even_header"
+                elif re.search(r"首页|first[- ]page",segment,re.I): key="first_header"
+            path=f"headers_footers.{key}"
             distance = re.search(rf"(?:{pattern})(?:距|距离)?\s*(?:页面)?(?:顶端|底端|边界)?\s*(?:为|:|：)?\s*{unit_pattern}", segment, re.I)
             if distance:
                 value = measure_to_mm(_number(distance.group(1)), distance.group(2))
                 record(f"page.{kind}_distance_mm", value, distance.group(0), 0.96)
                 continue
             text_match = re.search(rf"(?:{pattern})\s*(?:文字|内容)?\s*[:：]\s*(.+)$", segment, re.I)
-            if text_match and text_match.group(1).strip():
-                record(f"headers_footers.{kind}.enabled", True, segment, 0.96)
-                record(f"headers_footers.{kind}.text", text_match.group(1).strip(), segment, 0.91)
+            if kind=="header" and re.search(r"动态.*(?:章节标题|章标题)|显示章节标题|采用章节标题|STYLEREF",segment,re.I):
+                record(path+".enabled",True,segment,0.96)
+                record(path+".mode","chapter_title",segment,0.96)
+                style_match=re.search(r'STYLEREF\s+"([^"\\]+)"',segment,re.I)
+                if style_match: record(path+".style_name",style_match[1],segment,0.99)
+            elif text_match and text_match.group(1).strip():
+                record(path+".enabled", True, segment, 0.96)
+                record(path+".text", text_match.group(1).strip(), segment, 0.91)
+            for font in FONT_NAMES:
+                if font.lower() in segment.lower():
+                    record(path+(".font_east_asia" if re.search(r"[\u4e00-\u9fff]",font) else ".font_latin"),font,segment,0.95)
+            size=_size_from_text(segment)
+            if size is not None: record(path+".font_size_pt",size,segment,0.95)
             for alignment, alignment_pattern in alignments:
                 if re.search(alignment_pattern, segment, re.I):
-                    record(f"headers_footers.{kind}.alignment", alignment, segment, 0.94)
+                    record(path+".alignment", alignment, segment, 0.94)
                     break
     if re.search(r"首页不同|different\s+first\s+page", normalized, re.I):
         record("headers_footers.different_first_page", True, "首页不同 / different first page", 0.98)
+    if re.search(r"奇偶页不同|different\s+odd\s+(?:and\s+)?even",normalized,re.I):
+        record("headers_footers.different_odd_even",True,"奇偶页不同",0.98)
 
     page_number_segment = next(
         (segment for segment in segments if re.search(r"页码|page\s+numbers?", segment, re.I)),

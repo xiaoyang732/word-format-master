@@ -127,7 +127,8 @@ function adoptExtractedTemplateSpec(inferredSpec) {
   if (inferredSpec?.headers_footers?.header?.enabled && inferredSpec.headers_footers.header.text) {
     extracted.headers_footers.header = { ...inferredSpec.headers_footers.header, enabled: true };
   } else {
-    extracted.headers_footers.header = { enabled: false, text: "" };
+    extracted.headers_footers.header = inferredSpec?.headers_footers?.header?.enabled && inferredSpec.headers_footers.header.mode === "chapter_title"
+      ? clone(inferredSpec.headers_footers.header) : { enabled: false, text: "" };
   }
   if (inferredSpec?.headers_footers?.footer?.enabled && inferredSpec.headers_footers.footer.text) {
     extracted.headers_footers.footer = { ...inferredSpec.headers_footers.footer, enabled: true };
@@ -493,6 +494,8 @@ function visualReviewUnavailableMessage() {
 
 function updateInputs() {
   const workflowLocked = state.sessionSubmitted || (isOfficialTemplateWorkflow() && !state.analysis?.source);
+  $("#headerSectionNumberInput").value = state.spec.headers_footers?.section_number ?? "";
+  $("#headerSectionNumberInput").disabled = workflowLocked;
   const runtimeReady = visualReviewRuntimeReady();
   if (!runtimeReady && !state.sessionSubmitted) state.verification.visual_enabled = false;
   $$("[data-spec-path]").forEach((input) => {
@@ -927,7 +930,10 @@ function renderPreview() {
 
   const headerConfig = state.spec.headers_footers?.header || {};
   const footerConfig = state.spec.headers_footers?.footer || {};
-  $("#previewHeaderText").textContent = headerConfig.enabled && headerConfig.text ? headerConfig.text : "";
+  $("#previewHeaderText").textContent = headerConfig.enabled
+    ? (headerConfig.mode === "chapter_title" ? `${headerConfig.prefix || ""}章节标题（动态示意）` : headerConfig.text || "") : "";
+  $("#previewHeaderText").style.fontFamily = [headerConfig.font_east_asia, headerConfig.font_latin].filter(Boolean).join(",");
+  $("#previewHeaderText").style.fontSize = headerConfig.font_size_pt ? `${headerConfig.font_size_pt * scale}pt` : "";
   $("#previewFooterText").textContent = footerConfig.enabled && footerConfig.text ? footerConfig.text : "";
   const pageNumbers = state.spec.page_numbers || {};
   let pageText = "";
@@ -1641,6 +1647,12 @@ function activateSettingsPanel(panelName) {
 }
 
 function bindEvents() {
+  $("#headerSectionNumberInput").addEventListener("input", (event) => {
+    state.spec.headers_footers ??= {};
+    if (event.target.value === "") delete state.spec.headers_footers.section_number;
+    else state.spec.headers_footers.section_number = Number(event.target.value);
+    renderPreview();
+  });
   $("#presetSelect").addEventListener("change", (event) => applyPreset(event.target.value));
   $$('[data-settings-tab]').forEach((tab) => {
     tab.addEventListener("click", () => activateSettingsPanel(tab.dataset.settingsTab));

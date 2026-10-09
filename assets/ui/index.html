@@ -351,19 +351,42 @@
       </section>
 
       <section class="setting-section" data-setting-panel="headers">
+        <label class="control"><span>页眉目标节（留空表示所有节）</span><input id="headerSectionNumberInput" type="number" min="1" step="1" placeholder="如：2"></label>
         <h2>页眉与页脚</h2>
         <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.preserve_existing"><span>保留原文档已有页眉</span></label>
         <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.header.enabled"><span>自定义/覆盖页眉文字</span></label>
         <div class="control-grid two">
-          <label class="control"><span>页眉文字</span><input type="text" data-spec-path="headers_footers.header.text" placeholder="留空或关闭则保留原样"></label>
+          <label class="control"><span>页眉内容方式</span><select data-spec-path="headers_footers.header.mode"><option value="text">固定文字</option><option value="chapter_title">动态标题（STYLEREF）</option></select></label>
+          <label class="control"><span>固定页眉文字</span><input type="text" data-spec-path="headers_footers.header.text" placeholder="论文题目、学校/学位信息或模块名"></label>
+          <label class="control"><span>动态标题样式</span><input type="text" data-spec-path="headers_footers.header.style_name" placeholder="Heading 1（须在文档正文中使用）"></label>
+          <label class="control"><span>动态标题前缀</span><input type="text" data-spec-path="headers_footers.header.prefix" placeholder="例如：论文题目："></label>
           <label class="control"><span>页眉对齐</span><select data-spec-path="headers_footers.header.alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+          <label class="control"><span>页眉中文字体</span><input type="text" data-spec-path="headers_footers.header.font_east_asia" placeholder="宋体"></label>
+          <label class="control"><span>页眉西文字体</span><input type="text" data-spec-path="headers_footers.header.font_latin" placeholder="Times New Roman"></label>
+          <label class="control"><span>页眉字号（磅）</span><input type="number" min="5" max="96" step="0.5" data-spec-path="headers_footers.header.font_size_pt"></label>
+          <label class="control"><span>页眉距页面顶端（毫米）</span><input type="number" min="0" data-spec-path="page.header_distance_mm"></label>
         </div>
+        <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.different_odd_even"><span>奇偶页不同（同时影响页脚显示）</span></label>
+        <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.even_header.enabled"><span>独立设置偶数页页眉</span></label>
+        <div class="control-grid two">
+          <label class="control"><span>偶数页文字</span><input type="text" data-spec-path="headers_footers.even_header.text" placeholder="论文题目"></label>
+          <label class="control"><span>偶数页对齐</span><select data-spec-path="headers_footers.even_header.alignment"><option value="left">左对齐（外侧）</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+          <label class="control"><span>偶数页中文字体</span><input type="text" data-spec-path="headers_footers.even_header.font_east_asia" placeholder="宋体"></label>
+          <label class="control"><span>偶数页西文字体</span><input type="text" data-spec-path="headers_footers.even_header.font_latin" placeholder="Times New Roman"></label>
+          <label class="control"><span>偶数页字号（磅）</span><input type="number" min="5" max="96" step="0.5" data-spec-path="headers_footers.even_header.font_size_pt"></label>
+        </div>
+        <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.first_header.enabled"><span>独立设置首页页眉（留空可隐藏）</span></label>
+        <div class="control-grid two">
+          <label class="control"><span>首页文字</span><input type="text" data-spec-path="headers_footers.first_header.text"></label>
+          <label class="control"><span>首页对齐</span><select data-spec-path="headers_footers.first_header.alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
+        </div>
+        <p>学校或期刊规范优先。常见选择为：前置部分使用论文题目或模块名，正文使用动态章节标题，后置部分使用对应模块名。五号为 10.5 磅、小五为 9 磅；仅作为可选值。外侧对齐需奇数页右对齐、偶数页左对齐。预览仅展示普通页眉；分节与奇偶页结果需渲染验收。需要建立分节或分别设置各节页眉时，可直接告诉 AI。</p>
         <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.footer.enabled"><span>写入页脚文字</span></label>
         <div class="control-grid two">
           <label class="control"><span>页脚文字</span><input type="text" data-spec-path="headers_footers.footer.text"></label>
           <label class="control"><span>页脚对齐</span><select data-spec-path="headers_footers.footer.alignment"><option value="left">左对齐</option><option value="center">居中</option><option value="right">右对齐</option></select></label>
         </div>
-        <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.different_first_page"><span>首页不同</span></label>
+        <label class="check-control"><input type="checkbox" data-spec-path="headers_footers.different_first_page"><span>每节首页不同（同时影响页脚显示）</span></label>
       </section>
 
       <section class="setting-section" data-setting-panel="headers">

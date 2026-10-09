@@ -2,6 +2,8 @@
 
 两种入口共享 `scripts/word_format`。AI 负责把人类要求转换为结构化请求；格式引擎不调用大模型、不操作浏览器，也不执行动态生成的 Python 代码。
 
+页眉内容、动态章节标题、奇偶页、分节链接和格式的逐项代码对应见 [页眉契约](header-requirements.md)。支持 `header.*` 独立操作和显式 `section.break.next_page.insert`；新建节后须重新 inspect 并生成页眉计划。
+
 ## 命令
 
 ```powershell
@@ -74,4 +76,4 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 
 普通格式操作在内存中逐项比较整个包，只屏蔽被请求的属性；文字范围允许拆分普通 run，但检查选区外格式、书签、超链接和对象。结构操作单独检查正文文字、对象和无关部件，并只允许声明的转换。保存到临时文件后回读全部操作，再通过结构验收，最后发布输出。失败不会发布半成品。
 
-结构通过不等于视觉通过。Word 字段计算、最终分页、溢出和字形仍需 `render_docx.py` 与逐页检查。缺少渲染或视觉检查时应报告 skipped / pending，不能声明视觉通过。Strict OOXML 写入、宏文档、复杂范围和新分节暂不支持。
+结构通过不等于视觉通过。Word 字段计算、最终分页、溢出和字形仍需 `render_docx.py` 与逐页检查。缺少渲染或视觉检查时应报告 skipped / pending，不能声明视觉通过。Strict OOXML 写入、宏文档和复杂范围暂不支持；分节仅支持明确的顶层段落后下一页分节。

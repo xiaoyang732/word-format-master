@@ -36,6 +36,9 @@ def build_plan(input_path,output,request,*,_document=None):
     operations=request.get("operations")
     if not isinstance(operations,list) or len(operations)>MAX_OPERATIONS:
         raise FormatError(f"operations must be an array with at most {MAX_OPERATIONS} entries")
+    if any(isinstance(o,dict) and o.get("action")=="section.break.next_page.insert" for o in operations) and any(
+        not isinstance(o,dict) or o.get("action")!="section.break.next_page.insert" for o in operations):
+        raise FormatError("Insert section boundaries in a separate plan, then inspect the new DOCX before formatting", "needs_clarification")
     resolved=[];conflicts={}; assignments=[]; normalized=[]
     for i,item in enumerate(operations):
         require_keys(item,{"id","action","target","params"},{"action","target","params"},f"operation {i+1}")
@@ -50,18 +53,19 @@ def build_plan(input_path,output,request,*,_document=None):
         for ref in targets:
             # Conflicting assignments are rejected before any mutation. Zero
             # opposite indent defaults from snapshots are collapsed by the adapter.
-            scope=params.get("role") if cap.property=="caption_position" else None
+            scope=params.get("role") if cap.property=="caption_position" else params.get("variant") if cap.property.startswith("header:") else None
             key=(ref["id"],cap.property,ref.get("start"),ref.get("end"),scope)
             if key in conflicts and not equal_value(conflicts[key],params):
                 raise FormatError(f"Conflicting operations for {ref['id']} / {cap.property}","needs_clarification")
             conflicts[key]=params
-            if not cap.structural:
+            if not cap.structural or cap.property.startswith("header:"):
                 for prior_ref,prior_cap,prior_params in assignments:
                     if prior_ref["id"]!=ref["id"]: continue
+                    if cap.property.startswith("header:") and prior_params.get("variant")!=params.get("variant"): continue
                     overlap=max(prior_ref.get("start",0),ref.get("start",0))<min(prior_ref.get("end",10**12),ref.get("end",10**12))
                     if overlap and prior_cap.property==cap.property and not equal_value(prior_params,params):
                         raise FormatError(f"Overlapping assignments for {ref['id']} / {cap.property}","needs_clarification")
-                    if {prior_cap.property,cap.property}=={"first_line_indent","hanging_indent"}:
+                    if {prior_cap.property,cap.property} in ({"first_line_indent","hanging_indent"},{"header:first_line_indent","header:hanging_indent"}):
                         raise FormatError("First-line and hanging indents are mutually exclusive; request one", "needs_clarification")
                 assignments.append((ref,cap,params))
         oid=item.get("id",f"op-{i+1:04d}")

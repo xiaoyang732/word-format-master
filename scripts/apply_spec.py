@@ -509,7 +509,9 @@ def clear_managed_header_footer_paragraphs(document: Document, style_names: set[
             continue
         seen.add(identity)
         for paragraph in container.paragraphs:
-            if paragraph.style and paragraph.style.name in style_names:
+            if (paragraph.style and paragraph.style.name in style_names) or (
+                "WFM Header" in style_names and paragraph._p.get("{urn:word-format-master}managed-header") == "true"
+            ):
                 clear_paragraph_content(paragraph)
                 paragraph.style = get_or_create_paragraph_style(document, "Normal")
                 cleared += 1
@@ -572,6 +574,22 @@ def apply_headers_footers(document: Document, tokens: dict[str, Any]) -> list[st
             changes.append(f"Removed managed {kind} text from {cleared} part(s)")
             continue
         if not config.get("enabled"):
+            continue
+        if kind == "header":
+            from word_format.inspect import DocumentIndex
+            from word_format.headers import set_content, content_params
+            from word_format.spec import token_operations
+            from word_format.registry import REGISTRY
+            index = DocumentIndex(document)
+            for oid, record in index.records.items():
+                if record["kind"] != "section": continue
+                ref = index.ref(oid)
+                set_content(index, ref, content_params({"mode":"text", "text":config["text"]}))
+                for action, params in token_operations({k:v for k,v in config.items() if k not in {"enabled","text"}}):
+                    action = "header." + (action if action.startswith("font.") else action.removeprefix("paragraph."))
+                    cap = REGISTRY[action]
+                    cap.handler(index, ref, cap.validator(params))
+            changes.append("Updated header through registered section header handlers")
             continue
         style_name = f"WFM {kind.title()}"
         style = get_or_create_paragraph_style(document, style_name)

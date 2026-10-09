@@ -43,12 +43,29 @@ const { chromium } = require(process.env.WFM_NODE_MODULES ? path.join(process.en
     assert.equal(spec.template_required, false);
     const cap = await page.evaluate(() => state.capabilities.format_core.operations);
     assert.ok(cap.some(operation => operation.action === "paragraph.spacing_after.set"));
+    assert.ok(cap.some(operation => operation.action === "header.font.size.set"));
+    await page.getByRole("tab", { name: "页眉页码", exact: true }).click();
+    await page.locator("#headerSectionNumberInput").fill("2");
+    await page.locator('[data-spec-path="headers_footers.header.enabled"]').check();
+    await page.locator('[data-spec-path="headers_footers.header.mode"]').selectOption("chapter_title");
+    await page.locator('[data-spec-path="headers_footers.header.style_name"]').fill("Heading 1");
+    await page.locator('[data-spec-path="headers_footers.header.font_size_pt"]').fill("9");
+    await page.locator('[data-spec-path="headers_footers.different_odd_even"]').check();
+    await page.locator('[data-spec-path="headers_footers.even_header.enabled"]').check();
+    await page.locator('[data-spec-path="headers_footers.even_header.text"]').fill("论文题目");
+    const headerSpec = await page.evaluate(() => state.spec.headers_footers);
+    assert.equal(headerSpec.section_number, 2);
+    assert.equal(headerSpec.header.mode, "chapter_title");
+    assert.equal(headerSpec.header.font_size_pt, 9);
+    assert.equal(headerSpec.even_header.text, "论文题目");
+    assert.equal(headerSpec.different_odd_even, true);
+    assert.match(await page.locator("#previewHeaderText").textContent(), /动态示意/);
     for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport);
       await page.screenshot({ path: path.join(screenshotDir, `dashboard-${viewport.width}.png`), fullPage: true });
-      assert.ok(await page.locator("#presetSelect").isVisible());
+      assert.ok(await page.locator("#headerSectionNumberInput").isVisible());
     }
     assert.deepEqual(errors, []);
-    console.log("Dashboard UI passed: zero indent, precise units, template reselection, shared capabilities, desktop/mobile screenshots.");
+    console.log("Dashboard UI passed: zero indent, precise units, template reselection, section header fields, shared capabilities, desktop/mobile screenshots.");
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

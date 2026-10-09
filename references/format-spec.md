@@ -159,11 +159,13 @@ Applying a specification updates named caption styles and reassigns existing top
 
 ### Headers and Footers
 
+See [header-requirements.md](header-requirements.md) for the optional article-backed rules and exact action/handler/readback mapping. Header spec fields expand to independent `header.*` operations. `section_number` restricts the header target; `sections` carries per-section overrides. `even_header` and `first_header` carry separate variants. `mode: chapter_title`, `style_name` and optional `prefix` generate a STYLEREF field; `mode: text` is literal text.
+
 - `preserve_existing`
 - `different_first_page`, `different_odd_even`
 - `header` and `footer`: `enabled`, `text`, `alignment`, and typography tokens
 
-Managed text uses dedicated `WFM Header` and `WFM Footer` styles. When `preserve_existing` is `true`, disabling managed text clears only paragraphs created with those styles. A distilled uploaded template sets `preserve_existing` to `false`; application then clears the target document's existing header/footer content before rebuilding only what the uploaded template explicitly contains.
+Managed footer text uses `WFM Footer`; header content has an explicit managed marker and legacy `WFM Header` remains recognized. When `preserve_existing` is `true`, disabling global managed text clears only tool-managed paragraphs. Explicit content replacement or selected-section clearing replaces that variant. `preserve_existing: false` explicitly clears existing headers/footers before rebuilding template content; it is forbidden with a selected header section. Template extraction preserves separate sections and variants where present.
 
 ### Page Numbers
 
