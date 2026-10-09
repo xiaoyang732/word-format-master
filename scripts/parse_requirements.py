@@ -481,6 +481,8 @@ def parse_requirements(text: str) -> dict[str, Any]:
 
 
 def main() -> int:
+    from cli_output import configure_cli_output
+    configure_cli_output()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", nargs="?", help="UTF-8 text file containing formatting requirements")
     parser.add_argument("--text", help="Requirements supplied directly on the command line")

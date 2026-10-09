@@ -1598,6 +1598,8 @@ def apply_document(
 
 
 def main() -> int:
+    from cli_output import configure_cli_output
+    configure_cli_output()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help="Source DOCX")
     parser.add_argument("output", help="Destination DOCX; must not equal input")

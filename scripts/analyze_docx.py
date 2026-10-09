@@ -1381,6 +1381,8 @@ def analyze_docx(path: str | Path, semantic_spec: dict[str, Any] | None = None) 
 
 
 def main() -> int:
+    from cli_output import configure_cli_output
+    configure_cli_output()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help="DOCX or DOTX file")
     parser.add_argument("--output", help="Write JSON to this path instead of stdout")
@@ -1394,8 +1396,6 @@ def main() -> int:
     if args.output:
         Path(args.output).write_text(rendered + "\n", encoding="utf-8")
     else:
-        if hasattr(sys.stdout, "reconfigure"):
-            sys.stdout.reconfigure(encoding="utf-8")
         sys.stdout.write(rendered + "\n")
     return 0
 

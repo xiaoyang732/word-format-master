@@ -6,6 +6,8 @@
 
 ## 命令
 
+命令行的标准输出、错误输出和 JSON 报告文件统一使用 UTF-8。通过管道或子进程读取时，应显式用 UTF-8 解码，不依赖 Windows 的本地代码页。
+
 ```powershell
 python scripts/format_cli.py capabilities --output capabilities.json
 python scripts/format_cli.py inspect source.docx --output inspect.json

@@ -6,6 +6,7 @@ from __future__ import annotations
 import copy
 import json
 import hashlib
+import os
 import subprocess
 import sys
 import tempfile
@@ -612,8 +613,13 @@ def main() -> int:
             "--handoff",
             str(handoff_path),
         ]
-        confirmed_run = subprocess.run(cli_command, capture_output=True, text=True, check=False)
+        # Exercise the CLI under the same legacy pipe encoding as Windows CI;
+        # the CLI must select UTF-8 itself, and callers must decode it explicitly.
+        cli_environment = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"}
+        confirmed_run = subprocess.run(cli_command, capture_output=True, text=True, encoding="utf-8", env=cli_environment, check=False)
         assert confirmed_run.returncode == 0, confirmed_run.stderr
+        confirmed_report = json.loads(confirmed_run.stdout)
+        assert confirmed_report["output"] == str(session_output)
         assert session_output.is_file()
         direct_spec_run = subprocess.run(
             [
@@ -626,6 +632,8 @@ def main() -> int:
             ],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=cli_environment,
             check=False,
         )
         assert direct_spec_run.returncode != 0
@@ -637,6 +645,8 @@ def main() -> int:
             [*cli_command, "--spec", str(tampered_spec_path)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            env=cli_environment,
             check=False,
         )
         assert tampered_run.returncode == 2

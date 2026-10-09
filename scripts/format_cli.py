@@ -17,6 +17,8 @@ def read_json(path):
 
 
 def main():
+    from cli_output import configure_cli_output
+    configure_cli_output()
     parser=argparse.ArgumentParser(description=__doc__)
     commands=parser.add_subparsers(dest="command",required=True)
     p=commands.add_parser("capabilities");p.add_argument("--output")

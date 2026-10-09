@@ -289,6 +289,8 @@ def validate_visual_report(report: dict[str, Any], page_count: int | None = None
 
 
 def main() -> int:
+    from cli_output import configure_cli_output
+    configure_cli_output()
     if len(sys.argv) != 3:
         print("usage: verify_output.py OUTPUT.docx SPEC.json", file=sys.stderr)
         return 2

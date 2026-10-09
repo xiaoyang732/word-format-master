@@ -300,8 +300,8 @@ def render_document(
 
 
 def main() -> int:
-    if hasattr(sys.stdout, "reconfigure"):
-        sys.stdout.reconfigure(encoding="utf-8")
+    from cli_output import configure_cli_output
+    configure_cli_output()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help="Input DOCX or DOTX")
     parser.add_argument("--output-dir", required=True, help="Directory for page-<N>.png files")
