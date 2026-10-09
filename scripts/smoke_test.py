@@ -619,8 +619,8 @@ def main() -> int:
         confirmed_run = subprocess.run(cli_command, capture_output=True, text=True, encoding="utf-8", env=cli_environment, check=False)
         assert confirmed_run.returncode == 0, confirmed_run.stderr
         confirmed_report = json.loads(confirmed_run.stdout)
-        assert confirmed_report["output"] == str(session_output)
         assert session_output.is_file()
+        assert Path(confirmed_report["output"]).samefile(session_output)
         direct_spec_run = subprocess.run(
             [
                 sys.executable,

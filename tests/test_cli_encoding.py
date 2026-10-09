@@ -70,7 +70,7 @@ class CliEncodingTests(unittest.TestCase):
                     report = self.assert_json_success(result)
                     self.assertIn("排版结果", result.stdout)
                 self.assertEqual(report["status"], "passed")
-                self.assertEqual(report["output"], str(output))
+                self.assertTrue(Path(report["output"]).samefile(output))
                 self.assertEqual(Document(output).paragraphs[0].text, "正文中文表格")
                 self.assertEqual(sha256(self.source), self.source_hash)
                 output.unlink()
