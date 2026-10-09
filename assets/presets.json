@@ -40,7 +40,6 @@
         },
         "space_before_pt": 0,
         "space_after_pt": 0,
-        "first_line_indent_mm": 7.4,
         "first_line_indent_chars": 2,
         "widow_control": true
       },
@@ -66,7 +65,6 @@
           "bold": true,
           "alignment": "center",
           "first_line_indent_chars": 0,
-          "first_line_indent_mm": 0,
           "space_before_pt": 18,
           "space_after_pt": 12,
           "line_spacing": {
@@ -83,7 +81,6 @@
           "bold": true,
           "alignment": "left",
           "first_line_indent_chars": 0,
-          "first_line_indent_mm": 0,
           "space_before_pt": 12,
           "space_after_pt": 6,
           "line_spacing": {
@@ -100,7 +97,6 @@
           "bold": true,
           "alignment": "left",
           "first_line_indent_chars": 0,
-          "first_line_indent_mm": 0,
           "space_before_pt": 6,
           "space_after_pt": 6,
           "line_spacing": {
@@ -135,6 +131,14 @@
           "space_after_pt": 6,
           "numbering_mode": "seq"
         }
+      },
+      "tables": {
+        "three_line_table": true,
+        "repeat_header_row": true,
+        "alignment": "center",
+        "font_size_pt": 10.5,
+        "font_east_asia": "宋体",
+        "font_latin": "Times New Roman"
       },
       "headers_footers": {
         "preserve_existing": true,
@@ -175,9 +179,7 @@
         "font_latin": "Times New Roman",
         "font_size_pt": 10.5,
         "alignment": "justify",
-        "left_indent_mm": 0,
         "left_indent_chars": 0,
-        "hanging_indent_mm": 7.4,
         "hanging_indent_chars": 2,
         "line_spacing": {
           "kind": "single"

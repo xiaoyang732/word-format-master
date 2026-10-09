@@ -51,6 +51,15 @@ function setPath(object, path, value) {
     cursor = cursor[part];
   });
   cursor[parts.at(-1)] = value;
+  const key = parts.at(-1);
+  if (/^(first_line|left|right|hanging)_indent_(mm|chars)$/.test(key)) {
+    delete cursor[key.replace(/_(mm|chars)$/, key.endsWith("_mm") ? "_chars" : "_mm")];
+  }
+}
+
+function indentMm(tokens, name, fontSizePt = 12) {
+  if (tokens?.[`${name}_chars`] != null) return Number(tokens[`${name}_chars`]) * Number(fontSizePt || 12) * 25.4 / 72;
+  return Number(tokens?.[`${name}_mm`] ?? 0);
 }
 
 function merge(base, override) {
@@ -191,7 +200,7 @@ function applyPreset(id) {
       state.spec = adoptExtractedTemplateSpec(state.customTemplate.result.inferred_spec);
     }
     state.spec.name = `模板提取规范：${state.customTemplate.name}`;
-    state.spec.template_required = true;
+    state.spec.template_required = false;
     state.spec.authority = {
       level: "uploaded-template",
       sources: [state.customTemplate.name, state.aiSession?.input?.name || "目标文档"],
@@ -251,32 +260,32 @@ function findChineseFontSizeOption(pt) {
 }
 
 function convertFromMm(mm, targetUnit, fontSizePt = 12) {
-  const mmVal = Math.round(Number(mm) || 0);
-  const pt = Math.round(Number(fontSizePt) || 12);
-  const ptVal = Math.round(mmVal * 72 / 25.4);
+  const mmVal = Number(mm) || 0;
+  const pt = Number(fontSizePt) || 12;
+  const ptVal = mmVal * 72 / 25.4;
   if (targetUnit === "chars") {
-    return Math.round(ptVal / (pt || 12));
+    return Math.round(ptVal / pt * 1000) / 1000;
   }
   if (targetUnit === "pt") {
-    return ptVal;
+    return Math.round(ptVal * 1000) / 1000;
   }
   if (targetUnit === "cm") {
-    return Math.round(mmVal / 10);
+    return Math.round(mmVal / 10 * 1000) / 1000;
   }
   return mmVal; // mm
 }
 
 function convertToMm(value, fromUnit, fontSizePt = 12) {
-  const val = Math.round(Number(value) || 0);
-  const pt = Math.round(Number(fontSizePt) || 12);
+  const val = Number(value) || 0;
+  const pt = Number(fontSizePt) || 12;
   if (fromUnit === "chars") {
-    return Math.round(val * pt * 25.4 / 72);
+    return val * pt * 25.4 / 72;
   }
   if (fromUnit === "pt") {
-    return Math.round(val * 25.4 / 72);
+    return val * 25.4 / 72;
   }
   if (fromUnit === "cm") {
-    return Math.round(val * 10);
+    return val * 10;
   }
   return val; // mm
 }
@@ -299,7 +308,7 @@ function updateIndentUI(prefix, mmValue, fontSizePt, workflowLocked) {
   const unitNames = { chars: "字符", pt: "磅 (pt)", mm: "毫米 (mm)", cm: "厘米 (cm)" };
   if (label) label.textContent = `${prefix === "body" ? "首行缩进" : "悬挂缩进"} (${unitNames[currentUnit] || "字符"})`;
   valueInput.value = convertFromMm(mmValue, currentUnit, fontSizePt);
-  valueInput.step = "1";
+  valueInput.step = "0.1";
   valueInput.disabled = workflowLocked;
   unitSelect.disabled = workflowLocked;
   if (hint) hint.textContent = formatIndentSummary(mmValue, fontSizePt);
@@ -495,8 +504,8 @@ function updateInputs() {
     if (input.type === "checkbox") {
       input.checked = Boolean(value);
     } else if (input.type === "number") {
-      input.value = value !== null && value !== undefined && value !== "" ? Math.round(Number(value)) : "";
-      input.step = "1";
+      input.value = value !== null && value !== undefined && value !== "" ? Number(value) : "";
+      input.step = "0.1";
     } else {
       input.value = value ?? "";
     }
@@ -518,7 +527,7 @@ function updateInputs() {
   }
 
   // Body indent sync
-  updateIndentUI("body", state.spec.body?.first_line_indent_mm ?? 0, state.spec.body?.font_size_pt, workflowLocked);
+  updateIndentUI("body", indentMm(state.spec.body, "first_line_indent", state.spec.body?.font_size_pt), state.spec.body?.font_size_pt, workflowLocked);
 
   // Captions font size selects sync
   const figureSizeOpt = findChineseFontSizeOption(state.spec.captions?.figure?.font_size_pt);
@@ -546,7 +555,7 @@ function updateInputs() {
   }
 
   // References indent sync
-  updateIndentUI("reference", state.spec.references?.hanging_indent_mm ?? 0, state.spec.references?.font_size_pt, workflowLocked);
+  updateIndentUI("reference", indentMm(state.spec.references, "hanging_indent", state.spec.references?.font_size_pt), state.spec.references?.font_size_pt, workflowLocked);
 
   updateBodyRoleSummary();
   $("#referenceSystemValue").textContent = state.spec.references?.citation_system || "未指定";
@@ -881,7 +890,7 @@ function renderPreview() {
   content.style.lineHeight = lineHeightCss;
   content.querySelectorAll(".preview-body").forEach((paragraph) => {
     paragraph.style.textAlign = body.alignment || (copy.twoColumn ? "justify" : "left");
-    paragraph.style.textIndent = `${(Number(body.first_line_indent_mm) || 0) * scale}mm`;
+    paragraph.style.textIndent = `${indentMm(body, "first_line_indent", body.font_size_pt) * scale}mm`;
     paragraph.style.marginTop = `${(Number(body.space_before_pt) || 0) * scale}pt`;
     paragraph.style.marginBottom = `${(Number(body.space_after_pt) || 0) * scale}pt`;
   });
@@ -949,7 +958,7 @@ function renderPreview() {
   content.querySelectorAll(".preview-reference").forEach((reference) => {
     reference.style.fontSize = `${(Number(references.font_size_pt) || 9) * scale}pt`;
     reference.style.textAlign = references.alignment || "left";
-    const hanging = Number(references.hanging_indent_mm) || 0;
+    const hanging = indentMm(references, "hanging_indent", references.font_size_pt);
     reference.style.marginLeft = `${hanging * scale}mm`;
     reference.style.textIndent = `${-hanging * scale}mm`;
     reference.style.lineHeight = refLineHeightCss;
@@ -1670,9 +1679,9 @@ function bindEvents() {
       $("#bodyFontSizeInput").value = numPt;
       const unit = $("#bodyFirstLineIndentUnitSelect")?.value || "chars";
       if (unit === "chars") {
-        const chars = Number($("#bodyFirstLineIndentValueInput")?.value) || 2;
+        const chars = Number($("#bodyFirstLineIndentValueInput")?.value ?? 2);
         const newMm = convertToMm(chars, "chars", numPt);
-        setPath(state.spec, "body.first_line_indent_mm", newMm);
+        setPath(state.spec, "body.first_line_indent_chars", chars);
         $("#bodyIndentConversionHint").textContent = formatIndentSummary(newMm, numPt);
       }
       updateBodyRoleSummary();
@@ -1686,9 +1695,9 @@ function bindEvents() {
     setPath(state.spec, "body.font_size_pt", numPt);
     const unit = $("#bodyFirstLineIndentUnitSelect")?.value || "chars";
     if (unit === "chars") {
-      const chars = Number($("#bodyFirstLineIndentValueInput")?.value) || 2;
+      const chars = Number($("#bodyFirstLineIndentValueInput")?.value ?? 2);
       const newMm = convertToMm(chars, "chars", numPt);
-      setPath(state.spec, "body.first_line_indent_mm", newMm);
+      setPath(state.spec, "body.first_line_indent_chars", chars);
       $("#bodyIndentConversionHint").textContent = formatIndentSummary(newMm, numPt);
     }
     updateBodyRoleSummary();
@@ -1699,11 +1708,11 @@ function bindEvents() {
   $("#bodyFirstLineIndentUnitSelect")?.addEventListener("change", (event) => {
     const unit = event.target.value;
     const pt = state.spec.body?.font_size_pt || 12;
-    const mm = state.spec.body?.first_line_indent_mm ?? 8;
+    const mm = indentMm(state.spec.body, "first_line_indent", pt);
     const unitNames = { chars: "字符", pt: "磅 (pt)", mm: "毫米 (mm)", cm: "厘米 (cm)" };
     $("#bodyFirstLineIndentValueLabel").textContent = `首行缩进 (${unitNames[unit] || "字符"})`;
     $("#bodyFirstLineIndentValueInput").value = convertFromMm(mm, unit, pt);
-    $("#bodyFirstLineIndentValueInput").step = "1";
+    $("#bodyFirstLineIndentValueInput").step = "0.1";
   });
 
   // Body first line indent value input
@@ -1712,7 +1721,7 @@ function bindEvents() {
     const unit = $("#bodyFirstLineIndentUnitSelect")?.value || "chars";
     const pt = state.spec.body?.font_size_pt || 12;
     const mm = convertToMm(val, unit, pt);
-    setPath(state.spec, "body.first_line_indent_mm", mm);
+    setPath(state.spec, unit === "chars" ? "body.first_line_indent_chars" : "body.first_line_indent_mm", unit === "chars" ? val : mm);
     $("#bodyIndentConversionHint").textContent = formatIndentSummary(mm, pt);
     renderPreview();
   });
@@ -1849,9 +1858,9 @@ function bindEvents() {
       $("#referenceSizeInput").value = numPt;
       const unit = $("#referenceHangingIndentUnitSelect")?.value || "chars";
       if (unit === "chars") {
-        const chars = Number($("#referenceHangingIndentValueInput")?.value) || 2;
+        const chars = Number($("#referenceHangingIndentValueInput")?.value ?? 2);
         const newMm = convertToMm(chars, "chars", numPt);
-        setPath(state.spec, "references.hanging_indent_mm", newMm);
+        setPath(state.spec, "references.hanging_indent_chars", chars);
         $("#referenceIndentConversionHint").textContent = formatIndentSummary(newMm, numPt);
       }
       renderPreview();
@@ -1864,9 +1873,9 @@ function bindEvents() {
     setPath(state.spec, "references.font_size_pt", numPt);
     const unit = $("#referenceHangingIndentUnitSelect")?.value || "chars";
     if (unit === "chars") {
-      const chars = Number($("#referenceHangingIndentValueInput")?.value) || 2;
+      const chars = Number($("#referenceHangingIndentValueInput")?.value ?? 2);
       const newMm = convertToMm(chars, "chars", numPt);
-      setPath(state.spec, "references.hanging_indent_mm", newMm);
+      setPath(state.spec, "references.hanging_indent_chars", chars);
       $("#referenceIndentConversionHint").textContent = formatIndentSummary(newMm, numPt);
     }
     renderPreview();
@@ -1876,11 +1885,11 @@ function bindEvents() {
   $("#referenceHangingIndentUnitSelect")?.addEventListener("change", (event) => {
     const unit = event.target.value;
     const pt = state.spec.references?.font_size_pt || 10.5;
-    const mm = state.spec.references?.hanging_indent_mm ?? 7;
+    const mm = indentMm(state.spec.references, "hanging_indent", pt);
     const unitNames = { chars: "字符", pt: "磅 (pt)", mm: "毫米 (mm)", cm: "厘米 (cm)" };
     $("#referenceHangingIndentValueLabel").textContent = `悬挂缩进 (${unitNames[unit] || "字符"})`;
     $("#referenceHangingIndentValueInput").value = convertFromMm(mm, unit, pt);
-    $("#referenceHangingIndentValueInput").step = "1";
+    $("#referenceHangingIndentValueInput").step = "0.1";
   });
 
   // Reference hanging indent value input
@@ -1889,7 +1898,7 @@ function bindEvents() {
     const unit = $("#referenceHangingIndentUnitSelect")?.value || "chars";
     const pt = state.spec.references?.font_size_pt || 10.5;
     const mm = convertToMm(val, unit, pt);
-    setPath(state.spec, "references.hanging_indent_mm", mm);
+    setPath(state.spec, unit === "chars" ? "references.hanging_indent_chars" : "references.hanging_indent_mm", unit === "chars" ? val : mm);
     $("#referenceIndentConversionHint").textContent = formatIndentSummary(mm, pt);
     renderPreview();
   });
@@ -1898,6 +1907,7 @@ function bindEvents() {
     $(selector)?.addEventListener(eventName, (event) => {
       const heading = headingForLevel(state.selectedHeadingLevel, true);
       heading[property] = convert(event.target);
+      if (property.endsWith("_indent_chars")) delete heading[property.replace(/_chars$/, "_mm")];
       state.customHeadingLevels.add(state.selectedHeadingLevel);
       updateHeadingEditor(false);
       renderPreview();

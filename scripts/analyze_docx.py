@@ -806,9 +806,15 @@ def style_tokens(style: dict[str, Any] | None) -> dict[str, Any]:
         "widow_control": ppr.get("widow_control", True),
         "numbering": ppr.get("numbering"),
     }
+    for name,source in (("left_indent","left"),("right_indent","right"),("first_line_indent","first_line"),("hanging_indent","hanging")):
+        if source+"_chars" in indent:
+            result[name+"_chars"]=indent[source+"_chars"]
+            result.pop(name+"_mm",None)
+        else:
+            result.pop(name+"_chars",None)
     if spacing.get("line"):
         if spacing.get("line_pt") is not None:
-            result["line_spacing"] = {"kind": "exact", "value_pt": round(spacing["line_pt"], 2)}
+            result["line_spacing"] = {"kind": "at_least" if spacing.get("line_rule")=="atLeast" else "exact", "value_pt": round(spacing["line_pt"], 2)}
         elif spacing.get("line_rule") in {None, "auto"}:
             result["line_spacing"] = {"kind": "multiple", "value": round(float(spacing["line"]) / 240, 3)}
         else:
@@ -1083,14 +1089,17 @@ def fuse_dual_track_spec(
         corroborations.append({"field": "body.line_spacing", "value": spec["body"]["line_spacing"], "track": "Track 1 段落实测统计分布"})
 
     # 2. Body first line indent
-    if req_spec.get("body", {}).get("first_line_indent_mm"):
-        spec["body"]["first_line_indent_mm"] = req_spec["body"]["first_line_indent_mm"]
-        corroborations.append({"field": "body.first_line_indent_mm", "value": spec["body"]["first_line_indent_mm"], "track": f"{ai_engine_info} 条款判定"})
+    explicit_indent=next((key for key in ("first_line_indent_chars","first_line_indent_mm") if req_spec.get("body",{}).get(key) is not None),None)
+    if explicit_indent:
+        spec["body"].pop("first_line_indent_mm",None);spec["body"].pop("first_line_indent_chars",None)
+        spec["body"][explicit_indent]=req_spec["body"][explicit_indent]
+        corroborations.append({"field":"body."+explicit_indent,"value":spec["body"][explicit_indent],"track":f"{ai_engine_info} 条款判定"})
     elif body_indents:
         two_chars = [i for i in body_indents if i is not None and 7.0 <= i <= 9.5]
         if two_chars:
             indent = round(Counter(round(i, 3) for i in two_chars).most_common(1)[0][0], 3)
             spec["body"]["first_line_indent_mm"] = indent
+            spec["body"].pop("first_line_indent_chars",None)
             corroborations.append({"field": "body.first_line_indent_mm", "value": indent, "track": "Track 1 段落实测统计分布"})
 
     # 3. Body fonts & alignment
@@ -1100,8 +1109,8 @@ def fuse_dual_track_spec(
         spec["body"]["font_latin"] = req_spec["body"]["font_latin"]
     if req_spec.get("body", {}).get("font_size_pt"):
         spec["body"]["font_size_pt"] = req_spec["body"]["font_size_pt"]
-    if "alignment" not in spec.get("body", {}) or spec["body"]["alignment"] in [None, "left", "both"]:
-        spec["body"]["alignment"] = req_spec.get("body", {}).get("alignment", "justify")
+    if req_spec.get("body", {}).get("alignment") is not None:
+        spec["body"]["alignment"] = req_spec["body"]["alignment"]
 
     # 4. Headings
     if req_spec.get("headings"):

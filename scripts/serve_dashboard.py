@@ -9,6 +9,7 @@ import hashlib
 import json
 import mimetypes
 import os
+import shutil
 import tempfile
 import threading
 import copy
@@ -82,6 +83,15 @@ def _timestamp_age_seconds(value: str) -> float | None:
     return max(0.0, (datetime.now(timezone.utc) - timestamp).total_seconds())
 
 
+def _cleanup_task_file(task: dict) -> None:
+    path = task.pop("file_path", None)
+    if path and os.path.exists(path):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
 def _cleanup_analysis_tasks(server, *, reserve_slot: bool = False) -> None:
     with server.dashboard_analysis_lock:
         remove: list[str] = []
@@ -97,7 +107,9 @@ def _cleanup_analysis_tasks(server, *, reserve_slot: bool = False) -> None:
                     task.pop("claim_token", None)
                     task.pop("claimed_at", None)
         for task_id in remove:
-            server.dashboard_analysis_tasks.pop(task_id, None)
+            task = server.dashboard_analysis_tasks.pop(task_id, None)
+            if task:
+                _cleanup_task_file(task)
         limit = MAX_ANALYSIS_TASKS - 1 if reserve_slot else MAX_ANALYSIS_TASKS
         terminal = sorted(
             (
@@ -109,7 +121,9 @@ def _cleanup_analysis_tasks(server, *, reserve_slot: bool = False) -> None:
         )
         while len(server.dashboard_analysis_tasks) > limit and terminal:
             task_id, _ = terminal.pop(0)
-            server.dashboard_analysis_tasks.pop(task_id, None)
+            task = server.dashboard_analysis_tasks.pop(task_id, None)
+            if task:
+                _cleanup_task_file(task)
 
 
 def _runtime_snapshot(server) -> dict:
@@ -233,9 +247,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
             self._send_bytes(PRESETS_PATH.read_bytes(), "application/json; charset=utf-8")
             return
         if path == "/api/capabilities":
+            from word_format import capabilities
             self._send_json({
                 "api_version": API_VERSION,
                 "engine": "python-docx + targeted OOXML",
+                "format_core": capabilities(),
                 "settings": [
                     {"path": token_path, "method": method}
                     for token_path, method in SUPPORTED_APPLICATION_PATHS.items()
@@ -377,8 +393,17 @@ class DashboardHandler(BaseHTTPRequestHandler):
         source_sha256 = hashlib.sha256(data).hexdigest()
         task_id = uuid.uuid4().hex
         _cleanup_analysis_tasks(self.server, reserve_slot=True)
+        temp_dir = Path(tempfile.gettempdir()) / "wfm_spool"
+        temp_dir.mkdir(parents=True, exist_ok=True)
+        spool_path = temp_dir / f"{task_id}_{filename}"
+        spool_path.write_bytes(data)
         with self.server.dashboard_analysis_lock:
             if len(self.server.dashboard_analysis_tasks) >= MAX_ANALYSIS_TASKS:
+                if spool_path.is_file():
+                    try:
+                        spool_path.unlink()
+                    except OSError:
+                        pass
                 raise ValueError("Analysis queue is full; wait for existing tasks to finish")
             self.server.dashboard_analysis_tasks[task_id] = {
                 "id": task_id,
@@ -386,14 +411,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "filename": filename,
                 "source_sha256": source_sha256,
                 "created_at": _utc_now(),
-                "data": data,
+                "file_path": str(spool_path),
                 "result": None,
                 "error": None,
             }
         try:
             with tempfile.TemporaryDirectory(prefix="word-format-master-") as temp:
                 path = Path(temp) / filename
-                path.write_bytes(data)
+                shutil.copyfile(str(spool_path), str(path))
                 result = analyze_docx(path)
                 if path.suffix.lower() == ".docx":
                     try:
@@ -430,6 +455,11 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 "message": "已交给当前对话 AI 分析，结果将自动回填。",
             }
         except Exception:
+            if spool_path.is_file():
+                try:
+                    spool_path.unlink()
+                except OSError:
+                    pass
             with self.server.dashboard_analysis_lock:
                 self.server.dashboard_analysis_tasks.pop(task_id, None)
             raise
@@ -449,12 +479,14 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 raise ValueError("Analysis task is not claimed by this worker")
             claim_token = task["claim_token"]
             task["status"] = "processing"
-            data = task["data"]
+            file_path = task.get("file_path")
+            if not file_path or not os.path.exists(file_path):
+                raise ValueError("Task source file is no longer available on disk")
             filename = task["filename"]
         try:
             with tempfile.TemporaryDirectory(prefix="word-format-master-ai-") as temp:
                 source = Path(temp) / filename
-                source.write_bytes(data)
+                shutil.copyfile(file_path, str(source))
                 result = analyze_docx(source, semantic_spec=spec)
                 result["citation_context"] = copy.deepcopy(task["baseline_analysis"].get("citation_context"))
             with self.server.dashboard_analysis_lock:
@@ -463,7 +495,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                 task["status"] = "completed"
                 task["completed_at"] = _utc_now()
                 task["result"] = result
-                for key in ("data", "document_text", "baseline_analysis", "claim_token", "claimed_at"):
+                _cleanup_task_file(task)
+                for key in ("document_text", "baseline_analysis", "claim_token", "claimed_at"):
                     task.pop(key, None)
             return _analysis_task_public(task)
         except Exception as exc:
@@ -472,7 +505,8 @@ class DashboardHandler(BaseHTTPRequestHandler):
                     task["status"] = "failed"
                     task["completed_at"] = _utc_now()
                     task["error"] = str(exc)
-                    for key in ("data", "document_text", "baseline_analysis", "claim_token", "claimed_at"):
+                    _cleanup_task_file(task)
+                    for key in ("document_text", "baseline_analysis", "claim_token", "claimed_at"):
                         task.pop(key, None)
             raise
 

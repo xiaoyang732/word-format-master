@@ -57,6 +57,8 @@ try {
   if ($word -ne $null) { $word.Quit() }
   if ($document -ne $null) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($document) }
   if ($word -ne $null) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($word) }
+  [GC]::Collect()
+  [GC]::WaitForPendingFinalizers()
 }
 '''.strip()
     with tempfile.TemporaryDirectory(prefix="word-format-word-") as temp:

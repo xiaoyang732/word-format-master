@@ -4,11 +4,13 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import copy
 import hashlib
 import json
 import re
 import sys
+import uuid
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -19,6 +21,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls, qn
 from docx.shared import Mm, Pt, RGBColor
+from lxml import etree
 
 from citation_workflow import apply_citations
 from config import LIST_NUMBERING_STYLES, SUPPORTED_SPEC_SCHEMA_VERSIONS
@@ -38,71 +41,9 @@ PAGE_SIZES_MM = {
     "Letter": (215.9, 279.4),
 }
 
-SUPPORTED_APPLICATION_PATHS = {
-    "page.size": "Word section page size",
-    "page.orientation": "Word section orientation",
-    "page.width_mm": "Word section page width",
-    "page.height_mm": "Word section page height",
-    "page.margin_top_mm": "Word section top margin",
-    "page.margin_bottom_mm": "Word section bottom margin",
-    "page.margin_left_mm": "Word section left margin",
-    "page.margin_right_mm": "Word section right margin",
-    "body.font_east_asia": "Normal style east Asian font",
-    "body.font_latin": "Normal style Latin font",
-    "body.font_size_pt": "Normal style font size",
-    "body.alignment": "Normal paragraph alignment",
-    "body.line_spacing": "Normal paragraph line spacing",
-    "body.first_line_indent_mm": "Normal first-line indent",
-    "body.space_before_pt": "Normal paragraph space before",
-    "body.space_after_pt": "Normal paragraph space after",
-    "headings.*.font_east_asia": "Word Heading 1-9 east Asian font",
-    "headings.*.font_latin": "Word Heading 1-9 Latin font",
-    "headings.*.font_size_pt": "Word Heading 1-9 font size",
-    "headings.*.alignment": "Word Heading 1-9 alignment",
-    "headings.*.space_before_pt": "Word Heading 1-9 space before",
-    "headings.*.space_after_pt": "Word Heading 1-9 space after",
-    "headings.*.bold": "Word Heading 1-9 bold",
-    "headings.*.italic": "Word Heading 1-9 italic",
-    "lists.headings.level1": "Managed Level 1 heading numbering format (keep, chinese, arabic)",
-    "lists.headings.level2": "Managed Level 2 heading numbering format (arabic, keep)",
-    "lists.headings.level3": "Managed Level 3 heading numbering format (arabic, keep)",
-    "captions.figure.label": "Figure caption matching label",
-    "captions.figure.position": "Figure caption paragraph placement",
-    "captions.figure.font_size_pt": "Figure Caption style font size",
-    "captions.figure.alignment": "Figure Caption style alignment",
-    "captions.table.label": "Table caption matching label",
-    "captions.table.position": "Table caption paragraph placement",
-    "captions.table.font_size_pt": "Table Caption style font size",
-    "captions.table.alignment": "Table Caption style alignment",
-    "headers_footers.preserve_existing": "Preserve existing header/footer elements",
-    "headers_footers.header.enabled": "Managed header text insertion/removal",
-    "headers_footers.header.text": "Managed header text",
-    "headers_footers.header.alignment": "Managed header paragraph alignment",
-    "headers_footers.footer.enabled": "Managed footer text insertion/removal",
-    "headers_footers.footer.text": "Managed footer text",
-    "headers_footers.footer.alignment": "Managed footer paragraph alignment",
-    "headers_footers.different_first_page": "Section first-page header/footer flag",
-    "page_numbers.enabled": "Managed PAGE field insertion/removal",
-    "page_numbers.location": "PAGE field header/footer location",
-    "page_numbers.alignment": "PAGE field paragraph alignment",
-    "page_numbers.format": "PAGE/NUMPAGES field format",
-    "page_numbers.start": "Section page-number start",
-    "page_numbers.show_on_first_page": "First-page PAGE field visibility",
-    "table_of_contents.enabled": "Managed Word TOC field insertion/removal",
-    "table_of_contents.title": "Managed TOC heading text",
-    "table_of_contents.max_heading_level": "Word TOC heading-level range",
-    "table_of_contents.page_break_after": "Managed TOC trailing page break",
-    "references.font_size_pt": "Bibliography style font size",
-    "references.hanging_indent_mm": "Bibliography hanging indent",
-    "references.line_spacing": "Bibliography style line spacing",
-    "references.alignment": "Bibliography paragraph alignment",
-    "lists.numbered.style": "Managed Word numbered-list definition",
-    "lists.numbered.start": "Managed Word numbered-list start value",
-    "lists.numbered.left_indent_mm": "Managed numbered-list left indent",
-    "lists.numbered.hanging_indent_mm": "Managed numbered-list hanging indent",
-    "clear_direct_font_formatting": "Run-level direct font cleanup",
-    "document_structure": "Apply module-owned styles and validate ordered document modules",
-}
+from word_format.spec import legacy_paths
+
+SUPPORTED_APPLICATION_PATHS = legacy_paths()
 
 CHINESE_DIGITS = {
     1: "一", 2: "二", 3: "三", 4: "四", 5: "五",
@@ -231,160 +172,35 @@ def resolve_paragraph_style(document: Document, tokens: dict[str, Any], fallback
 
 
 def set_style_font(style, tokens: dict[str, Any]) -> None:
-    font = style.font
-    latin = tokens.get("font_latin")
-    east_asia = tokens.get("font_east_asia")
-    if latin:
-        font.name = latin
-    if tokens.get("font_size_pt") is not None:
-        font.size = Pt(float(tokens["font_size_pt"]))
-    if tokens.get("bold") is not None:
-        font.bold = bool(tokens["bold"])
-    if tokens.get("italic") is not None:
-        font.italic = bool(tokens["italic"])
-    color = tokens.get("color")
-    if color and str(color).lower() not in {"auto", "none"}:
-        cleaned = str(color).replace("#", "")
-        if len(cleaned) == 6:
-            font.color.rgb = RGBColor.from_string(cleaned.upper())
-    rpr = style.element.get_or_add_rPr()
-    rfonts = rpr.get_or_add_rFonts()
-    if latin:
-        rfonts.set(qn("w:ascii"), latin)
-        rfonts.set(qn("w:hAnsi"), latin)
-    if east_asia:
-        rfonts.set(qn("w:eastAsia"), east_asia)
+    from word_format.properties import element, write_font
+    from word_format.spec import FONT, token_operations
+    for action, params in token_operations({k: v for k, v in tokens.items() if k in FONT}):
+        key = next(k for k, v in FONT.items() if v == action)
+        write_font(element(style.element, "rPr"), key, params["value"])
 
 
 def set_paragraph_format(style, tokens: dict[str, Any]) -> None:
-    paragraph_format = style.paragraph_format
-    alignment = tokens.get("alignment")
-    if alignment in ALIGNMENTS:
-        paragraph_format.alignment = ALIGNMENTS[alignment]
-    if tokens.get("space_before_pt") is not None:
-        paragraph_format.space_before = Pt(float(tokens["space_before_pt"]))
-    font_size_pt = float(tokens.get("font_size_pt") or 12.0)
-    if tokens.get("first_line_indent_chars") is not None:
-        chars_val = float(tokens["first_line_indent_chars"])
-        paragraph_format.first_line_indent = Pt(0) if chars_val == 0 else Pt(round(chars_val * font_size_pt, 2))
-    elif tokens.get("first_line_indent_mm") is not None:
-        mm_val = float(tokens["first_line_indent_mm"])
-        paragraph_format.first_line_indent = Pt(0) if mm_val == 0 else Mm(mm_val)
-    if tokens.get("left_indent_chars") is not None:
-        l_chars_val = float(tokens["left_indent_chars"])
-        paragraph_format.left_indent = Pt(0) if l_chars_val == 0 else Pt(round(l_chars_val * font_size_pt, 2))
-    elif tokens.get("left_indent_mm") is not None:
-        l_mm_val = float(tokens["left_indent_mm"])
-        paragraph_format.left_indent = Pt(0) if l_mm_val == 0 else Mm(l_mm_val)
-    if tokens.get("right_indent_mm") is not None:
-        paragraph_format.right_indent = Mm(float(tokens["right_indent_mm"]))
-
-    pPr = getattr(style, "_element", None)
-    if pPr is not None:
-        pPr_elem = pPr.get_or_add_pPr() if hasattr(pPr, "get_or_add_pPr") else pPr
-        spacing_elem = pPr_elem.find(qn("w:spacing"))
-        if spacing_elem is not None:
-            for autospace_attr in ("beforeAutospacing", "afterAutospacing", "beforeLines", "afterLines"):
-                attr_qn = qn(f"w:{autospace_attr}")
-                if attr_qn in spacing_elem.attrib:
-                    del spacing_elem.attrib[attr_qn]
-        has_indent_tokens = any(
-            tokens.get(k) is not None
-            for k in (
-                "first_line_indent_chars",
-                "first_line_indent_mm",
-                "left_indent_chars",
-                "left_indent_mm",
-                "hanging_indent_chars",
-                "hanging_indent_mm",
-            )
-        )
-        ind = pPr_elem.find(qn("w:ind"))
-        if ind is None and has_indent_tokens:
-            ind = pPr_elem.get_or_add_ind()
-        if ind is not None:
-            first_line_chars = tokens.get("first_line_indent_chars")
-            first_line_mm = tokens.get("first_line_indent_mm")
-            if first_line_chars is not None:
-                fl_c = float(first_line_chars)
-                ind.set(qn("w:firstLineChars"), str(int(round(fl_c * 100))))
-                ind.set(qn("w:firstLine"), str(int(round(fl_c * font_size_pt * 20))))
-            elif first_line_mm is not None:
-                if float(first_line_mm) == 0:
-                    ind.set(qn("w:firstLineChars"), "0")
-                    ind.set(qn("w:firstLine"), "0")
-                else:
-                    chars = round(float(first_line_mm) / (font_size_pt * 25.4 / 72), 2)
-                    if abs(chars - round(chars)) < 0.2:
-                        ind.set(qn("w:firstLineChars"), str(int(round(chars * 100))))
-                    ind.set(qn("w:firstLine"), str(int(round(float(first_line_mm) * 56.6929))))
-
-            left_chars = tokens.get("left_indent_chars")
-            left_mm = tokens.get("left_indent_mm")
-            if left_chars is not None:
-                l_c = float(left_chars)
-                ind.set(qn("w:leftChars"), str(int(round(l_c * 100))))
-                ind.set(qn("w:left"), str(int(round(l_c * font_size_pt * 20))))
-            elif left_mm is not None:
-                if float(left_mm) == 0:
-                    ind.set(qn("w:leftChars"), "0")
-                    ind.set(qn("w:left"), "0")
-                else:
-                    chars = round(float(left_mm) / (font_size_pt * 25.4 / 72), 2)
-                    if abs(chars - round(chars)) < 0.2:
-                        ind.set(qn("w:leftChars"), str(int(round(chars * 100))))
-                    ind.set(qn("w:left"), str(int(round(float(left_mm) * 56.6929))))
-
-            hanging_chars = tokens.get("hanging_indent_chars")
-            hanging_mm = tokens.get("hanging_indent_mm")
-            if hanging_chars is not None:
-                hg_c = float(hanging_chars)
-                ind.set(qn("w:hangingChars"), str(int(round(hg_c * 100))))
-                ind.set(qn("w:hanging"), str(int(round(hg_c * font_size_pt * 20))))
-            elif hanging_mm is not None and float(hanging_mm) > 0:
-                chars = round(float(hanging_mm) / (font_size_pt * 25.4 / 72), 2)
-                if abs(chars - round(chars)) < 0.2:
-                    ind.set(qn("w:hangingChars"), str(int(round(chars * 100))))
-                ind.set(qn("w:hanging"), str(int(round(float(hanging_mm) * 56.6929))))
-
-    spacing = tokens.get("line_spacing") or {}
-    if spacing.get("kind") == "multiple" and spacing.get("value") is not None:
-        paragraph_format.line_spacing = float(spacing["value"])
-    elif spacing.get("kind") == "exact" and spacing.get("value_pt") is not None:
-        paragraph_format.line_spacing = Pt(float(spacing["value_pt"]))
-    elif spacing.get("kind") == "single":
-        paragraph_format.line_spacing = 1.0
-    elif spacing.get("kind") == "1.5":
-        paragraph_format.line_spacing = 1.5
-    elif spacing.get("kind") == "double":
-        paragraph_format.line_spacing = 2.0
-    elif spacing.get("kind") == "at_least" and spacing.get("value_pt") is not None:
-        paragraph_format.line_spacing = Pt(float(spacing["value_pt"]))
-    for attr, key in (
-        ("keep_with_next", "keep_with_next"),
-        ("keep_together", "keep_together"),
-        ("page_break_before", "page_break_before"),
-        ("widow_control", "widow_control"),
-    ):
-        if tokens.get(key) is not None and hasattr(paragraph_format, attr):
-            setattr(paragraph_format, attr, bool(tokens[key]))
+    from word_format.properties import element, write_paragraph
+    from word_format.spec import PARA, INDENTS, token_operations
+    selected = {k: v for k, v in tokens.items() if k in PARA or any(k.startswith(n + "_") for n in INDENTS)}
+    if "font_size_pt" in tokens:
+        selected["font_size_pt"] = tokens["font_size_pt"]
+    for action, params in token_operations(selected):
+        if not action.startswith("paragraph."):
+            continue
+        key = action[len("paragraph."):-len(".set")]
+        key = {"spacing_before": "space_before_pt", "spacing_after": "space_after_pt"}.get(key, key)
+        value = params if key == "line_spacing" or key.endswith("indent") else params["value"]
+        node = style._p if hasattr(style, "_p") else style.element
+        write_paragraph(element(node, "pPr"), key, value)
 
 
 def set_run_font(run, tokens: dict[str, Any]) -> None:
-    latin = tokens.get("font_latin")
-    east_asia = tokens.get("font_east_asia")
-    if latin:
-        run.font.name = latin
-        run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:ascii"), latin)
-        run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:hAnsi"), latin)
-    if east_asia:
-        run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), east_asia)
-    if tokens.get("font_size_pt") is not None:
-        run.font.size = Pt(float(tokens["font_size_pt"]))
-    if tokens.get("bold") is not None:
-        run.bold = bool(tokens["bold"])
-    if tokens.get("italic") is not None:
-        run.italic = bool(tokens["italic"])
+    from word_format.properties import element, write_font
+    from word_format.spec import FONT, token_operations
+    for action, params in token_operations({k: v for k, v in tokens.items() if k in FONT}):
+        key = next(k for k, v in FONT.items() if v == action)
+        write_font(element(run._r, "rPr"), key, params["value"])
 
 
 def clear_paragraph_content(paragraph) -> None:
@@ -437,6 +253,129 @@ def mark_fields_for_update(document: Document) -> None:
         update = OxmlElement("w:updateFields")
         settings.append(update)
     update.set(qn("w:val"), "true")
+
+
+def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any]) -> list[str]:
+    if not tables or not document.tables:
+        return []
+    changes: list[str] = []
+    three_line = bool(tables.get("three_line_table", False))
+    repeat_header = bool(tables.get("repeat_header_row", False))
+    alignment = tables.get("alignment")
+    latin = tables.get("font_latin") or body.get("font_latin")
+    east_asia = tables.get("font_east_asia") or body.get("font_east_asia")
+    font_size_pt = tables.get("font_size_pt")
+
+    for tbl_idx, table in enumerate(document.tables):
+        tblPr = table._tbl.tblPr
+        if alignment in ("center", "centre"):
+            existing_jc = tblPr.find(qn("w:jc"))
+            if existing_jc is not None:
+                tblPr.remove(existing_jc)
+            tblPr.append(parse_xml(f'<w:jc {nsdecls("w")} w:val="center"/>'))
+        elif alignment in ("left", "right"):
+            existing_jc = tblPr.find(qn("w:jc"))
+            if existing_jc is not None:
+                tblPr.remove(existing_jc)
+            tblPr.append(parse_xml(f'<w:jc {nsdecls("w")} w:val="{alignment}"/>'))
+
+        snapshot_key = "{urn:word-format-master:format}originalBorders"
+        if three_line and snapshot_key not in tblPr.attrib:
+            border_nodes = [tblPr] + [cell for row in table.rows for cell in row.cells]
+            snapshot = []
+            seen_cells = set()
+            for node in border_nodes:
+                owner = node if node is tblPr else node._tc.get_or_add_tcPr()
+                if owner in seen_cells:
+                    continue
+                seen_cells.add(owner)
+                border = owner.find(qn("w:tblBorders" if node is tblPr else "w:tcBorders"))
+                snapshot.append(base64.b64encode(etree.tostring(border)).decode() if border is not None else None)
+            tblPr.set(snapshot_key, json.dumps(snapshot))
+        if "three_line_table" in tables and not three_line and snapshot_key in tblPr.attrib:
+            snapshot = json.loads(tblPr.attrib.pop(snapshot_key))
+            owners = [tblPr]
+            for row in table.rows:
+                for cell in row.cells:
+                    owner = cell._tc.get_or_add_tcPr()
+                    if owner not in owners:
+                        owners.append(owner)
+            if len(snapshot) != len(owners):
+                raise ValueError("Table structure changed; saved borders cannot be restored")
+            for index, (owner, saved) in enumerate(zip(owners, snapshot)):
+                border = owner.find(qn("w:tblBorders" if index == 0 else "w:tcBorders"))
+                if border is not None:
+                    owner.remove(border)
+                if saved:
+                    owner.append(parse_xml(base64.b64decode(saved)))
+        if three_line:
+            existing_borders = tblPr.find(qn("w:tblBorders"))
+            if existing_borders is not None:
+                tblPr.remove(existing_borders)
+            three_line_xml = parse_xml(
+                f'<w:tblBorders {nsdecls("w")}>'
+                f'<w:top w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+                f'<w:left w:val="none"/>'
+                f'<w:bottom w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+                f'<w:right w:val="none"/>'
+                f'<w:insideH w:val="none"/>'
+                f'<w:insideV w:val="none"/>'
+                f'</w:tblBorders>'
+            )
+            tblPr.append(three_line_xml)
+
+            if table.rows:
+                header_row = table.rows[0]
+                for cell in header_row.cells:
+                    tcPr = cell._tc.get_or_add_tcPr()
+                    existing_tc_borders = tcPr.find(qn("w:tcBorders"))
+                    if existing_tc_borders is not None:
+                        tcPr.remove(existing_tc_borders)
+                    tc_border_xml = parse_xml(
+                        f'<w:tcBorders {nsdecls("w")}>'
+                        f'<w:bottom w:val="single" w:sz="6" w:space="0" w:color="auto"/>'
+                        f'</w:tcBorders>'
+                    )
+                    tcPr.append(tc_border_xml)
+
+        if "repeat_header_row" in tables and not repeat_header and table.rows:
+            trPr = table.rows[0]._tr.trPr
+            header = trPr.find(qn("w:tblHeader")) if trPr is not None else None
+            if header is not None:
+                trPr.remove(header)
+        if repeat_header and table.rows:
+            header_tr = table.rows[0]._tr
+            trPr = header_tr.get_or_add_trPr()
+            if trPr.find(qn("w:tblHeader")) is None:
+                trPr.append(parse_xml(f'<w:tblHeader {nsdecls("w")}/>'))
+
+        if latin or east_asia or font_size_pt is not None:
+            for row in table.rows:
+                for cell in row.cells:
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            if font_size_pt is not None:
+                                set_run_font(run, {"font_size_pt":float(font_size_pt)})
+                            rpr = run._r.get_or_add_rPr()
+                            rfonts = rpr.get_or_add_rFonts()
+                            if latin:
+                                run.font.name = latin
+                                rfonts.set(qn("w:ascii"), latin)
+                                rfonts.set(qn("w:hAnsi"), latin)
+                            if east_asia:
+                                rfonts.set(qn("w:eastAsia"), east_asia)
+
+    desc = []
+    if three_line:
+        desc.append("three-line borders")
+    if repeat_header:
+        desc.append("repeat header row")
+    if alignment:
+        desc.append(f"alignment={alignment}")
+    if font_size_pt:
+        desc.append(f"font_size={font_size_pt}pt")
+    changes.append(f"Applied table formatting ({', '.join(desc)}) to {len(document.tables)} table(s)")
+    return changes
 
 
 def apply_caption_styles(document: Document, body: dict[str, Any], captions: dict[str, Any]) -> list[str]:
@@ -678,6 +617,8 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     containers = []
     for section in document.sections:
         containers.append(getattr(section, location))
+        if document.settings.odd_and_even_pages_header_footer:
+            containers.append(getattr(section, f"even_page_{location}"))
     if tokens.get("show_on_first_page", True):
         for section in document.sections:
             if section.different_first_page_header_footer:
@@ -1073,9 +1014,9 @@ def _ensure_heading_multilevel_numbering(
     num_xml = f'<w:num {nsdecls("w")} w:numId="{num_id}"><w:abstractNumId w:val="{abstract_id}"/></w:num>'
     numbering_elm.append(parse_xml(num_xml.strip()))
 
-    _bind_style_numbering(document, "Heading 1", num_id, 0)
-    _bind_style_numbering(document, "Heading 2", num_id, 1)
-    _bind_style_numbering(document, "Heading 3", num_id, 2)
+    for level, mode in ((1, level1_format), (2, level2_format), (3, level3_format)):
+        if mode != "keep":
+            _bind_style_numbering(document, f"Heading {level}", num_id, level - 1)
     return num_id
 
 
@@ -1095,9 +1036,9 @@ def normalize_heading_styles(
         level2_format = "arabic"
         level3_format = "arabic"
     elif isinstance(heading_numbering, dict):
-        level1_format = heading_numbering.get("level1", "chinese")
-        level2_format = heading_numbering.get("level2", "arabic")
-        level3_format = heading_numbering.get("level3", "arabic")
+        level1_format = heading_numbering.get("level1", "keep")
+        level2_format = heading_numbering.get("level2", "keep")
+        level3_format = heading_numbering.get("level3", "keep")
     else:
         # A distilled template that has no heading numbering must preserve the
         # target's existing numbering instead of receiving a built-in default.
@@ -1159,14 +1100,15 @@ def normalize_heading_styles(
         current_style = paragraph.style.name if paragraph.style else ""
         if current_style in TOC_MANAGED_STYLES or current_style.lower().startswith("wfm toc"):
             continue
-        is_bold_title = any(r.bold for r in paragraph.runs if r.text.strip()) and len(text) < 100
-        is_heading_or_candidate = (
-            current_style.lower().startswith("heading")
-            or current_style.lower().startswith("标题")
-            or current_style.lower() in {"subtitle"}
-            or is_bold_title
-            or (len(text) < 80 and not text.rstrip().endswith(("。", "！", "？", "；", ";", ".")))
-        )
+        from document_structure import is_heading_candidate
+        from word_format.properties import strip_text_prefix
+        is_heading_or_candidate = is_heading_candidate(text, current_style)
+        actual_level = next((level for level, pattern in ((3, re_l3), (2, re_l2), (1, re_l1)) if pattern.match(text)), None)
+        if actual_level is None:
+            style_match = re.fullmatch(r"Heading ([1-3])", current_style, re.I)
+            actual_level = int(style_match.group(1)) if style_match else None
+        if actual_level and {1: level1_format, 2: level2_format, 3: level3_format}[actual_level] == "keep":
+            continue
         if current_style.lower() == "title":
             _remove_paragraph_numbering(paragraph)
             continue
@@ -1183,7 +1125,7 @@ def normalize_heading_styles(
                 m_l3 = re_l3_pattern.match(text)
                 if m_l3:
                     clean_text = m_l3.group(4).strip().lstrip("、.．").strip()
-                    paragraph.text = clean_text
+                    strip_text_prefix(paragraph._p, paragraph.text.find(clean_text))
                     _set_paragraph_numbering(paragraph, num_id, ilvl=2)
                     converted_l3 += 1
                 else:
@@ -1198,7 +1140,7 @@ def normalize_heading_styles(
                 m_l2 = re_l2_pattern.match(text)
                 if m_l2:
                     clean_text = m_l2.group(3).strip().lstrip("、.．").strip()
-                    paragraph.text = clean_text
+                    strip_text_prefix(paragraph._p, paragraph.text.find(clean_text))
                     _set_paragraph_numbering(paragraph, num_id, ilvl=1)
                     converted_l2 += 1
                 else:
@@ -1221,20 +1163,20 @@ def normalize_heading_styles(
             elif m_ara:
                 rest = m_ara.group(2).strip().lstrip("、.．").strip()
 
-            if rest and num_id is not None:
-                paragraph.text = rest
+            if rest and num_id is not None and level1_format != "keep":
+                strip_text_prefix(paragraph._p, paragraph.text.find(rest))
                 _set_paragraph_numbering(paragraph, num_id, ilvl=0)
                 converted_l1 += 1
-            elif num_id is not None and current_style.lower() == "heading 1":
+            elif num_id is not None and level1_format != "keep" and current_style.lower() == "heading 1":
                 _set_paragraph_numbering(paragraph, num_id, ilvl=0)
-        elif current_style.lower() == "heading 1" and num_id is not None:
+        elif current_style.lower() == "heading 1" and num_id is not None and level1_format != "keep":
             if re_special.match(text):
                 _remove_paragraph_numbering(paragraph)
             else:
                 _set_paragraph_numbering(paragraph, num_id, ilvl=0)
-        elif current_style.lower() == "heading 2" and num_id is not None:
+        elif current_style.lower() == "heading 2" and num_id is not None and level2_format != "keep":
             _set_paragraph_numbering(paragraph, num_id, ilvl=1)
-        elif current_style.lower() == "heading 3" and num_id is not None:
+        elif current_style.lower() == "heading 3" and num_id is not None and level3_format != "keep":
             _set_paragraph_numbering(paragraph, num_id, ilvl=2)
 
     if adjusted:
@@ -1304,20 +1246,6 @@ def iter_all_paragraphs(document: Document) -> Iterable:
                 yield from iter_table_paragraphs(table)
 
 
-def clear_direct_font_formatting(document: Document) -> int:
-    changed = 0
-    for paragraph in iter_all_paragraphs(document):
-        for run in paragraph.runs:
-            font = run.font
-            if font.name is not None or font.size is not None or font.color.rgb is not None:
-                font.name = None
-                font.size = None
-                font.color.rgb = None
-                rpr = run._element.rPr
-                if rpr is not None and rpr.rFonts is not None:
-                    rpr.remove(rpr.rFonts)
-                changed += 1
-    return changed
 
 
 def apply_reference_style(document: Document, body: dict[str, Any], references: dict[str, Any]) -> list[str]:
@@ -1336,7 +1264,7 @@ def apply_reference_style(document: Document, body: dict[str, Any], references: 
     set_style_font(bibliography, reference_tokens)
     set_paragraph_format(bibliography, reference_tokens)
 
-    numbering_mode = references.get("numbering_mode") or "word-numbering"
+    numbering_mode = references.get("numbering_mode")
     num_id = None
     if numbering_mode == "word-numbering":
         style_key = "decimal-bracket"
@@ -1428,19 +1356,16 @@ def apply_reference_style(document: Document, body: dict[str, Any], references: 
             paragraph.style = bibliography
             if numbering_mode == "word-numbering" and num_id is not None:
                 clean_text = re.sub(r"^\s*\[\s*\d+\s*\]\s*|^\s*\d+[\.、]\s*", "", text).strip()
-                paragraph.text = clean_text
+                from word_format.properties import strip_text_prefix
+                strip_text_prefix(paragraph._p, paragraph.text.find(clean_text))
                 for run in paragraph.runs:
                     set_run_font(run, reference_tokens)
                 _set_paragraph_numbering(paragraph, num_id, ilvl=0)
+            elif numbering_mode == "none":
+                _remove_paragraph_numbering(paragraph)
             else:
-                paragraph.text = text.lstrip()
                 for run in paragraph.runs:
                     set_run_font(run, reference_tokens)
-            pPr = paragraph._p.pPr
-            if pPr is not None:
-                ind = pPr.find(qn("w:ind"))
-                if ind is not None:
-                    pPr.remove(ind)
             styled += 1
     return [f"Updated Bibliography style and assigned it to {styled} reference paragraph(s)"]
 
@@ -1618,154 +1543,17 @@ def apply_numbered_lists(document: Document, tokens: dict[str, Any]) -> list[str
     return changes
 
 
-def apply_document_module_styles(document: Document, structure: dict[str, Any]) -> list[str]:
-    """Apply the format tokens owned by each extracted document module.
-
-    Module boundaries come from the same marker vocabulary as template
-    extraction.  A module may be absent in the target; the structural verifier
-    reports that mismatch instead of silently moving content between modules.
-    """
-    if not isinstance(structure, dict):
-        return []
-    module_specs = [item for item in structure.get("ordered_modules", []) if isinstance(item, dict)]
-    if not module_specs:
-        return []
-    from document_structure import classify_role, detect_module_spans
-
-    paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
-    items = [
-        {
-            "index": index,
-            "text": paragraph.text.strip(),
-            "style_name": paragraph.style.name if paragraph.style else "",
-        }
-        for index, paragraph in enumerate(paragraphs)
-    ]
-    target_spans = detect_module_spans(items)
-    changes: list[str] = []
-    chapter_spec = next((item for item in module_specs if item.get("kind") == "chapters"), None)
-    for target in target_spans:
-        kind = str(target.get("kind") or "")
-        source = chapter_spec if kind == "chapters" else next((item for item in module_specs if item.get("kind") == kind), None)
-        if not source:
-            continue
-        start = int(target.get("paragraph_start", 0))
-        end = int(target.get("paragraph_end", start))
-        span_paragraphs = paragraphs[start : end + 1]
-        source_roles = source.get("style_roles") if isinstance(source.get("style_roles"), dict) else {}
-        for offset, paragraph in enumerate(span_paragraphs):
-            role = classify_role(paragraph.text.strip(), paragraph.style.name if paragraph.style else "", first=offset == 0)
-            role_spec = source_roles.get(role) or source_roles.get("body")
-            if not isinstance(role_spec, dict) or not isinstance(role_spec.get("tokens"), dict):
-                continue
-            tokens = copy.deepcopy(role_spec["tokens"])
-            fallback = "Heading 1" if role == "heading" else "Normal"
-            style = resolve_paragraph_style(document, tokens, fallback)
-            set_style_font(style, tokens)
-            set_paragraph_format(style, tokens)
-            paragraph.style = style
-        changes.append(f"Applied module-owned styles for {kind} module")
-    return changes
 
 
-def _validate_spec(spec: dict[str, Any]) -> list[str]:
-    errors: list[str] = []
-    if not isinstance(spec, dict):
-        return ["format specification must be an object"]
-    schema_version = spec.get("schema_version")
-    if schema_version is not None and str(schema_version) not in SUPPORTED_SPEC_SCHEMA_VERSIONS:
-        errors.append(
-            f"schema_version {schema_version!r} is unsupported; supported versions: "
-            f"{', '.join(sorted(SUPPORTED_SPEC_SCHEMA_VERSIONS))}"
-        )
-    for key in ("id", "name", "mode"):
-        if key in spec and spec[key] is not None and not isinstance(spec[key], str):
-            errors.append(f"{key} must be text")
-    if spec.get("template_required"):
-        errors.append(
-            "This workflow requires the current official publisher template and cannot be applied as numeric tokens."
-        )
-    page = spec.get("page", {})
-    for key in ("width_mm", "height_mm"):
-        if page.get(key) is not None and float(page[key]) <= 0:
-            errors.append(f"{key} must be positive")
-    for key in ("margin_top_mm", "margin_right_mm", "margin_bottom_mm", "margin_left_mm", "gutter_mm"):
-        if page.get(key) is not None and float(page[key]) < 0:
-            errors.append(f"{key} cannot be negative")
-    if page.get("orientation") not in {None, "portrait", "landscape"}:
-        errors.append("orientation must be portrait or landscape")
-    body_size = spec.get("body", {}).get("font_size_pt")
-    if body_size is not None and not 5 <= float(body_size) <= 96:
-        errors.append("body.font_size_pt must be between 5 and 96")
-    reference_size = spec.get("references", {}).get("font_size_pt")
-    if reference_size is not None and not 5 <= float(reference_size) <= 96:
-        errors.append("references.font_size_pt must be between 5 and 96")
-    hanging_indent = spec.get("references", {}).get("hanging_indent_mm")
-    if hanging_indent is not None and float(hanging_indent) < 0:
-        errors.append("references.hanging_indent_mm cannot be negative")
-    for role in ("figure", "table"):
-        caption = spec.get("captions", {}).get(role, {})
-        size = caption.get("font_size_pt")
-        if size is not None and not 5 <= float(size) <= 96:
-            errors.append(f"captions.{role}.font_size_pt must be between 5 and 96")
-        if caption.get("position") not in {None, "above", "below"}:
-            errors.append(f"captions.{role}.position must be above or below")
-    for kind in ("header", "footer"):
-        alignment = spec.get("headers_footers", {}).get(kind, {}).get("alignment")
-        if alignment not in ALIGNMENTS and alignment is not None:
-            errors.append(f"headers_footers.{kind}.alignment is invalid")
-    page_numbers = spec.get("page_numbers", {})
-    if page_numbers.get("location") not in {None, "header", "footer"}:
-        errors.append("page_numbers.location must be header or footer")
-    if page_numbers.get("alignment") not in ALIGNMENTS and page_numbers.get("alignment") is not None:
-        errors.append("page_numbers.alignment is invalid")
-    if page_numbers.get("format") not in {None, "number", "page-number", "page-x-of-y"}:
-        errors.append("page_numbers.format is invalid")
-    if page_numbers.get("start") is not None and int(page_numbers["start"]) < 0:
-        errors.append("page_numbers.start cannot be negative")
-    toc = spec.get("table_of_contents", {})
-    if toc:
-        if "enabled" in toc and not isinstance(toc["enabled"], bool):
-            errors.append("table_of_contents.enabled must be boolean")
-        if toc.get("title") is not None and not isinstance(toc.get("title"), str):
-            errors.append("table_of_contents.title must be text")
-        level = toc.get("max_heading_level", 3)
-        try:
-            level_value = int(level)
-        except (TypeError, ValueError):
-            level_value = 0
-        if not 1 <= level_value <= 9:
-            errors.append("table_of_contents.max_heading_level must be between 1 and 9")
-        if "page_break_after" in toc and not isinstance(toc["page_break_after"], bool):
-            errors.append("table_of_contents.page_break_after must be boolean")
-    numbered = spec.get("lists", {}).get("numbered", {})
-    if numbered:
-        if numbered.get("style") not in {None, *LIST_NUMBERING_STYLES}:
-            errors.append("lists.numbered.style is unsupported")
-        if numbered.get("start") is not None and int(numbered["start"]) < 1:
-            errors.append("lists.numbered.start must be at least 1")
-        for key in ("left_indent_mm", "hanging_indent_mm"):
-            if numbered.get(key) is not None and float(numbered[key]) < 0:
-                errors.append(f"lists.numbered.{key} cannot be negative")
-    structure = spec.get("document_structure")
-    if structure is not None:
-        if not isinstance(structure, dict):
-            errors.append("document_structure must be an object")
-        else:
-            modules = structure.get("ordered_modules", [])
-            if not isinstance(modules, list):
-                errors.append("document_structure.ordered_modules must be a list")
-            else:
-                errors.extend(validate_module_order(modules, strict=bool(structure.get("strict_order", True))))
-    return errors
 
 
 def validate_spec(spec: dict[str, Any]) -> list[str]:
-    """Validate a specification without leaking conversion errors to callers."""
+    from word_format.spec import validate_spec as validate_contract
     try:
-        return _validate_spec(spec)
-    except (TypeError, ValueError, OverflowError):
-        return ["format specification contains invalid value types"]
+        validate_contract(spec)
+        return []
+    except (ValueError, TypeError, OverflowError, AttributeError) as exc:
+        return [str(exc)]
 
 
 def apply_document(
@@ -1775,116 +1563,20 @@ def apply_document(
     *,
     clear_direct: bool = False,
     verification: dict[str, Any] | None = None,
+    overwrite: bool = False,
 ) -> dict[str, Any]:
-    source = Path(input_path).resolve()
-    destination = Path(output_path).resolve()
-    if source == destination:
-        raise ValueError("Output path must differ from input path")
-    if source.suffix.lower() != ".docx":
-        raise ValueError("Application supports DOCX input only")
-    spec = normalize_spec(spec)
-    errors = validate_spec(spec)
-    if errors:
-        raise ValueError("; ".join(errors))
-    document = Document(str(source))
-    changes = apply_page(document, spec.get("page", {}))
-    body = spec.get("body", {})
-    if body:
-        for style in document.styles:
-            if hasattr(style, "_element"):
-                pPr_st = style._element.find(qn("w:pPr"))
-                if pPr_st is not None:
-                    sp_st = pPr_st.find(qn("w:spacing"))
-                    if sp_st is not None:
-                        for attr in ("beforeAutospacing", "afterAutospacing", "beforeLines", "afterLines"):
-                            q = qn(f"w:{attr}")
-                            if q in sp_st.attrib:
-                                del sp_st.attrib[q]
-        for style_name in ("Normal", "Normal (Web)", "正文", "Body Text", "Body Text 2"):
-            if style_name in document.styles:
-                style = document.styles[style_name]
-                set_style_font(style, body)
-                set_paragraph_format(style, body)
-        normal = get_or_create_paragraph_style(document, "Normal")
-        set_style_font(normal, body)
-        set_paragraph_format(normal, body)
-        for paragraph in document.paragraphs:
-            c_style = paragraph.style.name.lower() if paragraph.style else ""
-            pPr = paragraph._p.pPr
-            if pPr is not None:
-                sp_p = pPr.find(qn("w:spacing"))
-                if sp_p is not None:
-                    for attr in ("beforeAutospacing", "afterAutospacing", "beforeLines", "afterLines"):
-                        q = qn(f"w:{attr}")
-                        if q in sp_p.attrib:
-                            del sp_p.attrib[q]
-                if any(norm in c_style for norm in ("normal", "正文", "body", "web")):
-                    ind = pPr.find(qn("w:ind"))
-                    if ind is not None:
-                        if ind.get(qn("w:firstLine")) and not ind.get(qn("w:firstLineChars")):
-                            ind.set(qn("w:firstLineChars"), "200")
-    heading_numbering = None
-    if isinstance(spec.get("lists"), dict) and isinstance(spec.get("lists", {}).get("headings"), dict):
-        heading_numbering = spec["lists"]["headings"]
-    elif spec.get("headings_numbering_format") is not None:
-        heading_numbering = spec.get("headings_numbering_format")
-    changes.extend(normalize_heading_styles(document, heading_numbering, spec.get("headings", [])))
-    for heading in spec.get("headings", []):
-        level = int(heading.get("level", 0))
-        if not 1 <= level <= 9:
-            continue
-        style = get_or_create_paragraph_style(document, f"Heading {level}")
-        set_style_font(style, heading)
-        set_paragraph_format(style, heading)
-        changes.append(f"Updated Heading {level} style")
-    changes.extend(apply_document_module_styles(document, spec.get("document_structure", {})))
-    changes.extend(apply_caption_styles(document, body, spec.get("captions", {})))
-    changes.extend(apply_caption_positions(document, spec.get("captions", {})))
-    changes.extend(apply_numbered_lists(document, spec.get("lists", {})))
-    changes.extend(apply_reference_style(document, body, spec.get("references", {})))
-    changes.extend(apply_citations(document, spec.get("citations", {})))
-    changes.extend(apply_table_of_contents(document, spec.get("table_of_contents", {})))
-    changes.extend(apply_headers_footers(document, spec.get("headers_footers", {})))
-    changes.extend(apply_page_numbers(document, spec.get("page_numbers", {})))
-    cleared = clear_direct_font_formatting(document) if clear_direct else 0
-    if cleared:
-        changes.append(f"Cleared direct font formatting from {cleared} run(s)")
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    document.save(str(destination))
-    from verify_output import validate_visual_report, verify_structure
-
-    structure = verify_structure(destination, spec)
-    verification = verification or {}
-    if not verification.get("visual_enabled"):
-        visual = {"status": "skipped", "reason": "用户未开启视觉验收"}
-    elif verification.get("visual_execution_mode") == "dashboard-direct":
-        visual = {
+    from word_format.api import apply_spec as execute_spec
+    report = execute_spec(
+        input_path, output_path, normalize_spec(spec),
+        clear_direct=clear_direct, verification=verification, overwrite=overwrite,
+    )
+    if verification and verification.get("visual_execution_mode") == "dashboard-direct":
+        report["verification"]["visual"] = {
             "status": "skipped",
-            "reason": "本地下载模式未连接具备图片输入能力的 AI；请使用 AI 交接流程执行视觉验收",
+            "reason": "本地下载模式未连接视觉 AI，请运行显式渲染验收",
         }
-    elif verification.get("visual_model") == "custom" and not str(verification.get("custom_model_id") or "").strip():
-        visual = {"status": "skipped", "reason": "未提供自定义视觉模型 ID"}
-    elif isinstance(verification.get("visual_report"), dict):
-        visual = validate_visual_report(verification["visual_report"])
-        visual.setdefault("reason", "已校验多模态视觉验收报告")
-    else:
-        visual = {
-            "status": "pending",
-            "reason": "等待 AI 渲染所有页面并提交视觉验收报告",
-        }
-    visual["model_selection"] = verification.get("visual_model", "auto")
-    return {
-        "input": str(source),
-        "output": str(destination),
-        "changes": changes,
-        "clear_direct_font_formatting": clear_direct,
-        "verification": {"structure": structure, "visual": visual},
-        "warnings": [
-            "Content and complex package parts were preserved where python-docx supports round-tripping.",
-            "Fields were not evaluated; update them in Microsoft Word before final delivery.",
-            "Render and inspect every output page before delivery.",
-        ],
-    }
+    report["clear_direct_font_formatting"] = clear_direct
+    return report
 
 
 def main() -> int:

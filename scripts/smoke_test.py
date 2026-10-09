@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import hashlib
 import subprocess
@@ -231,13 +232,13 @@ def main() -> int:
         module_target_document.add_heading("参考文献", level=1)
         module_target_document.add_paragraph("[1] A. Author, Example reference, 2026.")
         module_target_document.save(module_target)
-        module_report = apply_document(module_target, Path(temp) / "module-output.docx", module_spec)
-        module_check = next(
-            check for check in module_report["verification"]["structure"]["checks"]
-            if check["name"] == "document-module-structure"
-        )
-        assert module_check["status"] == "failed"
-        assert any("appendix" in error for error in module_report["verification"]["structure"]["errors"])
+        try:
+            apply_document(module_target, Path(temp) / "module-output.docx", module_spec)
+        except ValueError as exc:
+            assert "appendix" in str(exc)
+        else:
+            raise AssertionError("Missing module must prevent publication")
+        assert not (Path(temp) / "module-output.docx").exists()
 
         # Test dual abstract (Chinese + English) document structure and TOC placement
         dual_abstract_source = Path(temp) / "dual-abstract-source.docx"
@@ -468,9 +469,13 @@ def main() -> int:
         no_heading_document.save(no_heading_source)
         no_heading_spec = json.loads(json.dumps(spec))
         no_heading_spec.pop("citations", None)
-        no_heading_report = apply_document(no_heading_source, no_heading_output, no_heading_spec)
-        assert no_heading_report["verification"]["structure"]["status"] == "failed"
-        assert any("no non-empty Heading" in error for error in no_heading_report["verification"]["structure"]["errors"])
+        try:
+            apply_document(no_heading_source, no_heading_output, no_heading_spec)
+        except ValueError as exc:
+            assert "TOC" in str(exc) or "no non-empty Heading" in str(exc)
+        else:
+            raise AssertionError("Empty TOC must prevent publication")
+        assert not no_heading_output.exists()
 
         removal_spec = {
             "headers_footers": {
@@ -492,7 +497,11 @@ def main() -> int:
         assert any("Removed managed page-number" in change for change in removal_report["changes"])
 
         template_cleared = Path(temp) / "template-cleared.docx"
-        template_clear_report = apply_document(output, template_cleared, blank_template_spec)
+        template_clear_spec = copy.deepcopy(blank_template_spec)
+        # This case exercises clearing absent template features, not requiring a
+        # cover-only template's module layout on a chapter/reference document.
+        template_clear_spec.pop("document_structure", None)
+        template_clear_report = apply_document(output, template_cleared, template_clear_spec)
         template_cleared_analysis = analyze_docx(template_cleared)
         assert template_cleared_analysis["document"]["fields"]["types"].get("PAGE", 0) == 0
         assert template_cleared_analysis["document"]["fields"]["types"].get("NUMPAGES", 0) == 0
@@ -733,12 +742,81 @@ def main() -> int:
         )
         assert incomplete_visual["status"] == "failed"
 
+        # Test declaration module detection and heuristic heading safety
+        from document_structure import classify_role, is_heading_candidate
+
+        assert is_heading_candidate("深度学习 计算机视觉 自然语言处理") is False
+        assert classify_role("深度学习 计算机视觉 自然语言处理", "Normal", first=False) == "body"
+        assert classify_role("关键词：深度学习、计算机视觉", "Normal", first=False) == "keywords"
+        assert classify_role("第1章 绪论", "Normal", first=False) == "heading"
+        assert is_heading_candidate("第1章 绪论") is True
+
+        # Test declaration module detection
+        decl_source = Path(temp) / "decl-source.docx"
+        decl_doc = Document()
+        decl_doc.add_paragraph("论文题目", style="Title")
+        decl_doc.add_paragraph("诚信声明")
+        decl_doc.add_paragraph("本人郑重声明所呈交的学位论文是本人独立完成的研究成果。")
+        decl_doc.add_paragraph("摘要")
+        decl_doc.add_paragraph("摘要正文。")
+        decl_doc.add_paragraph("关键词：声明、排版")
+        decl_doc.add_heading("第1章 绪论", level=1)
+        decl_doc.add_paragraph("正文。")
+        decl_doc.add_heading("参考文献", level=1)
+        decl_doc.add_paragraph("[1] Test Ref.")
+        decl_doc.save(decl_source)
+
+        decl_analysis = analyze_docx(decl_source)
+        decl_structure = decl_analysis["inferred_spec"]["document_structure"]
+        assert [item["kind"] for item in decl_structure["ordered_modules"]] == [
+            "cover", "declaration", "abstract", "keywords", "chapters", "references"
+        ]
+        assert decl_structure["order_errors"] == []
+
+        # Test three-line table application
+        table_source = Path(temp) / "table-source.docx"
+        table_output = Path(temp) / "table-output.docx"
+        table_doc = Document()
+        table_doc.add_heading("第1章 绪论", level=1)
+        t = table_doc.add_table(rows=3, cols=3)
+        t.rows[0].cells[0].text = "Header 1"
+        t.rows[0].cells[1].text = "Header 2"
+        t.rows[0].cells[2].text = "Header 3"
+        t.rows[1].cells[0].text = "Data A"
+        t.rows[1].cells[1].text = "Data B"
+        t.rows[1].cells[2].text = "Data C"
+        table_doc.save(table_source)
+
+        tbl_spec = copy.deepcopy(thesis_std)
+        tbl_spec["tables"] = {
+            "three_line_table": True,
+            "repeat_header_row": True,
+            "alignment": "center",
+            "font_size_pt": 10.5,
+            "font_east_asia": "宋体",
+            "font_latin": "Times New Roman",
+        }
+        apply_document(table_source, table_output, tbl_spec, verification={"visual_enabled": False})
+        reopened_table_doc = Document(str(table_output))
+        assert len(reopened_table_doc.tables) == 1
+        out_table = reopened_table_doc.tables[0]
+        out_tblPr = out_table._tbl.tblPr
+        tbl_borders = out_tblPr.find(qn("w:tblBorders"))
+        assert tbl_borders is not None
+        assert tbl_borders.find(qn("w:top")).get(qn("w:sz")) == "12"
+        assert tbl_borders.find(qn("w:bottom")).get(qn("w:sz")) == "12"
+        assert tbl_borders.find(qn("w:insideH")).get(qn("w:val")) == "none"
+        h_tcPr = out_table.rows[0].cells[0]._tc.tcPr
+        assert h_tcPr.find(qn("w:tcBorders")).find(qn("w:bottom")).get(qn("w:sz")) == "6"
+        assert out_table.rows[0]._tr.trPr.find(qn("w:tblHeader")) is not None
+        assert out_tblPr.find(qn("w:jc")).get(qn("w:val")) == "center"
+
         assert presets["template_workflows"] == []
         assert len(presets["presets"]) >= 1
 
     assert_dashboard_api_surface()
 
-    print("DOCX smoke test passed: lists, citations, page size, captions, TOC, references, headers, fields, verification, AI handoff, three-level headings")
+    print("DOCX smoke test passed: lists, citations, page size, captions, TOC, references, headers, fields, verification, AI handoff, three-level headings, declaration module, three-line tables")
     return 0
 
 

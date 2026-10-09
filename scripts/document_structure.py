@@ -14,6 +14,7 @@ from typing import Any, Iterable
 
 MODULE_ORDER = (
     "cover",
+    "declaration",
     "abstract",
     "keywords",
     "toc",
@@ -25,6 +26,10 @@ MODULE_ORDER = (
 )
 
 MODULE_MARKERS = {
+    "declaration": re.compile(
+        r"^\s*(?:(?:诚信|原创性|独创性|学术诚信|郑重)\s*声明|(?:学位论文)?(?:版权使用|使用)?授权书|声明与授权|授权声明)\s*$",
+        re.I,
+    ),
     "abstract": re.compile(r"^\s*(?:摘\s*要|中文摘要|英文摘要|abstracts?)(?:\s*[:：].*)?$", re.I),
     "keywords": re.compile(r"^\s*(?:关\s*键\s*词|key\s*words?)(?:\s*[:：].*)?$", re.I),
     "toc": re.compile(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", re.I),
@@ -53,12 +58,12 @@ def heading_level(text: str, style_name: str = "", outline_level: int | None = N
     match = re.search(r"(?:heading|标题)([1-9])$", normalized)
     if match:
         return int(match.group(1))
-    if _CHAPTER_RE.match(text):
-        return 1
     if _LEVEL3_RE.match(text):
         return 3
     if _LEVEL2_RE.match(text):
         return 2
+    if _CHAPTER_RE.match(text):
+        return 1
     return None
 
 
@@ -80,7 +85,7 @@ def is_heading_candidate(text: str, style_name: str = "") -> bool:
     normalized = normalized_style_name(style_name)
     if normalized.startswith("heading") or normalized.startswith("标题") or normalized in {"title", "subtitle"}:
         return True
-    if len(text) < 80 and not text.rstrip().endswith(("。", "！", "？", "；", ";", ".")):
+    if heading_level(text, style_name) is not None:
         return True
     return False
 
@@ -91,7 +96,7 @@ def classify_role(text: str, style_name: str = "", *, first: bool = False) -> st
         return "title"
     if first:
         return "heading"
-    if "keyword" in normalized or "关键词" in normalized:
+    if "keyword" in normalized or "关键词" in normalized or re.search(r"^\s*(?:关\s*键\s*词|key\s*words?)\s*[:：]", text, re.I):
         return "keywords"
     if normalized.startswith("heading") or normalized.startswith("标题") or is_heading_candidate(text, style_name):
         return "heading"
@@ -155,14 +160,15 @@ def detect_module_spans(paragraphs: Iterable[dict[str, Any]]) -> list[dict[str, 
 
 MODULE_STAGE_RANK = {
     "cover": 0,
-    "abstract": 1,
-    "keywords": 1,
-    "toc": 2,
-    "symbols": 3,
-    "chapters": 4,
-    "references": 5,
-    "acknowledgements": 6,
-    "appendix": 7,
+    "declaration": 1,
+    "abstract": 2,
+    "keywords": 2,
+    "toc": 3,
+    "symbols": 4,
+    "chapters": 5,
+    "references": 6,
+    "acknowledgements": 7,
+    "appendix": 8,
 }
 
 

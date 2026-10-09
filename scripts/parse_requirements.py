@@ -192,8 +192,6 @@ def parse_requirements(text: str) -> dict[str, Any]:
         record("body.font_size_pt", body_size, match.group(0) if match else str(body_size), 0.95 if body_lines else 0.70)
 
     multiple = re.search(r"(\d+(?:[.,]\d+)?)\s*倍(?:行距)?", body_context)
-    if not multiple:
-        multiple = re.search(r"(\d+(?:[.,]\d+)?)\s*倍(?:行距)?", normalized)
     if multiple:
         record(
             "body.line_spacing",
@@ -207,26 +205,22 @@ def parse_requirements(text: str) -> dict[str, Any]:
         record("body.line_spacing", {"kind": "multiple", "value": 1.0}, "单倍行距 / single spacing", 0.99)
     else:
         exact = re.search(r"(?:固定值|exact(?:ly)?)\s*[，,:\s]?\s*(\d+(?:[.,]\d+)?)\s*(?:pt|磅)", body_context, re.I)
-        if not exact:
-            exact = re.search(r"(?:固定值|exact(?:ly)?)\s*[，,:\s]?\s*(\d+(?:[.,]\d+)?)\s*(?:pt|磅)", normalized, re.I)
         if exact:
             record("body.line_spacing", {"kind": "exact", "value_pt": _number(exact.group(1))}, exact.group(0), 0.98)
 
     indent_chars = re.search(
         r"(?:首行缩进|first[- ]?line\s+indent)\s*(\d+(?:[.,]\d+)?)\s*(?:个)?\s*(?:字符|chars?)",
-        normalized,
+        body_context,
         re.I,
     )
     indent_measure = re.search(
         r"(?:首行缩进|first[- ]?line\s+indent)\s*(\d+(?:[.,]\d+)?)\s*(cm|mm|inches?|inch|in|pt|厘米|毫米|英寸|磅)",
-        normalized,
+        body_context,
         re.I,
     )
     if indent_chars:
         amount = _number(indent_chars.group(1))
-        font_size = spec.get("body", {}).get("font_size_pt", 12)
-        value = round(amount * font_size * 25.4 / 72, 3)
-        record("body.first_line_indent_mm", value, indent_chars.group(0), 0.95)
+        record("body.first_line_indent_chars", amount, indent_chars.group(0), 0.95)
     elif indent_measure:
         amount = _number(indent_measure.group(1))
         value = measure_to_mm(amount, indent_measure.group(2))
@@ -279,6 +273,9 @@ def parse_requirements(text: str) -> dict[str, Any]:
             heading["alignment"] = "center"
         elif re.search(r"左对齐|居左|left", line, re.I):
             heading["alignment"] = "left"
+        heading_multiple = re.search(r"(\d+(?:[.,]\d+)?)\s*倍(?:行距)?", line)
+        if heading_multiple:
+            heading["line_spacing"] = {"kind": "multiple", "value": _number(heading_multiple.group(1))}
         heading_results[level] = heading
         consumed.add(" ".join(line.split()))
     spec["headings"] = [heading_results[level] for level in sorted(heading_results)]
@@ -418,8 +415,6 @@ def parse_requirements(text: str) -> dict[str, Any]:
         if hanging:
             value = measure_to_mm(_number(hanging.group(1)), hanging.group(2))
             record("references.hanging_indent_mm", value, hanging.group(0), 0.98)
-        else:
-            record("references.hanging_indent_mm", 7.4, "GB/T 7714 standard hanging indent 7.4mm (2 chars)", 0.85)
         ref_multiple = re.search(r"(\d+(?:[.,]\d+)?)\s*倍(?:行距)?", segment)
         if ref_multiple:
             record("references.line_spacing", {"kind": "multiple", "value": _number(ref_multiple.group(1))}, segment, 0.97)
@@ -429,8 +424,6 @@ def parse_requirements(text: str) -> dict[str, Any]:
             if re.search(alignment_pattern, segment, re.I):
                 record("references.alignment", alignment, segment, 0.94)
                 break
-        if "references.alignment" not in spec.get("references", {}):
-            record("references.alignment", "justify", "default academic justify alignment", 0.85)
         if re.search(r"自动编号|编号项|numbered\s+list", segment, re.I):
             record("references.numbering_mode", "word-numbering", segment, 0.97)
 
@@ -440,24 +433,14 @@ def parse_requirements(text: str) -> dict[str, Any]:
             style = "decimal-fullwidth-parentheses" if "（" in segment or "括号" in segment else "decimal-parentheses"
             record("lists.numbered.style", style, segment, 0.92)
             record("lists.numbered.start", 1, segment, 0.92)
-            record("lists.numbered.left_indent_mm", 8.46, segment, 0.90)
-            record("lists.numbered.hanging_indent_mm", 4.5, segment, 0.90)
             break
         elif re.search(r"[1-9]\.|阿拉伯数字", segment):
             record("lists.numbered.style", "decimal-period", segment, 0.92)
             record("lists.numbered.start", 1, segment, 0.92)
-            record("lists.numbered.left_indent_mm", 8.46, segment, 0.90)
-            record("lists.numbered.hanging_indent_mm", 4.5, segment, 0.90)
             break
         elif re.search(r"[一二三四五]、", segment):
             record("lists.numbered.style", "chinese-period", segment, 0.92)
             record("lists.numbered.start", 1, segment, 0.92)
-            record("lists.numbered.left_indent_mm", 8.46, segment, 0.90)
-            record("lists.numbered.hanging_indent_mm", 4.5, segment, 0.90)
-    if "headings" not in spec.get("lists", {}):
-        record("lists.headings.level1", "chinese", "默认章节多级编号规范（第一章）", 0.90)
-        record("lists.headings.level2", "arabic", "默认节多级编号规范（1.1）", 0.90)
-        record("lists.headings.level3", "arabic", "默认小节多级编号规范（1.1.1）", 0.90)
 
     clauses = [" ".join(part.split()) for part in segments]
     matched_evidence = {item["evidence"] for item in evidence}

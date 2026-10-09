@@ -2,7 +2,7 @@
 
 ## 目标
 
-本文件定义 Word Format Master 的稳定边界。后续升级可以扩展格式能力，但不得绕过 Dashboard 确认、源文件指纹、确定性写入方法、结构复检或视觉验收契约。
+本文件定义 Word Format Master 的稳定边界。网页配置和直接 AI 请求共享同一格式核心。网页模式由人类提交确认；直接模式无需网页。两种模式都遵守源文件指纹、确定性写入和输出复检契约。
 
 ## 处理链
 
@@ -10,9 +10,23 @@
 2. `serve_dashboard.py` 提供本地接口，`dashboard_session.py` 保存目标文件会话。
 3. 用户在 Dashboard 修改规范并确认。
 4. `dashboard_session.py` 生成带源路径、输出路径、SHA-256 和应用方法清单的 Handoff。
-5. `apply_spec.py` 验证 Handoff 后生成新 DOCX。
+5. `apply_spec.py` 验证 Handoff，`spec.py` 将旧规范转换为操作计划，再由共享核心生成新 DOCX。
 6. `analyze_docx.py` 和 `verify_output.py` 重新检查输出。
 7. `render_docx.py` 渲染所有页面并生成哈希清单，AI 视觉报告经 `record_visual_verification()` 校验后完成闭环。
+
+直接模式：人类要求 → `format_cli.py inspect` → AI 生成已登记操作 → `plan` → `apply` → `verify`。明确要求直接执行；含糊的位置或冲突参数返回 `needs_clarification`。不得通过 AI 操作网页伪造确认。
+
+### `scripts/word_format`
+
+- `registry.py`：可执行能力表，每项对应参数校验、唯一 handler、独立 reader、verifier 和测试。
+- `properties.py`：字体和段落原子 XML 属性的唯一写入所有者。
+- `operations.py`：每项操作的命名 handler；复杂结构操作调用已有明确职责的实现。
+- `inspect.py` / `selectors.py`：源文件对象索引和严格位置解析。
+- `spec.py`：旧 Format Spec 展开器与旧网页字段映射，不能新增第二套格式实现。
+- `api.py`：请求、计划指纹、冲突检测、执行和临时文件验收后发布。
+- `verification.py`：指定属性的回读、逐操作变更边界和结构操作保护。
+
+只修改一个局部属性时，不改变共享样式或其他属性。共享样式必须显式指定 style target。字符范围只接受普通文字。编号、目录和引用是独立结构操作。详细契约见 [direct-format-api.md](direct-format-api.md)。
 
 ## 模块责任
 
@@ -26,7 +40,7 @@
 
 ### `apply_spec.py`
 
-只执行确定性写入。每个网页可编辑格式路径必须登记在 `SUPPORTED_APPLICATION_PATHS`。新增路径时必须同时增加规范校验、实际写入、输出断言和 Dashboard 能力覆盖检查。
+保留网页 Handoff 身份检查和复杂结构实现，普通属性写入委托共享核心。`SUPPORTED_APPLICATION_PATHS` 由能力适配器生成，新增能力需登记 handler、参数校验、独立 reader/verifier 与回归测试。
 
 ### `serve_dashboard.py`
 
@@ -62,6 +76,7 @@
 ## 数据契约版本
 
 - Format Spec：`schema_version: 1.0`。
+- Direct Request / Plan / Report：`schema_version: 2.0`。
 - AI Handoff：`schema_version: 1.2`。
 - Render Manifest：`schema_version: 1.0`。
 - Dashboard API：`API_VERSION = 1`。

@@ -41,6 +41,7 @@ REQUIRED = [
     "scripts/libreoffice_render.py",
     "scripts/config.py",
     "scripts/document_structure.py",
+    "scripts/local_ai_analysis.py",
 ]
 
 
@@ -67,15 +68,14 @@ def main() -> int:
         if "TODO" in skill:
             errors.append("SKILL.md contains TODO placeholders")
         required_interaction_rules = (
-            "For every request that will modify a DOCX or DOTX, launch the local Dashboard",
-            "Do not call `apply_spec.py`, copy an official template into an output",
-            "previously confirmed `HANDOFF.json` for the same source document",
-            "Configure interactively (default for any formatting change)",
-            "apply_spec.py` rejects standalone specifications and preset IDs",
+            "call `format_cli.py` without launching a browser",
+            "AI must not click confirmation",
+            "same planner, registry and executor",
+            "Direct requests do not require a handoff",
         )
         for rule in required_interaction_rules:
             if rule not in skill:
-                errors.append(f"SKILL.md is missing mandatory Dashboard interaction rule: {rule}")
+                errors.append(f"SKILL.md is missing two-entrance contract: {rule}")
 
     presets_path = ROOT / "assets" / "presets.json"
     if presets_path.is_file():
@@ -325,7 +325,7 @@ def main() -> int:
                 errors.append(f"apply_spec.py is missing confirmed-handoff guard: {contract}")
         if 'selection.add_argument("--preset-id"' in apply_source or 'selection.add_argument("--spec"' in apply_source:
             errors.append("apply_spec.py must not expose direct preset or standalone-spec application")
-        if '"document_structure": "Apply module-owned styles and validate ordered document modules"' not in apply_source:
+        if "SUPPORTED_APPLICATION_PATHS = legacy_paths()" not in apply_source:
             errors.append("apply_spec.py must register the document module structure application method")
     if session_path.is_file():
         session_source = session_path.read_text(encoding="utf-8")

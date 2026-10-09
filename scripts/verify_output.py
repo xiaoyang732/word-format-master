@@ -22,7 +22,7 @@ def _check(checks: list[dict[str, Any]], name: str, passed: bool, detail: str) -
     checks.append({"name": name, "status": "passed" if passed else "failed", "detail": detail})
 
 
-def verify_structure(path: str | Path, spec: dict[str, Any]) -> dict[str, Any]:
+def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bool = True) -> dict[str, Any]:
     checks: list[dict[str, Any]] = []
     errors: list[str] = []
     try:
@@ -46,9 +46,10 @@ def verify_structure(path: str | Path, spec: dict[str, Any]) -> dict[str, Any]:
         actual_modules = detect_module_spans(target_items)
         expected_kinds = [str(item.get("kind") or item.get("id") or "") for item in requested_structure.get("ordered_modules", [])]
         actual_kinds = [str(item.get("kind") or item.get("id") or "") for item in actual_modules]
+        OPTIONAL_STANDARD_MODULES = {"declaration", "symbols", "acknowledgements", "appendix"}
         required = [kind for kind in expected_kinds if kind != "chapters"]
         missing = [kind for kind in required if kind not in actual_kinds]
-        unexpected = [kind for kind in actual_kinds if kind not in expected_kinds]
+        unexpected = [kind for kind in actual_kinds if kind not in expected_kinds and kind not in OPTIONAL_STANDARD_MODULES]
         order_errors = validate_module_order(actual_modules)
         passed = not missing and not unexpected and not order_errors
         detail = f"expected={expected_kinds}, actual={actual_kinds}, missing={missing}, unexpected={unexpected}, order_errors={order_errors}"
@@ -206,6 +207,8 @@ def verify_structure(path: str | Path, spec: dict[str, Any]) -> dict[str, Any]:
             break_matches = any(
                 paragraph.style and paragraph.style.name == "WFM TOC Break"
                 and any(node.get(qn("w:type")) == "page" for node in paragraph._p.iter(qn("w:br")))
+                and paragraph._p.getprevious() is not None
+                and any(n.text and "TOC " in n.text for n in paragraph._p.getprevious().iter(qn("w:instrText")))
                 for paragraph in document.paragraphs
             )
             break_ok = break_matches if toc.get("page_break_after", True) else not break_matches
@@ -231,6 +234,24 @@ def verify_structure(path: str | Path, spec: dict[str, Any]) -> dict[str, Any]:
             if not passed:
                 errors.append("managed Word TOC content was not removed")
 
+    if check_format:
+        try:
+            from word_format.inspect import DocumentIndex
+            from word_format.spec import spec_request
+            from word_format.registry import REGISTRY
+            from word_format.selectors import resolve_targets
+            index=DocumentIndex(document)
+            for operation in spec_request(index,spec)["operations"]:
+                cap=REGISTRY[operation["action"]]
+                if cap.structural: continue
+                for ref in resolve_targets(index,operation["target"],cap.targets):
+                    actual=cap.reader(index,ref,cap)
+                    passed=cap.verifier(actual,operation["params"],cap)
+                    detail=f"target={ref['id']}, expected={operation['params']!r}, actual={actual!r}"
+                    _check(checks,"format:"+cap.action,passed,detail)
+                    if not passed: errors.append(detail)
+        except (ValueError,TypeError,KeyError) as exc:
+            errors.append("Format verification failed: "+str(exc))
     status = "passed" if not errors else "failed"
     return {"status": status, "checks": checks, "errors": errors}
 

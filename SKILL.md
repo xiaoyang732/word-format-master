@@ -1,6 +1,6 @@
 ---
 name: word-format-master
-description: Analyze, normalize, and apply Word/DOCX formatting from uploaded DOCX or DOTX templates, pasted formatting requirements, or authoritative academic presets. Use when AI needs to inspect a Word template, clean inconsistent formatting, convert requirements into an explicit style specification, open the local Word Format Master dashboard for user-confirmed settings, execute a confirmed dashboard handoff without rewriting content, or audit a DOCX before delivery. Do not use for prose rewriting alone or for legacy DOC files that have not been converted to DOCX.
+description: Inspect and edit Word formatting through deterministic local code, for whole documents, chapters, paragraphs or text ranges. Use direct AI requests or user-configured dashboard handoffs through the same format core. Also analyze DOCX/DOTX templates and audit formatting. Legacy DOC must first be converted to DOCX.
 ---
 
 # Word Format Master
@@ -13,13 +13,27 @@ Set `SKILL_DIR` to the directory containing this file. Use absolute paths for ev
 
 Before running any command shown below, resolve `PYTHON_BIN`. In AI Agent Desktop environments, resolve and set it to the available Python executable. Do not assume the environment variable already exists. Outside that runtime, use an absolute `python` executable only after `& "C:\absolute\path\python.exe" -c "import docx"` succeeds.
 
-## Interaction Gate
+## Choose the Entrance
 
-For every request that will modify a DOCX or DOTX, launch the local Dashboard and wait for the user to click **确认设置并交给 AI** before making any output DOCX. This is mandatory for requests involving presets, page layout, fonts, headings, lists, captions, tables, headers, footers, page numbers, table of contents, references, citations, or visual verification.
+For a direct AI request, inspect the document and call `format_cli.py` without launching a browser. When the source, scope and parameters are clear, execute directly into a new DOCX. Ask only about ambiguous requirements or selectors. Do not add unspecified defaults or apply a full preset to a local edit.
 
-Do not call `apply_spec.py`, copy an official template into an output, or otherwise write a formatted DOCX before Dashboard confirmation. Do not treat a natural-language request, an uploaded template, detected settings, or a selected preset as confirmation.
+For webpage configuration, launch the Dashboard and let the human edit and submit it. AI must not click confirmation, fill controls or fabricate a handoff on the human's behalf. The confirmed handoff uses the same planner, registry and executor as direct requests.
 
-The only exception is a user who explicitly asks to skip the page **and** supplies a previously confirmed `HANDOFF.json` for the same source document. Validate its source path, output path, and SHA-256 fingerprint, then execute that handoff. Never create a new handoff, apply a preset, or infer a new specification for this exception.
+Existing handoffs remain bound to their exact source and output paths and source SHA-256. Direct requests do not require a handoff. Editing code in this project is separate from modifying user documents.
+
+## Direct AI Workflow
+
+Read [references/direct-format-api.md](references/direct-format-api.md) for request contracts and selectors. Use absolute paths:
+
+```powershell
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" capabilities
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" inspect INPUT.docx --output inspect.json
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" plan INPUT.docx OUTPUT.docx --request request.json --output plan.json
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" apply --plan plan.json --report report.json
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" verify --plan plan.json --report report.json
+```
+
+Map the user's intent to registered operations, never generate ad hoc document-editing scripts. Use inspect IDs, exact chapter titles, filtered paragraph ordinals or unique quotes. A plan resolves selectors and detects conflicts before execution; source changes require a new plan. Atomic format edits preserve text, objects and unrelated properties. Heading/reference numbering conversion, citation insertion and TOC generation are separate explicit operations.
 
 ## Select One Route
 
@@ -29,7 +43,8 @@ Choose exactly one route:
 2. **Interpret requirements**: convert pasted formatting instructions into supported tokens with evidence and confidence.
 3. **Execute confirmed handoff**: apply only an existing, user-confirmed `HANDOFF.json` for its matching source DOCX.
 4. **Audit only**: report structural and formatting drift without modifying the source.
-5. **Configure interactively (default for any formatting change)**: preprocess the source document, launch the dashboard, let the user inspect or adjust tokens, then return an executable handoff to AI.
+5. **Configure interactively**: when the user chooses webpage configuration, preprocess the source document, launch the dashboard, let the human inspect or adjust tokens, then execute the handoff.
+6. **Direct formatting**: translate clear instructions to registered operations and execute the direct workflow above.
 
 Do not combine formatting with content rewriting unless the user explicitly requests both.
 
@@ -53,7 +68,7 @@ Inspect Strict and Transitional OOXML, styles, inheritance, direct formatting, n
 Treat an uploaded DOCX/DOTX used as a formatting template as a complete formatting snapshot. Populate every supported Dashboard setting from that template's final effective values, resolving direct formatting, style inheritance, document defaults, and theme fonts. Use explicit `false`/empty values only for genuinely absent features such as headers, footers, page numbers, and table of contents. Never deep-merge a distilled template over a built-in preset or use the preset to fill fields that the uploaded template does not define.
 
 For thesis-style documents, also extract the ordered module contract from the
-body sequence: cover, abstract, keywords, table of contents, symbols, chapters,
+body sequence: cover, declaration, abstract, keywords, table of contents, symbols, chapters,
 references, acknowledgements, and appendix. Each present module carries its
 paragraph anchors and role-specific style tokens; absent modules remain absent.
 The same detector is used during application and structural verification, so a
@@ -81,9 +96,9 @@ Merge values in this order:
 5. Selected built-in preset
 6. Existing document value
 
-Preserve each field's source, confidence, and override reason. 默认使用《标准学位论文/毕业论文规范模板》(GB/T 7713.1、GB/T 7714-2015 标准) 作为排版权威。
+Preserve each field's source, confidence, and override reason. Only apply a preset when the user requests whole-document normalization against that preset. Existing values remain the authority for unrequested properties in local edits.
 
-When formatting 学位论文或毕业设计（论文）, apply the default preset **标准学位论文/毕业论文规范模板** (`thesis-standard`):
+When the user selects **标准学位论文/毕业论文规范模板** (`thesis-standard`) for whole-document normalization, its rules are:
 - **页面边距**：标准 A4 纵向，页边距上 25.4mm、下 25.4mm、左 25.0mm、右 25.0mm，装订线 0mm，页眉/页脚距边界 15.0mm。
 - **正文排版**：中文小四号宋体（12pt），西文小四号 Times New Roman，1.5 倍行距，段前段后 0 磅，首行缩进 2 字符（7.4mm），两端对齐。
 - **标题层级**：一级标题（章）三号（16pt）黑体居中加粗，1.5 倍行距，段前 18 磅、段后 12 磅；二级标题（节）四号（14pt）黑体左对齐加粗，1.5 倍行距，段前 12 磅、段后 6 磅；三级标题（小节）小四号（12pt）黑体左对齐加粗，1.5 倍行距，段前 6 磅、段后 6 磅；各级标题支持独立控制首行缩进。
@@ -105,7 +120,7 @@ When AI already has a DOCX or DOTX, preprocess it before opening the dashboard:
 
 The server binds to `127.0.0.1`, chooses an available port, opens the local page, and preprocesses the source into a session containing document evidence, body paragraph anchors, reference entries, and the source fingerprint. Use `--no-open` for automated checks. The printed URL is the Dashboard URL.
 
-Do this before any formatting write. Report the Dashboard URL to the user and wait for their in-page confirmation; do not apply detected values while the Dashboard is open or after it times out. If the user changes their request while it is open, keep the session open and use their confirmed Dashboard values as the source of truth.
+For the webpage route, report the Dashboard URL and wait for the human's in-page submission. A direct request can instead use the direct workflow. Do not automate the webpage to simulate submission.
 
 At startup, the Dashboard detects Microsoft Word and LibreOffice as local renderers and reports each result in the **验收** panel. The user can select automatic mode, Microsoft Word, or LibreOffice. Automatic mode prefers Word and falls back to LibreOffice; an explicit selection must never be replaced silently. If LibreOffice is unavailable, the panel offers its official download page and an Agent-managed background installation. The managed package is stored under the local `.runtime/` directory, verified by re-detecting `soffice`, and is ignored by Git. Structural formatting and verification remain available even when no renderer is installed.
 
@@ -152,7 +167,7 @@ Expose a value as an editable Dashboard setting only when `scripts/apply_spec.py
 
 ## Apply Formatting
 
-Apply only a confirmed Dashboard handoff. `apply_spec.py` rejects standalone specifications and preset IDs at its command line; it verifies that the handoff belongs to the exact source and output paths before writing:
+For the webpage route, `apply_spec.py` verifies the confirmed handoff's source and output paths before passing the spec to the shared core. For direct requests use `format_cli.py`; it needs no Dashboard session.
 
 ```powershell
 & $PYTHON_BIN "$SKILL_DIR/scripts/apply_spec.py" INPUT.docx OUTPUT.docx `
@@ -162,7 +177,7 @@ Apply only a confirmed Dashboard handoff. `apply_spec.py` rejects standalone spe
 
 Omit `--spec` when no citation placement must be added. When supplied, it may differ from `handoff.spec` only in `citations`; all formatting values remain locked to the user-confirmed handoff. Do not invoke the script with `--spec` alone, `--preset-id`, or a manually reconstructed handoff.
 
-Preserve the source file. Prefer named Word styles, real numbering definitions, explicit section geometry, and explicit table widths. Avoid blanket direct-formatting removal because it can erase intentional emphasis. Enable direct-font cleanup only through the confirmed Dashboard setting, when the user explicitly requests normalization and the baseline render is available.
+Preserve the source file. The legacy direct-font cleanup switch now overrides only requested properties on selected objects; it does not erase unrelated emphasis or table formatting. Local edits write the requested property without changing shared styles unless a style target is explicit.
 
 Never pass an `official-template` workflow to `apply_spec.py`. Download or obtain the current publisher or institution template, analyze it, and use that DOCX/DOTX as the authoring authority. Treat an extracted numeric specification as an audit aid, not a replacement for the template package.
 

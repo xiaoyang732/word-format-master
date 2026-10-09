@@ -55,8 +55,6 @@ The user supplied two practical Word articles as secondary operational reference
 
 Adopt only the Word mechanics. Do not use either article to override publisher, venue, institution, or current GB/T rules. Publisher-specific citation and reference formatting comes from the authoritative template; GB/T bibliographic formatting remains a separate Chinese-paper mode.
 
-Popularity was used only as a broad discovery heuristic. No ranking or exact Star count is recorded because the current environment could not complete a live GitHub search safely.
-
 ## Resulting Architecture
 
 The project combines five proven patterns:
@@ -87,7 +85,3 @@ The project combines five proven patterns:
 - Do not copy or redistribute official publisher templates without permission.
 - Do not flatten fields, comments, tracked changes, equations, controls, or macros merely to simplify implementation.
 - Do not rank projects by an unverified live star count.
-
-## Source Verification Notes
-
-The source list favors official repositories and official standards pages. Several general web, GitHub API, and project documentation requests were blocked by the current browser security policy during this research pass; URLs and established architectural roles are retained, but unverified release details and live popularity metrics are intentionally omitted.
