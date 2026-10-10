@@ -149,6 +149,14 @@ python -m venv .venv
 列出不一致的位置，本次不要修改文件。
 ```
 
+命令行只读检查使用与修改相同的请求文件：
+
+```powershell
+python scripts/format_cli.py audit "论文.docx" --request request.json --output audit.json
+```
+
+报告包含每个目标的期望值、实际有效值和通过/失败计数。有差异时退出码为 2，完整报告仍会保存。只检查请求中指定的属性，不生成新 Word 文件。请求格式见[直接调用指南](references/direct-format-api.md)。
+
 ## 常见问题
 
 **必须通过网页才能修改吗？**
@@ -177,6 +185,8 @@ python -m venv .venv
 - [页眉设置指南](references/header-requirements.md)：分节、动态章节、首页与奇偶页要求。
 - [标准与预设](references/standards-registry.md)：排版依据及学校模板优先级。
 - [直接调用指南](references/direct-format-api.md)：命令行与精确修改请求。
+- [网页交接流程](references/dashboard-workflow.md)：配置页、后台监听和验收回传。
+- [项目审查与升级记录](references/review-2026-10-10.md)：同类方案比较、本轮修复和后续优先级。
 - [格式参数说明](references/format-spec.md)：支持的设置与单位。
 - [安全说明](SECURITY.md) · [项目架构](references/architecture.md)：保护边界与开发实现。
 
@@ -195,7 +205,16 @@ node --check assets/ui/app.js
 git diff --check
 ```
 
-网页回归还需 Node.js、Playwright 和 Microsoft Edge，详见 [网页测试脚本](tests/test_dashboard_ui.cjs)。每项新格式能力应同时提供参数约束、对应修改代码和回读验收。
+网页回归使用独立的 Node.js 开发依赖，测试会自动启动并关闭本地 Dashboard，无需手工提供 URL：
+
+```powershell
+npm ci
+npx playwright install chromium
+npm run check
+npm test
+```
+
+也可通过 `WFM_PYTHON` 指定 Python，通过 `WFM_BROWSER_CHANNEL=msedge` 选择本机 Edge，或向 `npm test -- URL` 传入已有测试服务。CI 单独执行桌面与移动端网页回归。每项新格式能力应同时提供参数约束、对应修改代码和回读验收。
 
 </details>
 

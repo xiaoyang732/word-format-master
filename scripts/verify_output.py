@@ -279,10 +279,9 @@ def validate_visual_report(report: dict[str, Any], page_count: int | None = None
             return {"status": "failed", "errors": ["渲染页数必须是大于 0 的整数"]}
         if not isinstance(pages, list):
             return {"status": "failed", "errors": ["视觉验收报告必须列出已检查页面"]}
-        try:
-            reviewed_pages = sorted({int(item) for item in pages})
-        except (TypeError, ValueError):
+        if any(isinstance(item, bool) or not isinstance(item, int) for item in pages):
             return {"status": "failed", "errors": ["已检查页面必须是页码整数"]}
+        reviewed_pages = sorted(pages)
         if reviewed_pages != list(range(1, page_count + 1)):
             return {"status": "failed", "errors": ["视觉验收报告必须覆盖每个渲染页面"]}
     return {"status": status, "model": model, "reviewed_pages": pages or [], "findings": report.get("findings", [])}

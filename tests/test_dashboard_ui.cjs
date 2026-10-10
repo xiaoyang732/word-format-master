@@ -3,17 +3,40 @@
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { spawn } = require("node:child_process");
 const { chromium } = require(process.env.WFM_NODE_MODULES ? path.join(process.env.WFM_NODE_MODULES, "playwright") : "playwright");
+
+let server;
+async function dashboardUrl() {
+  if (process.argv[2]) return process.argv[2];
+  server = spawn(process.env.WFM_PYTHON || "python", ["-u", path.join(__dirname, "..", "scripts", "serve_dashboard.py"), "--no-open"],
+    { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, PYTHONIOENCODING: "utf-8" } });
+  return new Promise((resolve, reject) => {
+    let output = "";
+    let stderr = "";
+    const timer = setTimeout(() => reject(new Error(`Dashboard startup timed out: ${stderr}`)), 30000);
+    const finish = callback => { clearTimeout(timer); callback(); };
+    server.stderr.on("data", data => { stderr += data.toString(); });
+    server.once("error", error => finish(() => reject(error)));
+    server.once("exit", code => finish(() => reject(new Error(`Dashboard exited (${code}): ${stderr}`))));
+    server.stdout.on("data", data => {
+      output += data.toString();
+      const match = output.match(/Word Format Master: (http:\/\/127\.0\.0\.1:\d+\/)/);
+      if (match) finish(() => resolve(match[1]));
+    });
+  });
+}
 
 (async () => {
   const screenshotDir = path.join(__dirname, "..", ".tmp", "dashboard-ui");
   fs.mkdirSync(screenshotDir, { recursive: true });
-  const browser = await chromium.launch({ headless: true, channel: process.env.WFM_BROWSER_CHANNEL || "msedge" });
+  const url = await dashboardUrl();
+  const browser = await chromium.launch({ headless: true, ...(process.env.WFM_BROWSER_CHANNEL ? { channel: process.env.WFM_BROWSER_CHANNEL } : {}) });
   try {
     const page = await browser.newPage({ viewport: { width: 1440, height: 1000 } });
     const errors = [];
     page.on("pageerror", error => errors.push(error.message));
-    await page.goto(process.argv[2], { waitUntil: "networkidle" });
+    await page.goto(url, { waitUntil: "networkidle" });
     await page.waitForFunction(() => state.presets.length && state.capabilities);
     assert.equal(await page.locator("#bodyFirstLineIndentValueInput").inputValue(), "2");
     await page.evaluate(() => {
@@ -68,4 +91,4 @@ const { chromium } = require(process.env.WFM_NODE_MODULES ? path.join(process.en
     assert.deepEqual(errors, []);
     console.log("Dashboard UI passed: zero indent, precise units, template reselection, section header fields, shared capabilities, desktop/mobile screenshots.");
   } finally { await browser.close(); }
-})().catch(error => { console.error(error); process.exitCode = 1; });
+})().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => { if (server) server.kill(); });

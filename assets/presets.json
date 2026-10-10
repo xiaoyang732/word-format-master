@@ -8,13 +8,13 @@
       "mode": "parameterized",
       "template_required": false,
       "authority": {
-        "level": "institution-standard",
+        "level": "project-preset",
         "sources": [
           "GB/T 7713.1 学位论文编写规则",
           "GB/T 7714-2015 信息与文献 参考文献著录规则",
-          "国家学术学位论文通用规范"
+          "项目维护的通用排版参数；学校或出版方模板优先"
         ],
-        "override_note": "本模板严格依据 GB/T 7713.1、GB/T 7714-2015 与国家学术学位论文通用排版规范设计。"
+        "override_note": "本模板参考 GB/T 7713.1 与 GB/T 7714-2015 的适用主题并采用项目维护的通用排版参数，不代表所有学校要求或逐条国标合规认证；用户锁定字段、学校或出版方模板与显式要求优先。"
       },
       "page": {
         "size": "A4",

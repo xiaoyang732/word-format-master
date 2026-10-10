@@ -14,7 +14,7 @@
 6. `analyze_docx.py` 和 `verify_output.py` 重新检查输出。
 7. `render_docx.py` 渲染所有页面并生成哈希清单，AI 视觉报告经 `record_visual_verification()` 校验后完成闭环。
 
-直接模式：人类要求 → `format_cli.py inspect` → AI 生成已登记操作 → `plan` → `apply` → `verify`。明确要求直接执行；含糊的位置或冲突参数返回 `needs_clarification`。不得通过 AI 操作网页伪造确认。
+直接模式：人类要求 → `format_cli.py inspect` → AI 生成已登记操作 → `plan` → `apply` → `verify`。只读模式使用 `audit`，复用计划解析、能力 reader/verifier 和结构验收，不调用 handler、不保存 DOCX。明确要求直接执行；含糊的位置或冲突参数返回 `needs_clarification`。不得通过 AI 操作网页伪造确认。
 
 ### `scripts/word_format`
 
@@ -54,6 +54,11 @@
 ### `render_docx.py` 与 `verify_output.py`
 
 渲染器只产生页面证据，验收器只验证证据和规则。两者不得静默替换用户明确指定的渲染器。
+
+渲染先读取源字节和 SHA-256，再转换任务临时快照；页面在独立目录中生成，检查源文件没有变化后再发布。新尝试先作废旧 manifest，失败不发布验收清单，成功以原子替换发布完整 manifest。Word 会刷新所有 StoryRanges 中的域和目录页码；源 DOCX 不保存这些计算结果。
+若 DOCX 含相对路径的外部关系，快照目录会改变其解析基准，渲染会显式拒绝此文档；先在源目录中解析或嵌入相关资源再试。
+
+`verify_plan` 必须核对报告中的操作、参数、源目标和检查数量与计划完整对应，然后回读输出属性并重跑结构验收。计划摘要用于误改检测，不能充当签名或身份认证。
 
 ## HTTP 接口契约
 

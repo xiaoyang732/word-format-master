@@ -6,11 +6,12 @@ import copy
 import json
 import os
 import uuid
+from collections import Counter
 from pathlib import Path
 
 from docx import Document
 
-from .contracts import FormatError, MAX_OPERATIONS, SCHEMA_VERSION, json_hash, output_path, require_keys, sha256, source_path
+from .contracts import FormatError, MAX_OPERATIONS, SCHEMA_VERSION, json_hash, output_path, require_keys, sha256, source_path, text_value
 from .inspect import DocumentIndex, inspect_document
 from .registry import REGISTRY, capabilities, equal_value
 from .selectors import resolve_targets
@@ -22,7 +23,8 @@ def build_plan(input_path,output,request,*,_document=None):
     destination=output_path(source,output)
     require_keys(request,{"schema_version","origin","request_text","operations","spec","verification_spec","notes","clear_direct_font_formatting","verification"},label="request")
     if request.get("schema_version",SCHEMA_VERSION)!=SCHEMA_VERSION: raise FormatError("Unsupported request schema_version")
-    if request.get("origin","direct") not in {"direct","dashboard","legacy"}: raise FormatError("origin must be direct, dashboard or legacy")
+    if text_value(request.get("origin","direct"), "origin") not in {"direct","dashboard","legacy"}: raise FormatError("origin must be direct, dashboard or legacy")
+    if "verification" in request and not isinstance(request["verification"], dict): raise FormatError("verification must be an object")
     if "spec" in request and "operations" in request: raise FormatError("Choose operations or legacy spec, not both")
     document=_document or Document(source)
     index=DocumentIndex(document)
@@ -42,6 +44,9 @@ def build_plan(input_path,output,request,*,_document=None):
     resolved=[];conflicts={}; assignments=[]; normalized=[]
     for i,item in enumerate(operations):
         require_keys(item,{"id","action","target","params"},{"action","target","params"},f"operation {i+1}")
+        text_value(item["action"], "action")
+        if not isinstance(item["target"], dict): raise FormatError("target must be an object")
+        text_value(item["target"].get("type"), "target.type")
         cap=REGISTRY.get(item["action"])
         if cap is None: raise FormatError(f"Unknown operation {item['action']!r}","unsupported")
         params=cap.validator(item["params"])
@@ -187,13 +192,82 @@ def apply_plan(plan,*,overwrite=False):
     return result
 
 
+def _validate_report_checks(plan, report):
+    """A successful recheck must cover the entire plan, including no-ops."""
+    if not isinstance(report, dict): raise FormatError("Report must be an object")
+    if report.get("status") not in {"passed", "no_change"}:
+        raise FormatError("Report must be a successful apply result")
+    checks = report.get("checks")
+    if not isinstance(checks, list): raise FormatError("Report checks must be an array covering the complete plan")
+    fields = ("operation_id", "action", "target", "params")
+    expected = Counter(json_hash({"operation_id": item["id"], "action": item["action"],
+                                  "target": ref, "params": item["params"]})
+                       for item in plan["operations"] for ref in item["targets"])
+    shifts_ids = any(item["action"] in {"toc.configure", "heading.numbering.configure",
+                                              "section.break.next_page.insert", "caption.position.configure"}
+                     for item in plan["operations"])
+    actual = Counter()
+    for check in checks:
+        if not isinstance(check, dict) or any(field not in check for field in fields):
+            raise FormatError("Each report check must identify its operation, action, source target and parameters")
+        actual[json_hash({field: check[field] for field in fields})] += 1
+        ref = check.get("output_target")
+        target = check["target"]
+        if not isinstance(ref, dict) or not isinstance(target, dict) or not isinstance(ref.get("id"), str):
+            raise FormatError("Each report check must have a valid output_target")
+        # Structural operations may shift paragraph IDs. All other selector
+        # metadata must still belong to the source-bound resolved target.
+        if {k: v for k, v in ref.items() if k != "id"} != {k: v for k, v in target.items() if k != "id"}:
+            raise FormatError("Report output_target does not match its source target")
+        if not shifts_ids and ref["id"] != target["id"]:
+            raise FormatError("Report retargeted an operation without a structural ID shift")
+    if actual != expected:
+        raise FormatError("Report checks do not cover the complete plan; missing, duplicate or changed checks")
+    return checks
+
+
 def verify_plan(plan,report):
     validate_plan(plan)
+    checks = _validate_report_checks(plan, report)
     if report.get("plan_sha256")!=plan["plan_sha256"]: raise FormatError("Report does not belong to this plan")
     output=Path(plan["output_path"])
     if not output.is_file() or sha256(output)!=report.get("output_sha256"): raise FormatError("Output changed after execution")
-    result=_format_verification(Document(output),report.get("checks",[]))
-    return {"schema_version":SCHEMA_VERSION,"status":result["status"],"format":result,"output":str(output)}
+    result=_format_verification(Document(output),checks)
+    from verify_output import verify_structure
+    structure = verify_structure(output, plan["request"].get("verification_spec", {}), check_format=False)
+    status = "passed" if result["status"] == structure["status"] == "passed" else "failed"
+    return {"schema_version":SCHEMA_VERSION,"status":status,"format":result,"structure":structure,"output":str(output)}
+
+
+def audit_document(input_path, request):
+    """Read requested effective values using the same selectors and verifiers."""
+    source = source_path(input_path)
+    source_hash = sha256(source)
+    document = Document(source)
+    # Planning resolves/validates the request but performs no writes. This
+    # internal destination is never created or exposed as an audit output.
+    plan = build_plan(source, source.with_name(f".{source.stem}.audit-only.docx"), request, _document=document)
+    index = DocumentIndex(document)
+    checks = []
+    for item in plan["operations"]:
+        cap = REGISTRY[item["action"]]
+        for ref in item["targets"]:
+            actual = _read(cap, index, ref)
+            passed = cap.verifier(actual, item["params"], cap)
+            record = index.records.get(ref["id"], {})
+            checks.append({"operation_id": item["id"], "action": item["action"], "target": ref,
+                           "text": record.get("text", ""), "expected": item["params"], "actual": actual,
+                           "status": "passed" if passed else "failed"})
+    from verify_output import verify_structure
+    structure = verify_structure(source, plan["request"].get("verification_spec", {}), check_format=False)
+    if sha256(source) != source_hash: raise FormatError("Source changed during audit; inspect and audit again")
+    failed = sum(check["status"] == "failed" for check in checks)
+    status = "failed" if failed or structure["status"] == "failed" else "passed" if checks else "no_change"
+    return {"schema_version": SCHEMA_VERSION, "kind": "word-format-audit", "status": status,
+            "source": {"path": str(source), "sha256": source_hash}, "checks": checks,
+            "summary": {"checked": len(checks), "passed": len(checks) - failed, "failed": failed},
+            "structure": structure, "visual": {"status": "skipped", "reason": "Read-only audit does not render pages"},
+            "warnings": ["Only explicitly requested properties are checked; structural agreement does not prove pagination."]}
 
 
 def apply_spec(input_path,output,spec,*,clear_direct=False,verification=None,overwrite=False,origin="legacy"):

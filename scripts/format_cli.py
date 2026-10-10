@@ -8,7 +8,7 @@ import json
 import sys
 from pathlib import Path
 
-from word_format import apply_plan, build_plan, capabilities, inspect_document, verify_plan
+from word_format import apply_plan, audit_document, build_plan, capabilities, inspect_document, verify_plan
 from word_format.contracts import FormatError
 
 
@@ -23,6 +23,7 @@ def main():
     commands=parser.add_subparsers(dest="command",required=True)
     p=commands.add_parser("capabilities");p.add_argument("--output")
     p=commands.add_parser("inspect");p.add_argument("input");p.add_argument("--output")
+    p=commands.add_parser("audit");p.add_argument("input");p.add_argument("--request",required=True);p.add_argument("--output")
     p=commands.add_parser("plan");p.add_argument("input");p.add_argument("destination");p.add_argument("--request",required=True);p.add_argument("--output")
     p=commands.add_parser("apply");p.add_argument("--plan",required=True);p.add_argument("--report");p.add_argument("--overwrite",action="store_true")
     p=commands.add_parser("verify");p.add_argument("--plan",required=True);p.add_argument("--report",required=True);p.add_argument("--output")
@@ -40,6 +41,7 @@ def main():
                 raise FormatError("JSON output must not overwrite document, request, plan or verification input")
         if args.command=="capabilities": result=capabilities()
         elif args.command=="inspect": result=inspect_document(args.input)
+        elif args.command=="audit": result=audit_document(args.input,read_json(args.request))
         elif args.command=="plan": result=build_plan(args.input,args.destination,read_json(args.request))
         elif args.command=="apply": result=apply_plan(read_json(args.plan),overwrite=args.overwrite)
         else: result=verify_plan(read_json(args.plan),read_json(args.report))

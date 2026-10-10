@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import io
 import hashlib
 import json
 import os
@@ -12,8 +13,11 @@ import socket
 import subprocess
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+from xml.etree import ElementTree
 
 from config import DEFAULT_RUNTIME_ROOT, RENDER_METHODS, SKILL_DIR
 from runtime_detection import detect_pdf_rasterizer, detect_renderers
@@ -37,6 +41,28 @@ def _nonempty(path: Path) -> bool:
     return path.is_file() and path.stat().st_size > 0
 
 
+def _relative_external_links(data: bytes) -> list[str]:
+    """Links resolved beside a DOCX would break when the source is staged."""
+    links = []
+    try:
+        with zipfile.ZipFile(io.BytesIO(data)) as package:
+            for part in package.infolist():
+                if not part.filename.endswith(".rels"):
+                    continue
+                if part.file_size > 4 * 1024 * 1024:
+                    raise ValueError("DOCX relationship part is too large to inspect")
+                root = ElementTree.fromstring(package.read(part))
+                for relation in root:
+                    if relation.get("TargetMode") != "External":
+                        continue
+                    target = relation.get("Target", "")
+                    if not urlparse(target).scheme and not target.startswith(("/", "\\", "#")):
+                        links.append(f"{part.filename}: {target}")
+    except (zipfile.BadZipFile, ElementTree.ParseError) as exc:
+        raise ValueError(f"DOCX relationships cannot be inspected: {exc}") from exc
+    return links
+
+
 def _word_to_pdf(source: Path, output_pdf: Path) -> None:
     shell = shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
     if not shell:
@@ -45,12 +71,22 @@ def _word_to_pdf(source: Path, output_pdf: Path) -> None:
 param([string]$InputPath, [string]$OutputPath)
 $word = $null
 $document = $null
+$ErrorActionPreference = 'Stop'
 try {
   $word = New-Object -ComObject Word.Application
   $word.Visible = $false
   $word.DisplayAlerts = 0
   $document = $word.Documents.Open($InputPath, $false, $true)
-  foreach ($field in $document.Fields) { try { $null = $field.Update() } catch {} }
+  foreach ($toc in $document.TablesOfContents) { $null = $toc.Update() }
+  foreach ($rootStory in $document.StoryRanges) {
+    $story = $rootStory
+    while ($null -ne $story) {
+      $null = $story.Fields.Update()
+      $story = $story.NextStoryRange
+    }
+  }
+  $document.Repaginate()
+  foreach ($toc in $document.TablesOfContents) { $null = $toc.UpdatePageNumbers() }
   $document.ExportAsFixedFormat($OutputPath, 17)
 } finally {
   if ($document -ne $null) { $document.Close(0) }
@@ -239,54 +275,76 @@ def render_document(
     input_path = Path(source).resolve()
     if not input_path.is_file() or input_path.suffix.lower() not in {".docx", ".dotx"}:
         raise ValueError("渲染输入必须是现有的 DOCX 或 DOTX 文件")
+    if isinstance(dpi, bool) or not isinstance(dpi, int) or not 72 <= dpi <= 300:
+        raise ValueError("dpi 必须在 72 到 300 之间")
     target = Path(output_dir).resolve()
     target.mkdir(parents=True, exist_ok=True)
+    manifest_path = target / "render-manifest.json"
+    # An unsuccessful new attempt must not leave an old acceptance marker.
+    manifest_path.unlink(missing_ok=True)
+    source_bytes = input_path.read_bytes()
+    source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    relative_links = _relative_external_links(source_bytes)
+    if relative_links:
+        raise ValueError("DOCX contains relative external links that would resolve differently from a render snapshot: " + "; ".join(relative_links[:5]))
     runtime = detect_renderers(runtime_root)
     selected, entry = resolve_renderer(runtime, method)
     candidates = [(selected, entry)]
     if method == "auto" and selected == "word" and runtime.get("libreoffice", {}).get("available"):
         candidates.append(("libreoffice", runtime["libreoffice"]))
-    temporary_pdf = target / f".{input_path.stem}.rendering.pdf"
     final_pdf = target / f"{input_path.stem}.pdf"
-    if temporary_pdf.exists():
-        temporary_pdf.unlink()
-    try:
+    # Convert an immutable task-local copy and rasterize into a staging folder.
+    # Failed renders leave previous page images untouched and publish no manifest.
+    with tempfile.TemporaryDirectory(prefix=".word-format-render-", dir=target) as staging:
+        stage = Path(staging)
+        snapshot = stage / input_path.name
+        snapshot.write_bytes(source_bytes)
+        temporary_pdf = stage / "rendering.pdf"
         failures = []
         for candidate_method, candidate_entry in candidates:
             temporary_pdf.unlink(missing_ok=True)
             try:
                 if candidate_method == "word":
-                    _word_to_pdf(input_path, temporary_pdf)
+                    _word_to_pdf(snapshot, temporary_pdf)
                 else:
-                    _libreoffice_to_pdf(input_path, temporary_pdf, Path(candidate_entry["path"]))
+                    _libreoffice_to_pdf(snapshot, temporary_pdf, Path(candidate_entry["path"]))
                 selected, entry = candidate_method, candidate_entry
                 break
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                 failures.append(f"{candidate_entry.get('name') or candidate_method}: {exc}")
         else:
             raise RuntimeError("；".join(failures))
-        pages = _pdf_to_pngs(temporary_pdf, target, dpi)
+        staged_pages = _pdf_to_pngs(temporary_pdf, stage, dpi)
+        if hashlib.sha256(input_path.read_bytes()).hexdigest() != source_sha256:
+            raise RuntimeError("渲染期间源文件发生变化，请重新渲染；未发布验收清单")
+        pages = [target / page.name for page in staged_pages]
         page_manifest = {
             "schema_version": "1.0",
             "source": str(input_path),
-            "source_sha256": hashlib.sha256(input_path.read_bytes()).hexdigest(),
+            "source_sha256": source_sha256,
             "selected_method": selected,
             "page_count": len(pages),
             "pages": [
                 {
                     "number": index,
-                    "path": str(page),
+                    "path": str(target / page.name),
                     "sha256": hashlib.sha256(page.read_bytes()).hexdigest(),
                 }
-                for index, page in enumerate(pages, start=1)
+                for index, page in enumerate(staged_pages, start=1)
             ],
         }
-        manifest_path = target / "render-manifest.json"
-        manifest_path.write_text(json.dumps(page_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        for staged_page, page in zip(staged_pages, pages):
+            os.replace(staged_page, page)
+        for stale in target.glob("page-*.png"):
+            if stale.stem[5:].isdigit() and stale not in pages:
+                stale.unlink()
         if emit_pdf:
-            shutil.copy2(temporary_pdf, final_pdf)
-    finally:
-        temporary_pdf.unlink(missing_ok=True)
+            os.replace(temporary_pdf, final_pdf)
+        if hashlib.sha256(input_path.read_bytes()).hexdigest() != source_sha256:
+            raise RuntimeError("发布渲染证据期间源文件发生变化，请重新渲染；未发布验收清单")
+        staged_manifest = stage / "render-manifest.json"
+        staged_manifest.write_text(json.dumps(page_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        os.replace(staged_manifest, manifest_path)
     return {
         "status": "rendered",
         "requested_method": method,

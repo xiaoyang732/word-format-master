@@ -46,6 +46,18 @@ Use this matrix when extending the implementation. It records which ideas are ad
 | [OpenTBS](https://github.com/Skrol29/opentbs) | ZIP/XML templating | Make narrow package-level edits without rebuilding the whole document | Use direct OOXML only for evidence or unsupported constructs; keep high-level edits in `python-docx` |
 | [UniOffice](https://github.com/unidoc/unioffice) | Typed OOXML API | Strongly typed Word generation and manipulation | Reference for future service implementations; avoid adding a second runtime to the MVP |
 
+## Thesis Skill Comparison (2026-10-10)
+
+Reviewed the named upstream repositories and two related projects at their then-current `main` snapshots. This matrix records ideas, not copied implementations; details and review findings are in [review-2026-10-10.md](review-2026-10-10.md).
+
+| Project | Useful evidence | Adopted now | Boundary |
+|---|---|---|---|
+| [the-shy123456/thesis-docx](https://github.com/the-shy123456/thesis-docx) | `failure-patterns-and-quality-gates.md` checks effective styles, hidden indentation and field drift; Word PDF helper refreshes story fields | Clarify quality gates; refresh fields across Word story ranges before PDF export | A rendered WPS page is not proof of Microsoft Word or university-template parity |
+| [WEN-JY/academic-research-skills](https://github.com/WEN-JY/academic-research-skills) | `docx-thesis-format` separates explicit institutional JSON rules from check/fix scripts, including allowed margin profiles | Add read-only audit to the existing planner/reader rather than copy one school's numeric profile | Zhejiang University values are not universal thesis requirements |
+| [Jonnys-Li/software-thesis-docx-skill](https://github.com/Jonnys-Li/software-thesis-docx-skill) | Manifest owns source order, figures and formatting mode; template extractor captures semantic roles | Keep template precedence, isolate dashboard workflow from the skill entrypoint | Repo-to-thesis content generation is a different route from formatting an existing DOCX |
+| [zxyasfas/paper_format_agent](https://github.com/zxyasfas/paper_format_agent) | Content fingerprint and synthetic text-survival benchmark report explicit coverage gaps | Strengthen report completeness and render-source fingerprinting; retain per-operation package-preservation checks | A body-text fingerprint alone cannot prove preservation of fields, footnotes or drawings |
+| [zouchenzhen/docx-template-translator-skill](https://github.com/zouchenzhen/docx-template-translator-skill) | Separates Pandoc content conversion, template adaptation and Word finalization | Document a possible future conversion route distinct from deterministic formatting | Template-specific generated Python should not bypass this project's registered operation boundary |
+
 ## Word Field and Reference Notes
 
 The user supplied two practical Word articles as secondary operational references:

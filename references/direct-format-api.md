@@ -11,12 +11,17 @@
 ```powershell
 python scripts/format_cli.py capabilities --output capabilities.json
 python scripts/format_cli.py inspect source.docx --output inspect.json
+python scripts/format_cli.py audit source.docx --request request.json --output audit.json
 python scripts/format_cli.py plan source.docx result.docx --request request.json --output plan.json
 python scripts/format_cli.py apply --plan plan.json --report report.json
 python scripts/format_cli.py verify --plan plan.json --report report.json
 ```
 
 命令失败退出码为 2，并返回 `failed`、`unsupported` 或 `needs_clarification`。已有输出默认拒绝覆盖；只有显式传入 `--overwrite` 才可替换输出。源文件和它的硬链接始终不能作为输出。JSON 路径也不得覆盖源文档、输出文档、请求或计划。
+
+`audit` 接受与 `plan` 相同的 `operations` 或 `spec` 请求，使用同一位置解析器和独立回读器检查文档，不调用写入 handler、不保存 DOCX、不创建输出文档。报告逐项列出对象 ID、文字、期望值、实际有效值和状态，`summary` 汇总通过/失败项。存在偏差时仍可写出完整 JSON 报告，退出码为 2；通过为 0。未选中可执行检查时为 `no_change`。只检查请求覆盖的属性，视觉状态为 `skipped`；这不等于完整论文合规审查。
+
+`verify` 要求报告中的每一项操作/目标与计划完整对应，包含执行时无需改动的项目。缺失、重复、截短或参数变更的检查列表会被拒绝。目录等结构操作可导致输出对象 ID 位移，报告保留源目标和最终输出目标；有效完整报告可以重新排序检查项。独立复检也重新执行结构验收。
 
 ## 请求示例
 

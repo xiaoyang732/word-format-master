@@ -1,0 +1,11 @@
+{
+  "name": "word-format-master-ui-tests",
+  "private": true,
+  "scripts": {
+    "test": "node tests/test_dashboard_ui.cjs",
+    "check": "node --check assets/ui/app.js"
+  },
+  "devDependencies": {
+    "playwright": "1.64.0"
+  }
+}
