@@ -43,6 +43,9 @@
         "first_line_indent_chars": 2,
         "widow_control": true
       },
+      "title": {
+        "color": "000000"
+      },
       "lists": {
         "headings": {
           "level1": "chinese",
@@ -59,6 +62,7 @@
       "headings": [
         {
           "level": 1,
+          "color": "000000",
           "font_latin": "Times New Roman",
           "font_east_asia": "黑体",
           "font_size_pt": 16,
@@ -75,6 +79,7 @@
         },
         {
           "level": 2,
+          "color": "000000",
           "font_latin": "Times New Roman",
           "font_east_asia": "黑体",
           "font_size_pt": 14,
@@ -91,6 +96,7 @@
         },
         {
           "level": 3,
+          "color": "000000",
           "font_latin": "Times New Roman",
           "font_east_asia": "黑体",
           "font_size_pt": 12,

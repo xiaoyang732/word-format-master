@@ -22,6 +22,13 @@ styles. Use paragraph/page/section break properties deliberately. Blank cover
 paragraphs and page-break runs are legitimate content; do not remove them merely
 to make preservation checks pass.
 
+The `thesis-standard` preset explicitly makes Title/Subtitle and Heading 1–3
+text black. Do not rely on the Office template defaults: Heading styles often
+inherit accent blue, while Title can use a dark theme color. A black cached RGB
+does not override an active theme color. Validate effective color after formatting,
+including direct run overrides. Preserve a school template's explicit color when
+that template is the chosen authority instead of imposing the generic preset.
+
 Chapter introductions such as “第二章：相关理论。介绍技术基础。” are body prose.
 Do not rewrite them to evade a classifier. The shared heading detector honors
 explicit heading styles and conservatively infers short numbered titles from

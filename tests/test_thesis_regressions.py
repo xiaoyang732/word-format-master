@@ -1,6 +1,8 @@
 """Regressions from the thesis generation trial (fixtures only, no user files)."""
 
 from pathlib import Path
+import copy
+import json
 import sys
 import tempfile
 import unittest
@@ -9,13 +11,13 @@ from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
-from docx.shared import Pt
+from docx.shared import Pt, RGBColor
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from document_structure import heading_level
 from word_format import apply_plan, build_plan, verify_plan
-from word_format.properties import read_paragraph
+from word_format.properties import read_font, read_paragraph
 
 
 class ThesisRegressionTests(unittest.TestCase):
@@ -25,6 +27,67 @@ class ThesisRegressionTests(unittest.TestCase):
         self.folder = Path(self.temp.name)
         self.source = self.folder / "source.docx"
         self.output = self.folder / "output.docx"
+
+    def test_thesis_preset_black_overrides_theme_and_direct_heading_colors(self):
+        doc = Document()
+        title = doc.add_paragraph("测试论文标题", style="Title")
+        doc.add_paragraph("Test subtitle", style="Subtitle")
+        doc.add_paragraph("摘要")
+        doc.add_paragraph("摘要正文。")
+        for level, text in ((1, "第一章 绪论"), (2, "1.1 技术基础"), (3, "1.1.1 研究范围")):
+            p = doc.add_paragraph(text, style=f"Heading {level}")
+            node = OxmlElement("w:color")
+            # Cached RGB is black, but the theme actually renders accent blue.
+            node.set(qn("w:val"), "000000")
+            node.set(qn("w:themeColor"), "accent1")
+            node.set(qn("w:themeShade"), "BF")
+            node.set(qn("w:themeTint"), "F0")
+            p.runs[0]._r.get_or_add_rPr().append(node)
+        title.runs[0].font.color.rgb = RGBColor.from_string("4F81BD")
+        doc.add_paragraph("正文内容。")
+        doc.add_paragraph("参考文献", style="Heading 1")
+        doc.add_paragraph("[1] 测试条目。")
+        doc.save(self.source)
+        self.assertNotEqual(read_font(doc, doc.paragraphs[4]._p, doc.paragraphs[4].runs[0]._r, "color"), "000000")
+        spec = json.loads((ROOT / "assets/presets.json").read_text(encoding="utf-8"))["presets"][0]
+        plan = build_plan(self.source, self.output, {"spec": spec})
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["status"], "passed")
+        out = Document(self.output)
+        for name in ("Title", "Subtitle", "Heading 1", "Heading 2", "Heading 3"):
+            node = out.styles[name].element.find("./" + qn("w:rPr") + "/" + qn("w:color"))
+            self.assertEqual(dict(node.attrib), {qn("w:val"): "000000"})
+        for p in out.paragraphs:
+            if p.style.name in {"Title", "Subtitle", "Heading 1", "Heading 2", "Heading 3"} or p.text == "摘要":
+                for r in p.runs:
+                    if r.text:
+                        self.assertEqual(read_font(out, p._p, r._r, "color"), "000000")
+                        node = r._r.find("./" + qn("w:rPr") + "/" + qn("w:color"))
+                        if node is not None:
+                            self.assertEqual(dict(node.attrib), {qn("w:val"): "000000"})
+
+    def test_explicit_title_color_and_partial_specs_preserve_authority(self):
+        doc = Document()
+        doc.add_paragraph("模板标题", style="Title")
+        doc.add_paragraph("第一章 绪论", style="Heading 1")
+        doc.add_paragraph("正文")
+        original_colors = [copy.deepcopy(doc.styles[name].element.find("./" + qn("w:rPr") + "/" + qn("w:color")))
+                           for name in ("Title", "Heading 1")]
+        doc.save(self.source)
+        plan = build_plan(self.source, self.output, {"spec": {"headings": [{"level": 1, "font_size_pt": 16}]}})
+        apply_plan(plan)
+        out = Document(self.output)
+        for name, original in zip(("Title", "Heading 1"), original_colors):
+            actual = out.styles[name].element.find("./" + qn("w:rPr") + "/" + qn("w:color"))
+            self.assertEqual(dict(actual.attrib), dict(original.attrib))
+        self.output = self.folder / "explicit-color.docx"
+        plan = build_plan(self.source, self.output, {"spec": {"title": {"color": "112233"},
+            "headings": [{"level": 1, "color": "AA3300"}]}})
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["status"], "passed")
+        out = Document(self.output)
+        self.assertEqual(read_font(out, out.paragraphs[0]._p, out.paragraphs[0].runs[0]._r, "color"), "112233")
+        self.assertEqual(read_font(out, out.paragraphs[1]._p, out.paragraphs[1].runs[0]._r, "color"), "AA3300")
 
     def test_chapter_descriptions_stay_body_through_numbering_and_toc(self):
         doc = Document()

@@ -166,10 +166,11 @@ def validate_section(section,data):
 
 
 def validate_spec(spec):
-    require_keys(spec,{"schema_version","id","name","mode","template_required","page","body","headings","lists","captions","tables",
+    require_keys(spec,{"schema_version","id","name","mode","template_required","page","body","title","headings","lists","captions","tables",
                        "headers_footers","page_numbers","table_of_contents","references","document_structure","citations","authority","notes","unsupported","ai_analysis_summary","headings_numbering_format"},label="spec")
     if spec.get("schema_version","1.0")!="1.0": raise FormatError("Unsupported legacy spec version")
     if spec.get("template_required"): raise FormatError("Official templates require their publisher workflow", "unsupported")
+    if "title" in spec: validate_tokens(spec["title"])
     for section in ("page","body","headers_footers","page_numbers","table_of_contents","references","citations"):
         if section in spec: validate_section(section,spec[section])
     headings=spec.get("headings",[])
@@ -244,9 +245,17 @@ def spec_request(index,spec,clear_direct=False):
         style_name=None
         if role=="body" or (role=="module_body" and r.get("module") in {"abstract","appendix","acknowledgements"}):
             tokens=spec.get("body",{})
+        elif role=="title":
+            tokens=spec.get("title",{})
         elif role=="heading":
             tokens=next((h for h in spec.get("headings",[]) if h["level"]==r.get("heading_level")),{})
             if tokens: style_name=f"Heading {tokens['level']}"
+            elif r.get("heading_level") is None:
+                # Module titles (abstract/references/etc.) may be plain text
+                # before numbering normalization. Apply the requested H1 color
+                # only; do not invent their other formatting or heading level.
+                first=next((h for h in spec.get("headings",[]) if h["level"]==1),{})
+                if "color" in first: tokens={"color":first["color"]}
         elif role=="reference":
             tokens=spec.get("references",{});style_name="Bibliography" if tokens else None
         elif role=="caption":
@@ -266,7 +275,7 @@ def spec_request(index,spec,clear_direct=False):
         for action,params in token_operations(tokens): add(action,[oid],params)
     # Global named styles mirror the explicit global rules; direct target writes
     # above ensure that existing overrides cannot hide the requested format.
-    for name,tokens in [("Normal",spec.get("body",{}))]+[(f"Heading {h['level']}",h) for h in spec.get("headings",[])]+[("Bibliography",spec.get("references",{}))]:
+    for name,tokens in [("Normal",spec.get("body",{})),("Title",spec.get("title",{})),("Subtitle",spec.get("title",{}))]+[(f"Heading {h['level']}",h) for h in spec.get("headings",[])]+[("Bibliography",spec.get("references",{}))]:
         for action,params in token_operations(tokens): add(action,["style:"+name],params)
     page=spec.get("page",{})
     dims={"A4":(210,297),"Letter":(215.9,279.4)}.get(page.get("size"))
@@ -353,7 +362,7 @@ def spec_request(index,spec,clear_direct=False):
 # Generated from executable actions, not a second independent supported-fields list.
 def legacy_paths():
     paths={}
-    for prefix in ("body","headings.*","references","captions.figure","captions.table","headers_footers.header","headers_footers.footer","page_numbers"):
+    for prefix in ("body","title","headings.*","references","captions.figure","captions.table","headers_footers.header","headers_footers.footer","page_numbers"):
         for key,action in (FONT|PARA).items(): paths[f"{prefix}.{key}"]=action
         for name in INDENTS:
             for unit in ("mm","chars"): paths[f"{prefix}.{name}_{unit}"]="paragraph."+name+".set"

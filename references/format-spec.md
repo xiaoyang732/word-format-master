@@ -29,6 +29,7 @@ The MVP dashboard edits plain values and keeps provenance in its analysis panel.
   "template_required": false,
   "page": {},
   "body": {},
+  "title": {},
   "lists": {},
   "headings": [],
   "captions": {},
@@ -54,6 +55,15 @@ An analyzed publisher template may produce an inferred format specification for 
 An official workflow may expose local copies supplied by the user under `local_templates`. Record the exact SHA-256 and treat them as local personal assets; the current publisher instructions still decide which variant is valid. Prefer an explicit path relative to `assets/templates`; filename-only entries are accepted only when exactly one file matches.
 
 ## Supported MVP Tokens
+
+`title` optionally applies the same font/paragraph tokens as `body` to paragraphs
+with Title/Subtitle styles and their named styles. Absent tokens preserve existing
+values. `thesis-standard` explicitly sets `title.color` and H1–H3 `color` to
+`000000`; other templates and partial requests do not inherit that default.
+Non-numbered module headings without an explicit Heading level receive only the
+requested H1 color. Explicit module-role overrides remain usable when no global
+color is requested. The color writer removes `themeColor`, `themeTint` and
+`themeShade`; the reader resolves the active theme rather than trusting cached RGB.
 
 ### Document Structure
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import copy
+import colorsys
 from typing import Any
+from xml.etree import ElementTree
 
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -130,6 +132,36 @@ def _attr(sources, tag, attr="val"):
     return None
 
 
+def resolved_color(document, node):
+    """Theme color overrides the cached RGB value in the same OOXML layer."""
+    theme = node.get(qn("w:themeColor"))
+    if not theme or theme == "none":
+        value = node.get(qn("w:val"), "auto")
+        return value.upper() if value != "auto" else "auto"
+    aliases = {"dark1": "dk1", "light1": "lt1", "dark2": "dk2", "light2": "lt2",
+               "text1": "dk1", "background1": "lt1", "text2": "dk2", "background2": "lt2",
+               "hyperlink": "hlink", "followedHyperlink": "folHlink"}
+    try:
+        part = next(p for p in document.part.package.parts if str(p.partname) == "/word/theme/theme1.xml")
+        ns = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
+        scheme = ElementTree.fromstring(part.blob).find("a:themeElements/a:clrScheme", ns)
+        slot = scheme.find("a:" + aliases.get(theme, theme), ns) if scheme is not None else None
+        color = slot[0] if slot is not None and len(slot) else None
+        rgb = (color.get("val") if color.tag.endswith("}srgbClr") else color.get("lastClr")) if color is not None else None
+        if rgb is None or len(rgb) != 6: raise ValueError("Unresolved theme color")
+        channels = [int(rgb[i:i+2], 16) / 255 for i in (0, 2, 4)]
+        hue, luminance, saturation = colorsys.rgb_to_hls(*channels)
+        shade = node.get(qn("w:themeShade"))
+        tint = node.get(qn("w:themeTint"))
+        if shade is not None: luminance *= int(shade, 16) / 255
+        if tint is not None: luminance = 1 - (1 - luminance) * int(tint, 16) / 255
+        return "".join(f"{int(round(max(0, min(1, c)) * 255)):02X}" for c in colorsys.hls_to_rgb(hue, luminance, saturation))
+    except (StopIteration, ElementTree.ParseError, ValueError):
+        # Never accept a cached black value when an unresolved theme may render
+        # blue. A concrete color request must execute and remove the theme.
+        return "theme:" + theme
+
+
 def read_font(document, paragraph, run, name):
     sources = list(rpr_sources(document, paragraph, run))
     if name in {"font_east_asia", "font_latin"}:
@@ -171,7 +203,10 @@ def read_font(document, paragraph, run, name):
             if node is not None and node.get(qn("w:val"), "1") not in {"0", "false", "off"}:
                 state = not state
         return state
-    return _attr(sources, "color") or "auto"
+    for pr in sources:
+        node = pr.find(qn("w:color")) if pr is not None else None
+        if node is not None: return resolved_color(document, node)
+    return "auto"
 
 
 def write_font(pr, name, value):
