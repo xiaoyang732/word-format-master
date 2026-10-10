@@ -65,6 +65,15 @@ class DocumentIndex:
         chapter = None
         module = None
         module_counts={};module_occurrence=0
+        # Front matter before the first module/chapter belongs to the cover,
+        # just as in the shared module detector. A plain body-only document
+        # without any marker still receives the requested body formatting.
+        boundary=next((i for i,oid in enumerate(self.top_ids)
+                       if self.records[oid]["module"] or self.records[oid]["heading_level"]==1),None)
+        if boundary is not None and any(self.records[oid]["text"].strip() for oid in self.top_ids[:boundary]):
+            module="cover"
+            module_counts["cover"]=1
+            module_occurrence=1
         for oid in self.top_ids:
             record = self.records[oid]
             if record["module"]:

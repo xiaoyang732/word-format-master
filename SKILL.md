@@ -48,6 +48,12 @@ Choose exactly one route:
 
 Do not combine formatting with content rewriting unless the user explicitly requests both.
 
+When the user explicitly requests a new thesis draft, read
+[references/thesis-generation.md](references/thesis-generation.md). Authoring
+content is separate from formatting an existing DOCX; use real Heading styles
+for chapter titles and keep chapter-description prose as body text. A formatting
+pass does not establish that research results or references are authentic.
+
 ## Load References
 
 - Read [references/format-spec.md](references/format-spec.md) before creating, merging, or applying a specification.

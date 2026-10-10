@@ -39,9 +39,9 @@ MODULE_MARKERS = {
     "symbols": re.compile(r"^\s*(?:符号说明|符号表|术语表|symbols?|glossary)\s*$", re.I),
 }
 
-_CHAPTER_RE = re.compile(r"^\s*(?:第\s*[一二三四五六七八九十0-9]+\s*章|\d+[、.\s])")
-_LEVEL2_RE = re.compile(r"^\s*\d+\.\d+(?:[、.\s])")
-_LEVEL3_RE = re.compile(r"^\s*\d+\.\d+\.\d+(?:[、.\s])")
+_CHAPTER_RE = re.compile(r"^\s*(?:第\s*[一二三四五六七八九十百零〇0-9]+\s*章\s*|\d+(?:[、.．]\s*|\s+))(.+)$")
+_LEVEL2_RE = re.compile(r"^\s*\d+\.\d+(?:[、.．]\s*|\s+)(.+)$")
+_LEVEL3_RE = re.compile(r"^\s*\d+\.\d+\.\d+(?:[、.．]\s*|\s+)(.+)$")
 
 
 def normalized_style_name(value: Any) -> str:
@@ -51,19 +51,27 @@ def normalized_style_name(value: Any) -> str:
 def heading_level(text: str, style_name: str = "", outline_level: int | None = None) -> int | None:
     if outline_level is not None:
         try:
-            return int(outline_level) + 1
+            level = int(outline_level)
+            if 0 <= level <= 8:
+                return level + 1
         except (TypeError, ValueError):
             pass
     normalized = normalized_style_name(style_name)
     match = re.search(r"(?:heading|标题)([1-9])$", normalized)
     if match:
         return int(match.group(1))
-    if _LEVEL3_RE.match(text):
-        return 3
-    if _LEVEL2_RE.match(text):
-        return 2
-    if _CHAPTER_RE.match(text):
-        return 1
+    if normalized in {"title", "subtitle"} or normalized.startswith(("toc", "wfmtoc")) or "list" in normalized or "caption" in normalized:
+        return None
+    # Text alone is weaker evidence than an explicit heading style. Chapter
+    # summaries, sentences, decimal measurements and TOC lines are not headings.
+    for level, pattern in ((3, _LEVEL3_RE), (2, _LEVEL2_RE), (1, _CHAPTER_RE)):
+        match = pattern.match(text)
+        if match:
+            title = match.group(1).strip()
+            if (len(title) <= 80 and not title[0].isdigit() and not title.startswith((".", "．"))
+                    and not re.search(r"[:：。；;！？!?\t]|\.{2,}|…", title) and not title.endswith(".")):
+                return level
+            return None
     return None
 
 

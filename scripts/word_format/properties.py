@@ -212,6 +212,25 @@ def read_paragraph(document, paragraph, name):
         for pr in sources:
             ind=pr.find(qn("w:ind")) if pr is not None else None
             if ind is None: continue
+            # A direct first-line/hanging declaration replaces the mutually
+            # exclusive property inherited from a style. Hanging wins when a
+            # malformed layer declares both (including hanging="0").
+            if base in {"firstLine", "hanging"}:
+                opposite="hanging" if base=="firstLine" else "firstLine"
+                has_opposite=any(ind.get(qn("w:"+opposite+suffix)) is not None for suffix in ("", "Chars"))
+                has_own=any(ind.get(qn("w:"+base+suffix)) is not None for suffix in ("", "Chars"))
+                if has_opposite and base=="firstLine":
+                    chars=ind.get(qn("w:hangingChars"))
+                    raw=ind.get(qn("w:hanging"))
+                    # A hanging indent is a negative first-line offset. Reading
+                    # it as zero would incorrectly skip a request to clear it.
+                    if chars is not None: return {"value":-float(chars)/100,"unit":"chars"}
+                    return {"value":-float(raw or 0)*25.4/1440,"unit":"mm"}
+                if has_opposite and not has_own:
+                    chars=ind.get(qn("w:firstLineChars"))
+                    raw=ind.get(qn("w:firstLine"))
+                    if chars is not None: return {"value":-float(chars)/100,"unit":"chars"}
+                    return {"value":-float(raw or 0)*25.4/1440,"unit":"mm"}
             chars=ind.get(qn("w:"+base+"Chars"))
             raw=ind.get(qn("w:"+base))
             if chars is not None: return {"value":float(chars)/100,"unit":"chars"}
@@ -244,14 +263,15 @@ def write_paragraph(pr, name, value):
         base = {"first_line_indent": "firstLine", "left_indent": "left", "right_indent": "right", "hanging_indent": "hanging"}[name]
         for attr in ATTRIBUTES[name]["ind"]:
             node.attrib.pop(qn("w:" + attr), None)
-        if name in {"first_line_indent", "hanging_indent"}:
-            # Explicit zero blocks inherited conflicting indents, too.
-            other = "hanging" if base == "firstLine" else "firstLine"
-            node.set(qn("w:" + other), "0")
-            node.set(qn("w:" + other + "Chars"), "0")
+        # ATTRIBUTES removes the opposite indent. Do not write its zero value:
+        # hanging="0" still takes precedence over a nonzero firstLineChars.
+        # A direct declaration already replaces the opposite style declaration.
         if value["unit"] == "chars":
             node.set(qn("w:" + base + "Chars"), str(int(round(value["value"] * 100))))
-            node.set(qn("w:" + base), "0")
+            # Keep character units authoritative; a fixed 12pt conversion is
+            # wrong for other font sizes and unnecessary in Word/WPS.
+            if not value["value"]:
+                node.set(qn("w:" + base), "0")
         else:
             node.set(qn("w:" + base + "Chars"), "0")
             # A zero character value can override a nonzero twips value in Word.

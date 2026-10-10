@@ -1118,13 +1118,12 @@ def normalize_heading_styles(
         current_style = paragraph.style.name if paragraph.style else ""
         if current_style in TOC_MANAGED_STYLES or current_style.lower().startswith("wfm toc"):
             continue
-        from document_structure import is_heading_candidate
+        from document_structure import heading_level, is_heading_candidate
         from word_format.properties import strip_text_prefix
         is_heading_or_candidate = is_heading_candidate(text, current_style)
-        actual_level = next((level for level, pattern in ((3, re_l3), (2, re_l2), (1, re_l1)) if pattern.match(text)), None)
-        if actual_level is None:
-            style_match = re.fullmatch(r"Heading ([1-3])", current_style, re.I)
-            actual_level = int(style_match.group(1)) if style_match else None
+        actual_level = heading_level(text, current_style)
+        if actual_level and actual_level not in {1, 2, 3}:
+            continue
         if actual_level and {1: level1_format, 2: level2_format, 3: level3_format}[actual_level] == "keep":
             continue
         if current_style.lower() == "title":
@@ -1135,7 +1134,7 @@ def normalize_heading_styles(
                 paragraph.style = level1_style
                 adjusted += 1
             _remove_paragraph_numbering(paragraph)
-        elif re_l3.match(text) and is_heading_or_candidate:
+        elif actual_level == 3:
             if paragraph.style != level3_style:
                 paragraph.style = level3_style
                 adjusted += 1
@@ -1150,7 +1149,7 @@ def normalize_heading_styles(
                     _set_paragraph_numbering(paragraph, num_id, ilvl=2)
             elif current_style.lower() == "heading 3" and num_id is not None:
                 _set_paragraph_numbering(paragraph, num_id, ilvl=2)
-        elif re_l2.match(text) and is_heading_or_candidate:
+        elif actual_level == 2:
             if paragraph.style != level2_style:
                 paragraph.style = level2_style
                 adjusted += 1
@@ -1165,7 +1164,7 @@ def normalize_heading_styles(
                     _set_paragraph_numbering(paragraph, num_id, ilvl=1)
             elif current_style.lower() == "heading 2" and num_id is not None:
                 _set_paragraph_numbering(paragraph, num_id, ilvl=1)
-        elif re_l1.match(text) and is_heading_or_candidate:
+        elif actual_level == 1:
             if paragraph.style != level1_style:
                 paragraph.style = level1_style
                 adjusted += 1
