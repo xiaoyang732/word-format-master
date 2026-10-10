@@ -165,7 +165,9 @@ class ReviewRegressionTests(unittest.TestCase):
             report = render_document(self.source, self.folder / "render", emit_pdf=True)
         manifest = json.loads(Path(report["manifest"]).read_text(encoding="utf-8"))
         self.assertEqual(manifest["source_sha256"], before)
-        self.assertEqual(Path(manifest["source"]), self.source)
+        # Windows runners may expose TEMP via an 8.3 alias (RUNNER~1)
+        # while render_document records its resolved long path.
+        self.assertTrue(Path(manifest["source"]).samefile(self.source))
         self.assertEqual(manifest["pages"][0]["sha256"], sha256(report["pages"][0]))
         self.assertTrue(Path(report["pdf"]).is_file())
         self.assertFalse(rendered_sources[0].exists())
