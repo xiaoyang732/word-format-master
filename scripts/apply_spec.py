@@ -534,22 +534,15 @@ def clear_all_header_footer_content(document: Document) -> int:
 
 
 def _field_codes(paragraph) -> list[str]:
-    return [
-        " ".join(str(node.text or "").split())
-        for node in paragraph._p.iter(qn("w:instrText"))
-        if str(node.text or "").strip()
-    ]
+    from word_format.fields import field_codes
+    return field_codes(paragraph._p)
 
 
 def _standalone_page_number_paragraph(container):
+    from word_format.fields import page_number_paragraphs
+    nodes = set(page_number_paragraphs(container._element))
     for paragraph in container.paragraphs:
-        codes = _field_codes(paragraph)
-        if not any(re.search(r"\bPAGE\b", code, re.I) for code in codes):
-            continue
-        if any(not re.fullmatch(r"(?:PAGE|NUMPAGES)(?:\s+\\\S+)*", code, re.I) for code in codes):
-            continue
-        visible = paragraph.text.strip()
-        if not visible or re.fullmatch(r"(?:Page\s*)?(?:第\s*)?\d+(?:\s*(?:of|/|页，共)\s*\d+\s*页?)?", visible, re.I):
+        if paragraph._p in nodes:
             return paragraph
     return None
 

@@ -333,5 +333,65 @@ class HeaderTests(unittest.TestCase):
                 self.assertEqual(verify_structure(self.output, {"page_numbers": tokens}, check_format=False)["status"], "passed")
                 self.assertTrue(verify_complex_state(read_complex_state(DocumentIndex(doc), "page_numbers"), tokens, "page_numbers"))
 
+    def test_header_content_and_page_numbers_keep_both_write_orders_and_variants(self):
+        page_operation = {"action": "page_number.configure", "target": {"type": "document"},
+                          "params": {"enabled": True, "location": "header", "font_size_pt": 12,
+                                     "format": "page-x-of-y", "show_on_first_page": True}}
+        header_operations = [self.op("header.content.set", {"mode": "text", "text": "Thesis", "variant": variant})
+                             for variant in ("default", "first", "even")]
+        header_operations.extend(self.op("header.font.size.set", {"value": 9, "variant": variant})
+                                 for variant in ("default", "first", "even"))
+        flags = [self.op("header.first_page_different.set", {"value": True}),
+                 {"action": "header.odd_even_different.set", "target": {"type": "document"}, "params": {"value": True}}]
+        for page_first in (True, False):
+            with self.subTest(page_first=page_first):
+                operations = flags + ([page_operation] + header_operations if page_first else header_operations + [page_operation])
+                doc, _ = self.execute(operations)
+                for variant in ("header", "first_page_header", "even_page_header"):
+                    container = getattr(doc.sections[1], variant)
+                    paragraphs = container.paragraphs
+                    self.assertEqual(len(paragraphs), 2)
+                    self.assertEqual(paragraphs[0].text, "Thesis")
+                    self.assertEqual(paragraphs[0].runs[0].font.size.pt, 9)
+                    self.assertEqual(paragraphs[1].style.name, "WFM Page Number")
+                    self.assertEqual(paragraphs[1].runs[0].font.size.pt, 12)
+                    self.assertEqual(sum((n.text or "").strip() == "PAGE" for n in container._element.iter(qn("w:instrText"))), 1)
+                self.assertTrue(self.text(doc.sections[0].header).startswith("original"))
+                self.assertTrue(self.text(doc.sections[2].header).startswith("original"))
+                self.output.unlink()
+
+    def test_imported_simple_page_is_preserved_and_mixed_field_is_rejected(self):
+        doc = Document(self.source)
+        header = doc.sections[1].header
+        header.is_linked_to_previous = False
+        page = header.add_paragraph()
+        field = OxmlElement("w:fldSimple")
+        field.set(qn("w:instr"), "PAGE")
+        page._p.append(field)
+        page_xml = page._p.xml
+        doc.save(self.source)
+        result, _ = self.execute([self.op("header.content.set", {"mode": "text", "text": "Thesis"})])
+        self.assertEqual(result.sections[1].header.paragraphs[1]._p.xml, page_xml)
+        self.output.unlink()
+        page.add_run(" mixed text")
+        doc.save(self.source)
+        plan = build_plan(self.source, self.output, {"operations": [self.op("header.content.set", {"mode": "text", "text": "Thesis"})]})
+        with self.assertRaisesRegex(FormatError, "mixed PAGE"):
+            apply_plan(plan)
+        self.assertFalse(self.output.exists())
+
+    def test_page_writer_cannot_pollute_header_content(self):
+        cap = REGISTRY["page_number.configure"]
+        plan = build_plan(self.source, self.output, {"operations": [
+            {"action": cap.action, "target": {"type": "document"}, "params": {"enabled": True}}
+        ]})
+        def polluted(index, ref, params):
+            cap.handler(index, ref, params)
+            index.document.sections[0].header.paragraphs[0].text = "polluted"
+        with patch.dict(REGISTRY, {cap.action: type(cap)(**{**cap.__dict__, "handler": polluted})}):
+            with self.assertRaisesRegex(FormatError, "unrelated header/footer"):
+                apply_plan(plan)
+        self.assertFalse(self.output.exists())
+
 
 if __name__ == "__main__": unittest.main()

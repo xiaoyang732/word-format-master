@@ -8,6 +8,7 @@ from .namespaces import qn
 from docx.section import Section
 
 from .contracts import FormatError, require_keys, text_value
+from .fields import field_codes, page_number_paragraphs
 from .properties import (element, read_font, read_paragraph,
                          write_font, write_paragraph, xml_value, FONT_TAGS)
 
@@ -100,7 +101,12 @@ def set_content(index, ref, params):
                    for p in index.document.element.body.iter(qn("w:p"))):
             raise FormatError("STYLEREF style has no body heading to reference", "needs_clarification")
     container = editable_header(index, ref, params["variant"])
-    original = next(container._element.iter(qn("w:p")), None)
+    page_paragraphs = [p for p in page_number_paragraphs(container._element) if p.getparent() is container._element]
+    protected = set(page_paragraphs)
+    for paragraph in container._element.iter(qn("w:p")):
+        if paragraph not in protected and any(re.match(r"^PAGE(?:\s|$)", code, re.I) for code in field_codes(paragraph)):
+            raise FormatError("Separate mixed PAGE fields from header content before replacing it", "needs_clarification")
+    original = next((p for p in container._element.iter(qn("w:p")) if p not in protected), None)
     saved_pr = copy.deepcopy(original.find(qn("w:pPr"))) if original is not None else None
     first_run = next(original.iter(qn("w:r")), None) if original is not None else None
     saved_rpr = copy.deepcopy(first_run.find(qn("w:rPr"))) if first_run is not None else None
@@ -120,6 +126,8 @@ def set_content(index, ref, params):
         p._p.append(field)
     if saved_rpr is not None:
         for run in p._p.iter(qn("w:r")): run.insert(0, copy.deepcopy(saved_rpr))
+    for paragraph in page_paragraphs:
+        container._element.append(paragraph)
 
 
 def set_link(index, ref, params):
@@ -144,7 +152,10 @@ def set_format(index, ref, params, name):
     if root is None or not list(root.iter(qn("w:p"))):
         raise FormatError("Set header content before setting its format", "needs_clarification")
     container = editable_header(index, ref, params["variant"])
+    page_paragraphs = set(page_number_paragraphs(container._element))
     for p in container._element.iter(qn("w:p")):
+        if p in page_paragraphs:
+            continue
         if name in FONT_TAGS:
             for run in p.iter(qn("w:r")):
                 write_font(element(run, "rPr"), name, params["value"])
@@ -187,6 +198,9 @@ def read_header(index, ref, cap):
             continue
         root = effective_root(container)
         if name == "content":
+            root = copy.deepcopy(root)
+            for paragraph in page_number_paragraphs(root):
+                paragraph.getparent().remove(paragraph)
             literal=[]
             field_depth = 0
             def visit(node):
@@ -208,7 +222,10 @@ def read_header(index, ref, cap):
         else:
             variants[variant] = []
             if root is not None:
+                page_paragraphs = set(page_number_paragraphs(root))
                 for p in root.iter(qn("w:p")):
+                    if p in page_paragraphs:
+                        continue
                     values = [read_font(index.document, p, r, name) for r in p.iter(qn("w:r"))] if name in FONT_TAGS else [read_paragraph(index.document, p, name)]
                     variants[variant].extend(values or [read_font(index.document, p, None, name)])
     return variants
@@ -257,9 +274,18 @@ def header_projection(index, cap, params, refs):
                         if attr_name.startswith("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}") and value in container.part.rels:
                             node.set(attr_name, container.part.rels[value].target_ref)
             if s._sectPr in selected and variant == params.get("variant"):
-                if name in {"content", "link"}: clone = None
+                if name == "content":
+                    # Content replacement must preserve separately owned PAGE fields.
+                    page_paragraphs = page_number_paragraphs(clone)
+                    clone = OxmlElement("w:hdr") if page_paragraphs else None
+                    if clone is not None:
+                        clone.extend(page_paragraphs)
+                elif name == "link": clone = None
                 elif clone is not None:
-                    for pr in list(clone.iter(qn("w:rPr"))) + list(clone.iter(qn("w:pPr"))):
+                    page_paragraphs = set(page_number_paragraphs(clone))
+                    properties = [pr for p in clone.iter(qn("w:p")) if p not in page_paragraphs
+                                  for tag in ("rPr", "pPr") for pr in p.iter(qn("w:" + tag))]
+                    for pr in properties:
                         from .properties import FONT_TAGS, PARAGRAPH_TAGS, ATTRIBUTES
                         for tag in FONT_TAGS.get(name, PARAGRAPH_TAGS.get(name, ())):
                             node = pr.find(qn("w:" + tag))
@@ -269,8 +295,10 @@ def header_projection(index, cap, params, refs):
                                 if not node.attrib and not len(node): pr.remove(node)
                             else: pr.remove(node)
                     for pr in list(clone.iter(qn("w:rPr"))):
+                        if any(parent in page_paragraphs for parent in pr.iterancestors()): continue
                         if not len(pr) and not pr.attrib: pr.getparent().remove(pr)
                     for pr in list(clone.iter(qn("w:pPr"))):
+                        if any(parent in page_paragraphs for parent in pr.iterancestors()): continue
                         if not len(pr) and not pr.attrib: pr.getparent().remove(pr)
             if clone is not None and not clone.attrib and all(n.tag==qn("w:p") and not len(n) and not n.attrib for n in clone):
                 clone=None

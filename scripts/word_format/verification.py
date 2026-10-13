@@ -269,6 +269,36 @@ def _masked_node(tag,value):
     return node
 
 
+def _page_number_content_projection(document):
+    """Protect non-page header/footer content across page-number configuration."""
+    from .fields import page_number_paragraphs
+    from .headers import effective_root
+    values = []
+    for section in document.sections:
+        for name in ("header", "first_page_header", "even_page_header", "footer", "first_page_footer", "even_page_footer"):
+            container = getattr(section, name)
+            root = effective_root(container)
+            if root is None:
+                values.append([])
+                continue
+            while not container._has_definition:
+                container = container._prior_headerfooter
+            clone = copy.deepcopy(root)
+            for paragraph in page_number_paragraphs(clone):
+                paragraph.getparent().remove(paragraph)
+            content = []
+            for child in clone:
+                if child.tag == qn("w:p") and all(n.tag == qn("w:pPr") for n in child):
+                    continue
+                for node in child.iter():
+                    for attr, value in list(node.attrib.items()):
+                        if attr.startswith("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}") and value in container.part.rels:
+                            node.set(attr, container.part.rels[value].target_ref)
+                content.append(xml_value(child))
+            values.append(content)
+    return values
+
+
 def structural_snapshot(index,cap,params,refs):
     """Protect body content/objects and unrelated parts across structural writes."""
     if cap.property == "section_break":
@@ -311,7 +341,8 @@ def structural_snapshot(index,cap,params,refs):
     if cap.property in {"headers_footers","page_numbers","table_of_contents"}: allowed.update({"/word/styles.xml","/word/settings.xml"})
     parts={str(p.partname):p.blob for p in index.document.part.package.parts
            if str(p.partname) not in allowed and not (cap.property in {"headers_footers","page_numbers"} and re.fullmatch(r"/word/(header|footer)\d+\.xml",str(p.partname)))}
-    return paragraphs,parts
+    stories = _page_number_content_projection(index.document) if cap.property == "page_numbers" else None
+    return paragraphs,parts,stories
 
 
 def verify_structural_preservation(index,cap,params,refs,before):
@@ -327,6 +358,8 @@ def verify_structural_preservation(index,cap,params,refs,before):
         return
     from .inspect import paragraph_text
     after=structural_snapshot(index,cap,params,refs)
+    if before[2] != after[2]:
+        raise FormatError("Page-number configuration changed unrelated header/footer content")
     by_node={p:(text,xml) for p,text,xml in after[0]}
     for node,text,xml in before[0]:
         if node not in by_node: raise FormatError("Structural operation removed unrelated body content")
