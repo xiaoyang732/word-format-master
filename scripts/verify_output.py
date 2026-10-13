@@ -134,6 +134,8 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
     if page_numbers.get("enabled"):
         location = str(page_numbers.get("location") or "footer")
         containers = [getattr(section, location) for section in document.sections]
+        if document.settings.odd_and_even_pages_header_footer:
+            containers.extend(getattr(section, f"even_page_{location}") for section in document.sections)
         if page_numbers.get("show_on_first_page", True):
             containers.extend(
                 getattr(section, f"first_page_{location}")
@@ -147,12 +149,9 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
             if identity in seen_parts:
                 continue
             seen_parts.add(identity)
-            page_field_counts.append(sum(
-                1
-                for paragraph in container.paragraphs
-                for node in paragraph._p.iter(qn("w:instrText"))
-                if node.text and re.search(r"\bPAGE\b", node.text, re.I)
-            ))
+            codes = [node.text or "" for node in container._element.iter(qn("w:instrText"))]
+            codes.extend(node.get(qn("w:instr"), "") for node in container._element.iter(qn("w:fldSimple")))
+            page_field_counts.append(sum(bool(re.search(r"\bPAGE\b", code, re.I)) for code in codes))
         passed = bool(page_field_counts) and all(count == 1 for count in page_field_counts)
         _check(checks, "page-numbers", passed, f"PAGE fields per target {location} part={page_field_counts}")
         if not passed:

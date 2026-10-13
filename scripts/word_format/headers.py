@@ -188,17 +188,18 @@ def read_header(index, ref, cap):
         root = effective_root(container)
         if name == "content":
             literal=[]
-            in_field=[False]
+            field_depth = 0
             def visit(node):
+                nonlocal field_depth
                 for child in node:
                     if child.tag==qn("w:fldSimple"): continue
                     if child.tag==qn("w:fldChar"):
                         kind=child.get(qn("w:fldCharType"))
-                        if kind=="begin": in_field[0]=True
-                        elif kind=="end": in_field[0]=False
-                    elif child.tag==qn("w:t") and not in_field[0]: literal.append(child.text or "")
-                    elif child.tag in {qn("w:br"), qn("w:cr")} and not in_field[0]: literal.append("\n")
-                    elif child.tag==qn("w:tab") and not in_field[0]: literal.append("\t")
+                        if kind == "begin": field_depth += 1
+                        elif kind == "end": field_depth = max(0, field_depth - 1)
+                    elif child.tag==qn("w:t") and field_depth == 0: literal.append(child.text or "")
+                    elif child.tag in {qn("w:br"), qn("w:cr")} and field_depth == 0: literal.append("\n")
+                    elif child.tag==qn("w:tab") and field_depth == 0: literal.append("\t")
                     visit(child)
             if root is not None: visit(root)
             variants[variant] = {"text": "".join(literal),

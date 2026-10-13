@@ -17,8 +17,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from word_format import build_plan, apply_plan, verify_plan, inspect_document
 from word_format.contracts import FormatError, sha256
 from word_format.registry import REGISTRY
-from word_format.headers import effective_root
-from analyze_docx import analyze_docx
+from word_format.headers import effective_root, read_header
+from word_format.inspect import DocumentIndex
+from word_format.verification import read_complex_state, verify_complex_state
+from analyze_docx import analyze_docx, _paragraph_text_outside_fields
+from verify_output import verify_structure
 from parse_requirements import parse_requirements
 from word_format.spec import legacy_paths
 
@@ -283,6 +286,52 @@ class HeaderTests(unittest.TestCase):
                             self.op("header.font.size.set",{"value":9})])
         self.assertEqual(doc.sections[1].header.paragraphs[0].text,value)
         self.assertEqual(self.text(doc.sections[2].header),"original")
+
+    def test_nested_complex_fields_do_not_leak_cached_text(self):
+        doc = Document(self.source)
+        paragraph = doc.sections[0].header.paragraphs[0]
+        paragraph.text = "Prefix "
+        for tag, value in [("fldChar", "begin"), ("instrText", " IF "),
+                           ("fldChar", "begin"), ("instrText", " PAGE "),
+                           ("fldChar", "separate"), ("t", "2"), ("fldChar", "end"),
+                           ("instrText", ' > 1 "continued" "first" '),
+                           ("fldChar", "separate"), ("t", "continued"), ("fldChar", "end")]:
+            run = OxmlElement("w:r")
+            node = OxmlElement("w:" + tag)
+            if tag == "fldChar":
+                node.set(qn("w:fldCharType"), value)
+            else:
+                node.text = value
+            run.append(node)
+            paragraph._p.append(run)
+        paragraph.add_run(" Suffix")
+        self.assertEqual(_paragraph_text_outside_fields(paragraph._p), "Prefix  Suffix")
+        index = DocumentIndex(doc)
+        section_ref = next(index.ref(oid) for oid, rec in index.records.items() if rec["kind"] == "section")
+        actual = read_header(index, section_ref, REGISTRY["header.content.set"])["default"]
+        self.assertEqual(actual["text"], "Prefix  Suffix")
+        self.assertEqual(len(actual["fields"]), 3)
+
+    def test_page_verifiers_check_even_parts_and_simple_fields(self):
+        for location in ("header", "footer"):
+            with self.subTest(location=location):
+                doc = Document()
+                doc.add_paragraph("Body")
+                doc.settings.odd_and_even_pages_header_footer = True
+                tokens = {"enabled": True, "location": location, "show_on_first_page": True}
+                from apply_spec import apply_page_numbers
+                apply_page_numbers(doc, tokens)
+                even = getattr(doc.sections[0], f"even_page_{location}")
+                even.paragraphs[0].clear()
+                doc.save(self.output)
+                self.assertEqual(verify_structure(self.output, {"page_numbers": tokens}, check_format=False)["status"], "failed")
+                self.assertFalse(verify_complex_state(read_complex_state(DocumentIndex(doc), "page_numbers"), tokens, "page_numbers"))
+                field = OxmlElement("w:fldSimple")
+                field.set(qn("w:instr"), "PAGE")
+                even.paragraphs[0]._p.append(field)
+                doc.save(self.output)
+                self.assertEqual(verify_structure(self.output, {"page_numbers": tokens}, check_format=False)["status"], "passed")
+                self.assertTrue(verify_complex_state(read_complex_state(DocumentIndex(doc), "page_numbers"), tokens, "page_numbers"))
 
 
 if __name__ == "__main__": unittest.main()

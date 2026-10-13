@@ -47,6 +47,7 @@ def read_complex_state(index,name):
                         effective=effective._prior_headerfooter
                     if effective is not None:
                         codes=[n.text or "" for n in effective._element.iter(qn("w:instrText"))]
+                        codes.extend(n.get(qn("w:instr"), "") for n in effective._element.iter(qn("w:fldSimple")))
                         parts[f"{i}:{prefix}{kind}"]=sum(bool(re.search(r"\bPAGE\b",c,re.I)) for c in codes)
         starts=[s._sectPr.find(qn("w:pgNumType")) for s in doc.sections]
         managed=sum(p.find("./"+qn("w:pPr")+"/"+qn("w:pStyle")) is not None and

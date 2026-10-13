@@ -529,20 +529,21 @@ def summarize_header_footer_parts(package: zipfile.ZipFile, names: set[str]) -> 
 def _paragraph_text_outside_fields(paragraph: ET.Element, *, strip: bool = True) -> str:
     """Return literal paragraph text without cached field results."""
     paragraph_chunks: list[str] = []
-    field_state = [False]
+    field_depth = 0
 
     def visit(node: ET.Element) -> None:
+        nonlocal field_depth
         for child in list(node):
             if child.tag == W + "fldSimple":
                 continue
             if child.tag == W + "fldChar":
                 field_type = w_attr(child, "fldCharType")
                 if field_type == "begin":
-                    field_state[0] = True
+                    field_depth += 1
                 elif field_type == "end":
-                    field_state[0] = False
+                    field_depth = max(0, field_depth - 1)
                 continue
-            if child.tag == W + "t" and not field_state[0] and child.text:
+            if child.tag == W + "t" and field_depth == 0 and child.text:
                 paragraph_chunks.append(child.text)
             visit(child)
 
