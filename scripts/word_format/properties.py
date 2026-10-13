@@ -165,28 +165,30 @@ def resolved_color(document, node):
 def read_font(document, paragraph, run, name):
     sources = list(rpr_sources(document, paragraph, run))
     if name in {"font_east_asia", "font_latin"}:
-        attr = "eastAsia" if name == "font_east_asia" else "ascii"
-        # Theme attributes take precedence within each layer, not across layers.
-        for pr in sources:
-            node = pr.find(qn("w:rFonts")) if pr is not None else None
-            if node is None:
-                continue
-            theme = node.get(qn("w:" + attr + "Theme"))
-            if theme:
-                from analyze_docx import parse_theme_fonts
-                # Reuse the already loaded theme part without a filesystem write.
-                class Parts:
-                    def read(self, path):
-                        return next(p.blob for p in document.part.package.parts if str(p.partname).lstrip("/") == path)
-                try:
-                    fonts = parse_theme_fonts(Parts())
-                    return fonts.get(theme, theme)
-                except (StopIteration, KeyError):
-                    return theme
-            value = node.get(qn("w:" + attr))
-            if value:
-                return value
-        return None
+        def channel(attr):
+            # Resolve each channel independently through the inheritance chain.
+            for pr in sources:
+                node = pr.find(qn("w:rFonts")) if pr is not None else None
+                if node is None:
+                    continue
+                theme = node.get(qn("w:" + attr + "Theme"))
+                if theme:
+                    from analyze_docx import parse_theme_fonts
+                    class Parts:
+                        def read(self, path):
+                            return next(p.blob for p in document.part.package.parts if str(p.partname).lstrip("/") == path)
+                    try:
+                        return parse_theme_fonts(Parts()).get(theme, "theme:" + theme)
+                    except (StopIteration, KeyError):
+                        return "theme:" + theme
+                value = node.get(qn("w:" + attr))
+                if value:
+                    return value
+            return None
+        if name == "font_east_asia":
+            return channel("eastAsia")
+        ascii_font, hansi_font = channel("ascii"), channel("hAnsi")
+        return ascii_font if ascii_font == hansi_font else {"ascii": ascii_font, "hAnsi": hansi_font}
     if name == "font_size_pt":
         raw = _attr(sources, "sz")
         return float(raw) / 2 if raw is not None else None
@@ -235,8 +237,24 @@ def read_paragraph(document, paragraph, name):
         value = _attr(sources, "jc") or "left"
         return "justify" if value == "both" else value
     if name in {"space_before_pt", "space_after_pt"}:
-        raw = _attr(sources, "spacing", "before" if name == "space_before_pt" else "after")
-        return float(raw or 0) / 20
+        side = "before" if name == "space_before_pt" else "after"
+        automatic = _attr(sources, "spacing", side + "Autospacing")
+        if automatic is not None and automatic not in {"0", "false", "off"}:
+            return {"kind": "auto"}
+        for pr in sources:
+            spacing = pr.find(qn("w:spacing")) if pr is not None else None
+            if spacing is None:
+                continue
+            auto = spacing.get(qn("w:" + side + "Autospacing"))
+            lines = spacing.get(qn("w:" + side + "Lines"))
+            points = spacing.get(qn("w:" + side))
+            if auto is not None and auto not in {"0", "false", "off"}:
+                return {"kind": "auto"}
+            if lines is not None:
+                return {"value": float(lines) / 100, "unit": "lines"}
+            if points is not None:
+                return float(points) / 20
+        return 0.0
     if name == "line_spacing":
         rule = _attr(sources, "spacing", "lineRule") or "auto"
         raw = float(_attr(sources, "spacing", "line") or 240)
@@ -288,6 +306,8 @@ def write_paragraph(pr, name, value):
         for key in (attr + "Lines", attr + "Autospacing"):
             spacing.attrib.pop(qn("w:" + key), None)
         spacing.set(qn("w:" + attr), str(int(round(value * 20))))
+        # Explicitly disable automatic spacing inherited from a style.
+        spacing.set(qn("w:" + attr + "Autospacing"), "0")
     elif name == "line_spacing":
         node = element(pr, "spacing")
         factor = 240 if value["kind"] == "multiple" else 20

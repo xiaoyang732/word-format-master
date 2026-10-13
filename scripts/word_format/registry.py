@@ -90,6 +90,12 @@ def read_atomic(index,ref,cap):
         tag="pgSz" if attr in {"w","h","orient"} else "pgMar"
         child=p.find(qn("w:"+tag))
         raw=child.get(qn("w:"+attr)) if child is not None else None
+        if attr == "orient":
+            width = child.get(qn("w:w")) if child is not None else None
+            height = child.get(qn("w:h")) if child is not None else None
+            orientation = raw or "portrait"
+            if width is None or height is None or ((float(width) > float(height)) != (orientation == "landscape") and width != height):
+                return {"orientation": orientation, "geometry": "inconsistent"}
         return (raw or "portrait") if attr=="orient" else float(raw)*25.4/1440 if raw else None
     if cap.property=="style":
         child=p.find("./"+qn("w:pPr")+"/"+qn("w:pStyle"))
@@ -162,7 +168,7 @@ for action,attr,handler in (
     ("page.margin_bottom.set","bottom",op.set_bottom_margin),("page.margin_left.set","left",op.set_left_margin),
     ("page.margin_right.set","right",op.set_right_margin),("page.gutter.set","gutter",op.set_gutter),
     ("page.header_distance.set","header",op.set_header_distance),("page.footer_distance.set","footer",op.set_footer_distance),
-): add(action,"page:"+attr,{"section"},handler,scalar("text",enum=("portrait","landscape")) if attr=="orient" else scalar("number",1 if attr in {"w","h"} else 0,2000,"mm"),{"value":["portrait","landscape"]} if attr=="orient" else {"value":"0..2000 mm (dimensions positive)","unit":"mm"})
+): add(action,"page:"+attr,{"section"},handler,scalar("text",enum=("portrait","landscape")) if attr=="orient" else scalar("number",1 if attr in {"w","h"} else 0,2000,"mm"),{"value":["portrait","landscape"]} if attr=="orient" else {"value":"0..2000 mm (dimensions positive)","unit":"mm"}, effects=("orientation and width/height order",) if attr=="orient" else ())
 
 def style_params(params):
     require_keys(params,{"name"},{"name"},"style params")

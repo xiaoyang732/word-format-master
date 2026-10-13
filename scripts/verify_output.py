@@ -61,6 +61,14 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         errors.extend(order_errors)
 
     page = spec.get("page", {})
+    if page.get("orientation"):
+        landscape = page["orientation"] == "landscape"
+        passed = all((int(s.orientation) == 1) == landscape and
+                     ((s.page_width > s.page_height) == landscape or s.page_width == s.page_height)
+                     for s in document.sections)
+        _check(checks, "page-orientation", passed, "orientation marker and dimensions checked in every section")
+        if not passed:
+            errors.append("page orientation disagrees with requested direction or actual dimensions")
     expected_size = {"A4": (210.0, 297.0), "Letter": (215.9, 279.4)}.get(str(page.get("size")))
     if expected_size and document.sections:
         section = document.sections[0]

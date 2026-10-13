@@ -87,7 +87,15 @@ def set_page_property(index,ref,params,attr):
 
 def set_page_width(index,ref,params): set_page_property(index,ref,params,"w")
 def set_page_height(index,ref,params): set_page_property(index,ref,params,"h")
-def set_page_orientation(index,ref,params): set_page_property(index,ref,params,"orient")
+def set_page_orientation(index,ref,params):
+    size = element(index.elements[ref["id"]], "pgSz")
+    width, height = size.get(qn("w:w")), size.get(qn("w:h"))
+    if width is None or height is None:
+        raise FormatError("Page orientation requires existing width and height")
+    if (int(width) < int(height)) == (params["value"] == "landscape") and width != height:
+        size.set(qn("w:w"), height)
+        size.set(qn("w:h"), width)
+    set_page_property(index,ref,params,"orient")
 def set_top_margin(index,ref,params): set_page_property(index,ref,params,"top")
 def set_bottom_margin(index,ref,params): set_page_property(index,ref,params,"bottom")
 def set_left_margin(index,ref,params): set_page_property(index,ref,params,"left")

@@ -217,11 +217,16 @@ def atomic_projection(document,index,refs,cap):
                         if masked: clone.append(_masked_node(tag,masked))
                 return xml_value(clone)
             clone=copy.deepcopy(node)
+            dimensions = None
             if cap.property.startswith("page:"):
                 attr=cap.property[5:];tag="pgSz" if attr in {"w","h","orient"} else "pgMar"
                 pr=clone.find(qn("w:"+tag))
                 if pr is not None:
                     pr.attrib.pop(qn("w:"+attr),None)
+                    if attr == "orient":
+                        dimensions = tuple(sorted(int(pr.get(qn("w:" + a), "0")) for a in ("w", "h")))
+                        pr.attrib.pop(qn("w:w"), None)
+                        pr.attrib.pop(qn("w:h"), None)
                     if not pr.attrib: clone.remove(pr)
             elif cap.property=="table_alignment":
                 pr=clone.find(qn("w:tblPr"));jc=pr.find(qn("w:jc")) if pr is not None else None
@@ -231,7 +236,7 @@ def atomic_projection(document,index,refs,cap):
                 hd=pr.find(qn("w:tblHeader")) if pr is not None else None
                 if hd is not None: pr.remove(hd)
                 if pr is not None and not len(pr) and not pr.attrib: pr.getparent().remove(pr)
-            return xml_value(clone)
+            return (xml_value(clone), dimensions) if dimensions is not None else xml_value(clone)
         # Newly created styles from assigning a name are not unrelated changes.
         if node.tag==qn("w:style") and node.find(qn("w:name")) is not None:
             name=node.find(qn("w:name")).get(qn("w:val"))
@@ -334,5 +339,7 @@ def check_page_geometry(document):
     for i,s in enumerate(document.sections,1):
         if s.page_width is None or s.page_height is None:
             raise FormatError(f"Section {i} has no dimensions")
+        if (s.page_width > s.page_height) != (int(s.orientation) == 1) and s.page_width != s.page_height:
+            raise FormatError(f"Section {i} orientation disagrees with width and height")
         if s.left_margin+s.right_margin+(s.gutter or 0)>=s.page_width or s.top_margin+s.bottom_margin>=s.page_height:
             raise FormatError(f"Section {i} margins leave no content area")

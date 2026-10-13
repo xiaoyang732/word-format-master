@@ -12,6 +12,11 @@ from unittest.mock import patch
 import zipfile
 
 from docx import Document
+from docx.enum.section import WD_SECTION_START
+from docx.enum.style import WD_STYLE_TYPE
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Mm
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -20,6 +25,7 @@ from word_format import apply_plan, build_plan, verify_plan
 from word_format.contracts import FormatError
 from word_format.registry import REGISTRY
 from word_format.properties import xml_value
+from word_format import audit_document
 
 
 class JsonSafetyTests(unittest.TestCase):
@@ -100,6 +106,71 @@ class ReferenceSafetyTests(unittest.TestCase):
                 with self.assertRaises(FormatError):
                     apply_plan(plan)
             self.assertFalse(output.exists())
+
+
+class PropertySemanticsTests(unittest.TestCase):
+    def test_spacing_and_both_latin_font_channels_cannot_falsely_pass(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source, output = Path(folder) / "source.docx", Path(folder) / "output.docx"
+            doc = Document()
+            style = doc.styles.add_style("Inherited", WD_STYLE_TYPE.PARAGRAPH)
+            spacing = OxmlElement("w:spacing")
+            spacing.set(qn("w:beforeAutospacing"), "1")
+            style.element.get_or_add_pPr().append(spacing)
+            fonts = OxmlElement("w:rFonts")
+            fonts.set(qn("w:hAnsi"), "Courier New")
+            style.element.get_or_add_rPr().append(fonts)
+            for inherited in (False, True):
+                p = doc.add_paragraph("ASCII and café", style=style if inherited else "Normal")
+                spacing = OxmlElement("w:spacing")
+                spacing.set(qn("w:before"), "0")
+                if not inherited:
+                    spacing.set(qn("w:beforeAutospacing"), "1")
+                spacing.set(qn("w:afterLines"), "100")
+                p._p.get_or_add_pPr().append(spacing)
+                fonts = OxmlElement("w:rFonts")
+                fonts.set(qn("w:ascii"), "Arial")
+                if not inherited:
+                    fonts.set(qn("w:hAnsi"), "Courier New")
+                p.runs[0]._r.get_or_add_rPr().append(fonts)
+            doc.save(source)
+            request = {"operations": [{"action": action, "target": {"type": "paragraph", "all": True},
+                       "params": {"value": value}} for action, value in
+                       (("font.latin.set", "Arial"), ("paragraph.spacing_before.set", 0), ("paragraph.spacing_after.set", 0))]}
+            self.assertEqual(audit_document(source, request)["status"], "failed")
+            plan = build_plan(source, output, request)
+            report = apply_plan(plan)
+            self.assertTrue(all(check["changed"] for check in report["checks"][:2]))
+            self.assertEqual(verify_plan(plan, report)["status"], "passed")
+            out = Document(output)
+            for p in out.paragraphs:
+                fonts = p.runs[0]._r.find("./" + qn("w:rPr") + "/" + qn("w:rFonts"))
+                self.assertEqual(fonts.get(qn("w:ascii")), "Arial")
+                self.assertEqual(fonts.get(qn("w:hAnsi")), "Arial")
+                spacing = p._p.pPr.find(qn("w:spacing"))
+                for side in ("before", "after"):
+                    self.assertEqual(spacing.get(qn("w:" + side)), "0")
+                    self.assertEqual(spacing.get(qn("w:" + side + "Autospacing")), "0")
+                    self.assertIsNone(spacing.get(qn("w:" + side + "Lines")))
+
+    def test_orientation_swaps_existing_geometry_across_sections_and_round_trips(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source = Path(folder) / "source.docx"
+            doc = Document()
+            doc.add_paragraph("Geometry")
+            doc.sections[0].page_width, doc.sections[0].page_height = Mm(210), Mm(297)
+            doc.add_section(WD_SECTION_START.NEW_PAGE)
+            doc.save(source)
+            for direction in ("landscape", "portrait"):
+                output = Path(folder) / (direction + ".docx")
+                plan = build_plan(source, output, {"operations": [{"action": "page.orientation.set",
+                    "target": {"type": "section", "all": True}, "params": {"value": direction}}]})
+                report = apply_plan(plan)
+                self.assertEqual(verify_plan(plan, report)["status"], "passed")
+                for section in Document(output).sections:
+                    self.assertEqual(section.page_width > section.page_height, direction == "landscape")
+                    self.assertAlmostEqual(max(section.page_width.mm, section.page_height.mm), 297, places=1)
+                source = output
 
 
 if __name__ == "__main__":
