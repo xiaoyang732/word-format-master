@@ -132,6 +132,11 @@ def _attr(sources, tag, attr="val"):
     return None
 
 
+def outline_level(document, paragraph):
+    raw = _attr(ppr_sources(document, paragraph), "outlineLvl")
+    return int(raw) if raw is not None else None
+
+
 def resolved_color(document, node):
     """Theme color overrides the cached RGB value in the same OOXML layer."""
     theme = node.get(qn("w:themeColor"))

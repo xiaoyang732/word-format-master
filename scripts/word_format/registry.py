@@ -212,7 +212,8 @@ for action,prop,handler,section,effects in (
     ("citation.insert","citations",op.insert_citations,"citations",("validated citation placement text",)),
 ):
     REGISTRY[action]=Capability(action,prop,frozenset({"document"}),handler,complex_validator(section),read_complex,verify_complex,
-                               {"contract":section,"scope":"document; use atomic properties for local formatting"},True,effects)
+                               {"contract":section,"scope":"document; use atomic properties for local formatting",
+                                **({"level1":["keep","chinese","arabic","arabic-space"],"level2":["keep","arabic"],"level3":["keep","arabic"]} if section=="heading_numbering" else {})},True,effects)
 
 
 def capabilities():

@@ -14,6 +14,7 @@ from docx.oxml.ns import qn
 
 from config import LIST_NUMBERING_STYLES
 from document_structure import detect_module_spans, validate_module_order
+from word_format.properties import outline_level
 
 EXPECTED_LIST_MARKERS = LIST_NUMBERING_STYLES
 
@@ -40,6 +41,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
                 "index": index,
                 "text": paragraph.text.strip(),
                 "style_name": paragraph.style.name if paragraph.style else "",
+                "outline_level": outline_level(document, paragraph._p),
             }
             for index, paragraph in enumerate(paragraphs)
         ]

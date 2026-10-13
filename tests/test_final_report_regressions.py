@@ -26,6 +26,8 @@ from word_format.contracts import FormatError
 from word_format.registry import REGISTRY
 from word_format.properties import xml_value
 from word_format import audit_document
+from word_format import inspect_document
+from word_format.inspect import DocumentIndex
 
 
 class JsonSafetyTests(unittest.TestCase):
@@ -171,6 +173,51 @@ class PropertySemanticsTests(unittest.TestCase):
                     self.assertEqual(section.page_width > section.page_height, direction == "landscape")
                     self.assertAlmostEqual(max(section.page_width.mm, section.page_height.mm), 297, places=1)
                 source = output
+
+
+class ModuleContractTests(unittest.TestCase):
+    def test_plain_modules_custom_outlines_occurrences_and_arabic_space(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source, output = Path(folder) / "source.docx", Path(folder) / "output.docx"
+            doc = Document()
+            style = doc.styles.add_style("Custom chapter", WD_STYLE_TYPE.PARAGRAPH)
+            outline = OxmlElement("w:outlineLvl")
+            outline.set(qn("w:val"), "0")
+            style.element.get_or_add_pPr().append(outline)
+            for text in ("论文标题", "摘要", "中文摘要正文", "关键词：文档", "Abstract", "English abstract", "Key words: document"):
+                doc.add_paragraph(text)
+            for i in range(3):
+                doc.add_paragraph("Custom chapter " + str(i), style=style)
+                doc.add_paragraph("Body")
+            index = DocumentIndex(doc)
+            chapters = [r for r in index.records.values() if r.get("heading_level") == 1]
+            self.assertEqual([r["module_occurrence"] for r in chapters], [1, 2, 3])
+            self.assertEqual(index.records["p0"]["role"], "title")
+            self.assertEqual(index.records["p3"]["role"], "keywords")
+            doc.save(source)
+            spec = {"title": {"font_size_pt": 22, "alignment": "center"},
+                "body": {"font_size_pt": 12, "first_line_indent_chars": 2},
+                "headings": [{"level": 1, "font_size_pt": 16, "bold": True, "first_line_indent_chars": 0}],
+                "keywords": {"font_size_pt": 11, "first_line_indent_chars": 0},
+                "lists": {"headings": {"level1": "arabic-space"}}}
+            plan = build_plan(source, output, {"spec": spec})
+            report = apply_plan(plan)
+            self.assertEqual(verify_plan(plan, report)["status"], "passed")
+            out = Document(output)
+            self.assertEqual(out.paragraphs[0].runs[0].font.size.pt, 22)
+            for i in (1, 4):
+                self.assertEqual(out.paragraphs[i].runs[0].font.size.pt, 16)
+                self.assertTrue(out.paragraphs[i].runs[0].bold)
+                self.assertIsNone(out.paragraphs[i]._p.find("./" + qn("w:pPr") + "/" + qn("w:numPr")))
+            for i in (3, 6):
+                self.assertEqual(out.paragraphs[i].runs[0].font.size.pt, 11)
+            self.assertEqual(sum(p.style.name == "Heading 1" for p in out.paragraphs), 3)
+            markers = [n.get(qn("w:val")) for n in out.part.numbering_part.element.iter(qn("w:lvlText"))]
+            self.assertIn("%1", markers)
+            inspected = inspect_document(output)
+            fmt = next(r["format"] for r in inspected["objects"] if r["kind"] == "paragraph")
+            expected = {c.property for c in REGISTRY.values() if not c.structural and "paragraph" in c.targets}
+            self.assertEqual(set(fmt), expected)
 
 
 if __name__ == "__main__":

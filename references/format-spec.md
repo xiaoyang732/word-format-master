@@ -156,6 +156,16 @@ Treat `citation_system`, `citation_mode`, and `numbering_mode` as provenance and
 
 For citation placement, export body paragraphs and existing bibliography entries with `scripts/analyze_citations.py`. Let AI return only `citations.placements`, including `paragraph_index`, `paragraph_sha256`, `reference_ids`, `citation_text`, `insert`, `spacing`, `confidence`, and `reason`. `spacing` is one of `none`, `space-before`, `space-after`, or `spaces-around`. Accept only existing reference IDs. Recompute every paragraph fingerprint immediately before insertion and reject the whole batch on mismatch. AI chooses placement; deterministic code performs the DOCX edit.
 
+### Titles and module typography
+
+`title` applies only explicit tokens to Title/Subtitle and the first non-empty
+cover paragraph. A color-only title rule does not authorize a new size or font.
+Unnumbered module headings use explicit level-1 tokens through `WFM Module Heading`
+without becoming numbered chapters. `keywords` supplies explicit keyword typography;
+template `document_structure.ordered_modules[].style_roles.keywords.tokens` remains
+available for separate Chinese and English rules. Inspection reports every registered
+paragraph/font property, including effective outline levels and spacing units.
+
 ### Figure and Table Captions
 
 Store separate `captions.figure` and `captions.table` objects:

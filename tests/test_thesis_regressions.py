@@ -162,9 +162,9 @@ class ThesisRegressionTests(unittest.TestCase):
         self.assertEqual(verify_plan(plan, report)["status"], "passed")
         out = Document(self.output)
         # Explicit global body values win; the unrelated module spacing survives.
-        self.assertEqual(out.paragraphs[1].runs[0].font.size.pt, 12)
+        self.assertEqual(read_font(out, out.paragraphs[1]._p, out.paragraphs[1].runs[0]._r, "font_size_pt"), 12)
         self.assertEqual(out.paragraphs[1].paragraph_format.space_after.pt, 5)
-        self.assertEqual(out.paragraphs[2].runs[0].font.size.pt, 16)
+        self.assertEqual(read_font(out, out.paragraphs[2]._p, out.paragraphs[2].runs[0]._r, "font_size_pt"), 16)
         for p in out.paragraphs[3:]:
             self.assertEqual(p.runs[0].font.size.pt, 12)
             self.assertEqual(read_paragraph(out, p._p, "first_line_indent"), {"value": 2, "unit": "chars"})
@@ -207,7 +207,7 @@ class ThesisRegressionTests(unittest.TestCase):
         self.assertEqual(verify_plan(plan, report)["status"], "passed")
         out = Document(self.output)
         self.assertEqual(out.paragraphs[0]._p.xml, doc.paragraphs[0]._p.xml)
-        self.assertEqual(out.paragraphs[-1].runs[0].font.size.pt, 12)
+        self.assertEqual(read_font(out, out.paragraphs[-1]._p, out.paragraphs[-1].runs[0]._r, "font_size_pt"), 12)
         # A document with no front-matter marker must remain a body-only input.
         self.source = self.folder / "plain.docx"
         self.output = self.folder / "plain-output.docx"
@@ -216,7 +216,8 @@ class ThesisRegressionTests(unittest.TestCase):
         plain.save(self.source)
         plan = build_plan(self.source, self.output, {"spec": {"body": {"font_size_pt": 12}}})
         apply_plan(plan)
-        self.assertEqual(Document(self.output).paragraphs[0].runs[0].font.size.pt, 12)
+        plain_out = Document(self.output)
+        self.assertEqual(read_font(plain_out, plain_out.paragraphs[0]._p, plain_out.paragraphs[0].runs[0]._r, "font_size_pt"), 12)
 
     def test_indent_repairs_conflicting_xml_and_replaces_style_hanging(self):
         doc = Document()

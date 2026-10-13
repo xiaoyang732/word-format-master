@@ -46,6 +46,13 @@
       "title": {
         "color": "000000"
       },
+      "keywords": {
+        "font_latin": "Times New Roman",
+        "font_east_asia": "宋体",
+        "font_size_pt": 12,
+        "alignment": "left",
+        "first_line_indent_chars": 0
+      },
       "lists": {
         "headings": {
           "level1": "chinese",

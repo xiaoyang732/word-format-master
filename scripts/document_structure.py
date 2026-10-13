@@ -102,10 +102,10 @@ def classify_role(text: str, style_name: str = "", *, first: bool = False) -> st
     normalized = normalized_style_name(style_name)
     if normalized in {"title", "subtitle"}:
         return "title"
-    if first:
-        return "heading"
     if "keyword" in normalized or "关键词" in normalized or re.search(r"^\s*(?:关\s*键\s*词|key\s*words?)\s*[:：]", text, re.I):
         return "keywords"
+    if first:
+        return "heading"
     if normalized.startswith("heading") or normalized.startswith("标题") or is_heading_candidate(text, style_name):
         return "heading"
     return "body"

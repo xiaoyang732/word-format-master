@@ -142,7 +142,7 @@ def validate_section(section,data):
     elif section=="heading_numbering":
         require_keys(data,{"level1","level2","level3"},label=section)
         for level,value in data.items():
-            if value not in ({"keep","chinese","arabic"} if level=="level1" else {"keep","arabic"}):
+            if value not in ({"keep","chinese","arabic","arabic-space"} if level=="level1" else {"keep","arabic"}):
                 raise FormatError(f"Invalid {level} heading numbering")
     elif section=="reference_numbering":
         require_keys(data,{"numbering_mode"},{"numbering_mode"},section)
@@ -166,11 +166,12 @@ def validate_section(section,data):
 
 
 def validate_spec(spec):
-    require_keys(spec,{"schema_version","id","name","mode","template_required","page","body","title","headings","lists","captions","tables",
+    require_keys(spec,{"schema_version","id","name","mode","template_required","page","body","title","keywords","headings","lists","captions","tables",
                        "headers_footers","page_numbers","table_of_contents","references","document_structure","citations","authority","notes","unsupported","ai_analysis_summary","headings_numbering_format"},label="spec")
     if spec.get("schema_version","1.0")!="1.0": raise FormatError("Unsupported legacy spec version")
     if spec.get("template_required"): raise FormatError("Official templates require their publisher workflow", "unsupported")
     if "title" in spec: validate_tokens(spec["title"])
+    if "keywords" in spec: validate_tokens(spec["keywords"])
     for section in ("page","body","headers_footers","page_numbers","table_of_contents","references","citations"):
         if section in spec: validate_section(section,spec[section])
     headings=spec.get("headings",[])
@@ -237,7 +238,7 @@ def spec_request(index,spec,clear_direct=False):
         occurrence=max(0,r.get("module_occurrence",1)-1)
         module=matching[min(occurrence,len(matching)-1)] if matching else None
         if module:
-            role="heading" if r.get("role")=="heading" else "title" if r.get("role")=="title" else "keywords" if r.get("module")=="keywords" else "body"
+            role="heading" if r.get("role")=="heading" else "title" if r.get("role")=="title" else "keywords" if r.get("role")=="keywords" else "body"
             tokens=module.get("style_roles",{}).get(role,{}).get("tokens",{})
             effective[oid]=dict(tokens)
         role=r.get("role")
@@ -251,11 +252,11 @@ def spec_request(index,spec,clear_direct=False):
             tokens=next((h for h in spec.get("headings",[]) if h["level"]==r.get("heading_level")),{})
             if tokens: style_name=f"Heading {tokens['level']}"
             elif r.get("heading_level") is None:
-                # Module titles (abstract/references/etc.) may be plain text
-                # before numbering normalization. Apply the requested H1 color
-                # only; do not invent their other formatting or heading level.
-                first=next((h for h in spec.get("headings",[]) if h["level"]==1),{})
-                if "color" in first: tokens={"color":first["color"]}
+                tokens=next((h for h in spec.get("headings",[]) if h["level"]==1),{})
+                if tokens: style_name="WFM Module Heading"
+        elif role=="keywords":
+            tokens=spec.get("keywords",{})
+            if tokens or effective.get(oid): style_name="WFM Keywords"
         elif role=="reference":
             tokens=spec.get("references",{});style_name="Bibliography" if tokens else None
         elif role=="caption":
@@ -264,6 +265,7 @@ def spec_request(index,spec,clear_direct=False):
                 labels=(cap.get("label"),)+defaults
                 if cap and any(label and re.match(r"^\s*"+re.escape(label)+r"\s*\d",r.get("text",""),re.I) for label in labels):
                     tokens=cap;style_name=cap.get("style_name") or ("Figure Caption" if label_kind=="figure" else "Table Caption")
+        style_name=tokens.get("style_name") or effective.get(oid,{}).get("style_name") or style_name
         if style_name: add("paragraph.style.assign",[oid],{"name":style_name})
         merged=effective.setdefault(oid,{})
         # Remove alternate unit representation when a higher priority source sets it.
@@ -354,7 +356,11 @@ def spec_request(index,spec,clear_direct=False):
     if spec.get("citations",{}).get("placements"): add("citation.insert",["document"],spec["citations"])
     # Citation anchors are source indices, and heading conversion can change their
     # text, so explicit citation insertions precede structural normalization.
-    operations.sort(key=lambda item: 0 if item["action"]=="citation.insert" else 2 if item["action"]=="toc.configure" else 1)
+    # Set inherited defaults before deciding whether a local override is a no-op.
+    # Otherwise a value skipped against the old Normal style can change later.
+    operations.sort(key=lambda item: 0 if item["action"]=="citation.insert" else
+                    1 if item["target"]["type"]=="style" else
+                    3 if item["action"]=="toc.configure" else 2)
     return {"schema_version":"2.0","origin":"dashboard","operations":operations,"verification_spec":copy.deepcopy(spec),
             "notes":["Legacy clear_direct is scoped to requested properties; unrelated direct formatting is preserved."] if clear_direct else []}
 
@@ -362,7 +368,7 @@ def spec_request(index,spec,clear_direct=False):
 # Generated from executable actions, not a second independent supported-fields list.
 def legacy_paths():
     paths={}
-    for prefix in ("body","title","headings.*","references","captions.figure","captions.table","headers_footers.header","headers_footers.footer","page_numbers"):
+    for prefix in ("body","title","keywords","headings.*","references","captions.figure","captions.table","headers_footers.header","headers_footers.footer","page_numbers"):
         for key,action in (FONT|PARA).items(): paths[f"{prefix}.{key}"]=action
         for name in INDENTS:
             for unit in ("mm","chars"): paths[f"{prefix}.{name}_{unit}"]="paragraph."+name+".set"

@@ -1119,9 +1119,9 @@ def normalize_heading_styles(
         if current_style in TOC_MANAGED_STYLES or current_style.lower().startswith("wfm toc"):
             continue
         from document_structure import heading_level, is_heading_candidate
-        from word_format.properties import strip_text_prefix
+        from word_format.properties import strip_text_prefix, outline_level
         is_heading_or_candidate = is_heading_candidate(text, current_style)
-        actual_level = heading_level(text, current_style)
+        actual_level = heading_level(text, current_style, outline_level(document, paragraph._p))
         if actual_level and actual_level not in {1, 2, 3}:
             continue
         if actual_level and {1: level1_format, 2: level2_format, 3: level3_format}[actual_level] == "keep":

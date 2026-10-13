@@ -136,7 +136,7 @@ def verify_complex_state(actual,params,name):
             if mode=="keep": continue
             candidates=[r for r in actual if r["style"]==f"Heading {level}" and r["num_id"] not in {None,"0"}]
             # No headings of this level is a no-op, not permission to invent one.
-            if any(r["marker"]!=({1:"第%1章" if mode=="chinese" else "%1、",2:"%1.%2",3:"%1.%2.%3"}[level]) for r in candidates): return False
+            if any(r["marker"]!=({1:{"chinese":"第%1章","arabic":"%1、","arabic-space":"%1"}[mode] if level==1 else None,2:"%1.%2",3:"%1.%2.%3"}[level]) for r in candidates): return False
         return True
     if name=="numbered":
         from config import LIST_NUMBERING_STYLES

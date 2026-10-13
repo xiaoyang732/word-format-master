@@ -13,7 +13,7 @@ from docx.text.paragraph import Paragraph
 
 from document_structure import MODULE_MARKERS, classify_module, heading_level
 from .contracts import FormatError, json_hash, sha256, source_path
-from .properties import read_font, read_paragraph, text_runs, xml_value
+from .properties import read_font, read_paragraph, text_runs, xml_value, outline_level
 
 
 def paragraph_text(p):
@@ -38,9 +38,10 @@ class DocumentIndex:
             style = next((s for s in document.styles if s.style_id == style_id), None)
             style_name = style.name if style is not None else style_id
             text = paragraph_text(p)
-            level = heading_level(text.strip(), style_name)
-            special = classify_module(text.strip(), style_name)
-            role = "heading" if level or special in MODULE_MARKERS else "body"
+            outline = outline_level(document, p)
+            level = heading_level(text.strip(), style_name, outline)
+            special = classify_module(text.strip(), style_name, outline)
+            role = "keywords" if special == "keywords" else "heading" if level or special in MODULE_MARKERS else "body"
             normalized = style_name.lower().replace(" ", "")
             if normalized in {"title", "subtitle"}:
                 role = "title"
@@ -57,7 +58,7 @@ class DocumentIndex:
             self._add(oid, "paragraph", "word/document.xml", p, {
                 "text": text, "text_sha256": hashlib.sha256(text.encode()).hexdigest(),
                 "style_id": style_id, "style_name": style_name, "role": role,
-                "heading_level": level, "top_level": top, "unsupported_container": unsafe,
+                "heading_level": level, "outline_level": outline, "top_level": top, "unsupported_container": unsafe,
                 "module": special if special in MODULE_MARKERS else None, "chapter_id": None,
             })
             if top:
@@ -74,6 +75,9 @@ class DocumentIndex:
             module="cover"
             module_counts["cover"]=1
             module_occurrence=1
+            first = next(oid for oid in self.top_ids[:boundary] if self.records[oid]["text"].strip())
+            if self.records[first]["role"] == "body":
+                self.records[first]["role"] = "title"
         for oid in self.top_ids:
             record = self.records[oid]
             if record["module"]:
@@ -83,6 +87,8 @@ class DocumentIndex:
                 chapter = None
             elif record["heading_level"] == 1:
                 module = "chapters"
+                module_counts[module]=module_counts.get(module,0)+1
+                module_occurrence=module_counts[module]
                 chapter = oid
             record["module"] = module
             record["module_occurrence"]=module_occurrence
@@ -175,11 +181,15 @@ def inspect_document(path):
     document=Document(source)
     index=DocumentIndex(document)
     records=index.public()
+    from .registry import REGISTRY
+    properties = {cap.property for cap in REGISTRY.values() if not cap.structural and "paragraph" in cap.targets}
     for record in records:
         if record["kind"] == "paragraph":
             p=index.elements[record["id"]]
-            record["format"]={name:index.font_values(record["id"],name) for name in ("font_size_pt","font_east_asia","font_latin","bold","italic")}
-            record["format"].update({name:read_paragraph(document,p,name) for name in ("alignment","space_before_pt","space_after_pt","line_spacing","first_line_indent")})
+            from .properties import FONT_TAGS, PARAGRAPH_TAGS
+            record["format"]={name:index.font_values(record["id"],name) for name in FONT_TAGS if name in properties}
+            record["format"].update({name:read_paragraph(document,p,name) for name in PARAGRAPH_TAGS if name in properties})
+            record["format"]["style"] = record.get("style_name") or index.paragraph(record["id"]).style.name
     return {"schema_version":"2.0","source":{"path":str(source),"sha256":sha256(source)},"objects":records,
             "counting_rule":"Paragraph ordinal is 1-based among non-empty paragraphs after role/chapter filters; table paragraphs excluded unless explicitly selected.",
             "limits":["Page-number selectors need renderer anchors; unsupported here.","Text ranges with fields, drawings, tabs or revisions are rejected."]}
