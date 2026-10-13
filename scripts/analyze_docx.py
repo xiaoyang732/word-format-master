@@ -1387,15 +1387,17 @@ def main() -> int:
     parser.add_argument("input", help="DOCX or DOTX file")
     parser.add_argument("--output", help="Write JSON to this path instead of stdout")
     args = parser.parse_args()
+    from json_output import ensure_protected_paths, write_json
     try:
+        ensure_protected_paths(args.output, args.input)
         result = analyze_docx(args.input)
+        if args.output:
+            write_json(args.output, result, args.input)
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     rendered = json.dumps(result, ensure_ascii=False, indent=2)
-    if args.output:
-        Path(args.output).write_text(rendered + "\n", encoding="utf-8")
-    else:
+    if not args.output:
         sys.stdout.write(rendered + "\n")
     return 0
 

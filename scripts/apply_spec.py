@@ -1609,7 +1609,10 @@ def main() -> int:
     )
     parser.add_argument("--report", help="Write application report JSON")
     args = parser.parse_args()
+    from json_output import ensure_protected_paths, write_json
+    protected = (args.input, args.output, args.handoff, args.spec)
     try:
+        ensure_protected_paths(args.report, *protected)
         handoff = load_confirmed_handoff(args.handoff, args.input, args.output)
         if args.spec:
             spec = normalize_spec(load_json(args.spec))
@@ -1626,13 +1629,13 @@ def main() -> int:
             clear_direct=bool(handoff.get("clear_direct_font_formatting", False)),
             verification=handoff.get("verification") if isinstance(handoff.get("verification"), dict) else None,
         )
+        if args.report:
+            write_json(args.report, report, *protected)
     except (OSError, ValueError, json.JSONDecodeError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
     rendered = json.dumps(report, ensure_ascii=False, indent=2)
-    if args.report:
-        Path(args.report).write_text(rendered + "\n", encoding="utf-8")
-    else:
+    if not args.report:
         print(rendered)
     return 0
 

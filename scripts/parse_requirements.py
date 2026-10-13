@@ -491,11 +491,13 @@ def main() -> int:
 
     if bool(args.input) == bool(args.text):
         parser.error("provide exactly one of input or --text")
+    from json_output import ensure_protected_paths, write_json
+    ensure_protected_paths(args.output, args.input)
     text = args.text if args.text is not None else Path(args.input).read_text(encoding="utf-8-sig")
     result = parse_requirements(text)
     rendered = json.dumps(result, ensure_ascii=False, indent=2)
     if args.output:
-        Path(args.output).write_text(rendered + "\n", encoding="utf-8")
+        write_json(args.output, result, args.input)
     else:
         sys.stdout.write(rendered + "\n")
     return 0

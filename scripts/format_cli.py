@@ -10,6 +10,7 @@ from pathlib import Path
 
 from word_format import apply_plan, audit_document, build_plan, capabilities, inspect_document, verify_plan
 from word_format.contracts import FormatError
+from json_output import ensure_protected_paths, write_json
 
 
 def read_json(path):
@@ -35,10 +36,7 @@ def main():
             plan=read_json(args.plan)
             protected.extend([Path(plan["source"]["path"]).resolve(),Path(plan["output_path"]).resolve()])
         if args.command=="verify": protected.append(Path(args.report).resolve())
-        if destination:
-            path=Path(destination).resolve()
-            if any(path==p or (path.exists() and p.exists() and path.samefile(p)) for p in protected):
-                raise FormatError("JSON output must not overwrite document, request, plan or verification input")
+        ensure_protected_paths(destination, *protected)
         if args.command=="capabilities": result=capabilities()
         elif args.command=="inspect": result=inspect_document(args.input)
         elif args.command=="audit": result=audit_document(args.input,read_json(args.request))
@@ -47,8 +45,7 @@ def main():
         else: result=verify_plan(read_json(args.plan),read_json(args.report))
         rendered=json.dumps(result,ensure_ascii=False,indent=2,allow_nan=False)+"\n"
         if destination:
-            path=Path(destination).resolve()
-            path.parent.mkdir(parents=True,exist_ok=True);path.write_text(rendered,encoding="utf-8")
+            write_json(destination, result, *protected)
         else: print(rendered,end="")
         return 0 if result.get("status") not in {"failed","unsupported","needs_clarification"} else 2
     except (FormatError,ValueError,OSError,KeyError,TypeError) as exc:

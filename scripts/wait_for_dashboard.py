@@ -19,6 +19,10 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=3600, help="Maximum seconds to wait")
     parser.add_argument("--poll-interval", type=float, default=0.5, help="Seconds between checks")
     args = parser.parse_args()
+    from cli_output import configure_cli_output
+    from json_output import ensure_protected_paths, write_json
+    configure_cli_output()
+    ensure_protected_paths(args.output)
     endpoint = urljoin(args.url.rstrip("/") + "/", "api/session/result")
     deadline = time.monotonic() + max(1.0, args.timeout)
     while time.monotonic() < deadline:
@@ -29,8 +33,7 @@ def main() -> int:
                     time.sleep(max(0.1, args.poll_interval))
                     continue
                 destination = Path(args.output).resolve()
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+                write_json(destination, payload, payload.get("source", {}).get("path"), payload.get("output_path"))
                 print(f"Dashboard handoff ready: {destination}")
                 return 0
         except HTTPError as exc:
