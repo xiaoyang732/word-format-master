@@ -83,12 +83,74 @@ async function dashboardUrl() {
     assert.equal(headerSpec.even_header.text, "论文题目");
     assert.equal(headerSpec.different_odd_even, true);
     assert.match(await page.locator("#previewHeaderText").textContent(), /动态示意/);
+    const injected = '<img src=x onerror="window.cvInjected=true">';
+    await page.evaluate(payload => {
+      renderCrossValidation({ corroborations: [
+        { field: payload, value: payload, track: payload },
+        { field: "body.line_spacing", value: { kind: "multiple", value: payload } },
+        { field: "body.first_line_indent_mm", value: payload },
+        { field: "headings", levels: payload },
+        { field: "references", standard: payload },
+        { field: "lists", style: payload },
+      ] });
+    }, injected);
+    assert.equal(await page.locator("#cvCorroborationsList img").count(), 0);
+    assert.ok((await page.locator("#cvCorroborationsList").textContent()).includes(injected));
+    assert.equal(await page.evaluate(() => window.cvInjected), undefined);
+    for (const status of ["pending", "passed", "skipped"]) {
+      await page.evaluate(({ status, payload }) => {
+        state.aiSession = { visual_verification: { status, reason: payload } };
+        renderSessionVisualLog();
+      }, { status, payload: injected });
+      assert.match(await page.locator("#visualReviewLog").textContent(), /视觉验收/);
+      assert.equal(await page.locator("#visualReviewLog img").count(), 0);
+      const logClass = { pending: "log-pending", passed: "log-success", skipped: "log-neutral" }[status];
+      assert.equal(await page.locator(`#visualReviewLog .${logClass}`).count() > 0, true);
+    }
+    const locked = await page.evaluate(() => {
+      state.sessionSubmitted = true;
+      renderAll();
+      const before = JSON.stringify(state.spec);
+      const controls = [
+        ["#bodyLineSpacingKindSelect", "change", "exact"],
+        ["#referenceLineSpacingKindSelect", "change", "exact"],
+        ["#headingFontSizeSelect", "change", "22"],
+        ["#headingSizeInput", "input", "30"],
+        ["#bodyFontSizeInput", "input", "30"],
+        ["#referenceSizeInput", "input", "30"],
+        ["#bodyFirstLineIndentValueInput", "input", "8"],
+        ["#referenceHangingIndentValueInput", "input", "8"],
+        ["#captionFigureFontSizeSelect", "change", "22"],
+        ["#captionTableFontSizeSelect", "change", "22"],
+        ["#headerSectionNumberInput", "input", "5"],
+        ['[data-spec-path="body.font_east_asia"]', "input", "changed"],
+        ["#presetSelect", "change", "thesis-standard"],
+      ];
+      for (const [selector, type, value] of controls) {
+        const input = document.querySelector(selector);
+        input.value = value;
+        input.dispatchEvent(new Event(type, { bubbles: true }));
+      }
+      document.querySelector('[data-heading-level="2"]').click();
+      return {
+        unchanged: before === JSON.stringify(state.spec),
+        disabled: ["#lineSpacingInput", "#referenceSpacingInput", "#headingSizeInput", "#headingBoldInput"]
+          .every(selector => document.querySelector(selector).disabled),
+      };
+    });
+    assert.deepEqual(locked, { unchanged: true, disabled: true });
+    await page.evaluate(() => {
+      state.sessionSubmitted = false;
+      state.aiSession = null;
+      renderAll();
+    });
+    assert.equal(await page.locator("#visualReviewLog").textContent(), "");
     for (const viewport of [{ width: 1440, height: 1000 }, { width: 390, height: 844 }]) {
       await page.setViewportSize(viewport);
       await page.screenshot({ path: path.join(screenshotDir, `dashboard-${viewport.width}.png`), fullPage: true });
       assert.ok(await page.locator("#headerSectionNumberInput").isVisible());
     }
     assert.deepEqual(errors, []);
-    console.log("Dashboard UI passed: zero indent, precise units, template reselection, section header fields, shared capabilities, desktop/mobile screenshots.");
+    console.log("Dashboard UI passed: formatting controls, locked submissions, escaped cross-validation, visual logs, desktop/mobile screenshots.");
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => { if (server) server.kill(); });

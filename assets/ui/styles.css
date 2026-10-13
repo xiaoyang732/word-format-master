@@ -1131,6 +1131,12 @@ textarea:focus {
   font-size: 12px;
 }
 
+.visual-review-log {
+  display: grid;
+  gap: 4px;
+  line-height: 1.5;
+}
+
 .log-success {
   margin: 0;
   color: var(--green-dark);

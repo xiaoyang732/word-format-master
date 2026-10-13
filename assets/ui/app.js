@@ -493,7 +493,7 @@ function visualReviewUnavailableMessage() {
 }
 
 function updateInputs() {
-  const workflowLocked = state.sessionSubmitted || (isOfficialTemplateWorkflow() && !state.analysis?.source);
+  const workflowLocked = isWorkflowLocked();
   $("#headerSectionNumberInput").value = state.spec.headers_footers?.section_number ?? "";
   $("#headerSectionNumberInput").disabled = workflowLocked;
   const runtimeReady = visualReviewRuntimeReady();
@@ -590,6 +590,8 @@ function updateInputs() {
   $("#presetSelect").disabled = state.sessionSubmitted;
   $("#requirementsText").disabled = state.sessionSubmitted;
   $("#analyzeTextButton").disabled = state.sessionSubmitted;
+  $("#fileInput").disabled = state.sessionSubmitted;
+  if (state.sessionSubmitted) $("#analyzeFileButton").disabled = true;
   updateHeadingEditor(workflowLocked);
   $("#clearDirectInput").disabled = workflowLocked;
 }
@@ -1029,6 +1031,7 @@ function renderAll() {
   } else {
     $("#visualReviewStatus").textContent = "本地下载不会调用 AI；应用后会标记为已跳过。请使用 AI 交接流程执行视觉验收。";
   }
+  renderSessionVisualLog();
   applyButton.title = sessionMode
     ? (state.sessionSubmitted ? "设置已提交，等待 AI 使用交接方案修改文档" : "提交确认的参数、写入方法和验收选项给 AI")
     : (isOfficialTemplateWorkflow() ? `${selectedPreset()?.name || "当前模板"} 必须在母版中排版，不能作为数值预设直接套用` : "");
@@ -1230,10 +1233,19 @@ function visualReviewMessage(visual) {
   return `视觉验收：${visualReviewLabel(visual?.status)}${reason}`;
 }
 
+function isWorkflowLocked() {
+  return state.sessionSubmitted || (isOfficialTemplateWorkflow() && !state.analysis?.source);
+}
+
 function renderSessionVisualLog() {
   const handoff = state.sessionHandoff;
   const visual = state.aiSession?.visual_verification || handoff?.visual_verification;
-  if (!visual) return;
+  const log = $("#visualReviewLog");
+  if (!log) return;
+  if (!visual) {
+    log.replaceChildren();
+    return;
+  }
   const entries = [];
   if (handoff) {
     const methodCount = handoff.application_methods?.length || 0;
@@ -1255,6 +1267,7 @@ function renderSessionVisualLog() {
   if (visual.status === "pending") {
     entries.push('<p class="log-pending">AI 完成写入后会重新分析结构、渲染每一页，并回传最终视觉验收结果。</p>');
   }
+  log.innerHTML = entries.join("");
 }
 
 function stopVisualStatusPolling() {
@@ -1391,22 +1404,25 @@ function renderCrossValidation(cvReport) {
     }
   }
   list.innerHTML = cvReport.corroborations.map((item) => {
+    const field = escapeHtml(item.field || "");
     let desc = "";
     if (item.field === "body.line_spacing") {
-      const v = item.value?.kind === "multiple" ? `${item.value.value} 倍行距` : `${item.value?.value_pt || ""} 磅固定值`;
+      const v = item.value?.kind === "multiple"
+        ? `${escapeHtml(item.value.value)} 倍行距`
+        : `${escapeHtml(item.value?.value_pt || "")} 磅固定值`;
       desc = `正文行距：<strong>${v}</strong>`;
     } else if (item.field === "body.first_line_indent_mm") {
-      desc = `首行缩进：<strong>${item.value} mm (2 字符)</strong>`;
+      desc = `首行缩进：<strong>${escapeHtml(item.value)} mm (2 字符)</strong>`;
     } else if (item.field === "headings") {
-      desc = `标题层级：<strong>${item.levels} 级标题体系完整识别</strong>`;
+      desc = `标题层级：<strong>${escapeHtml(item.levels)} 级标题体系完整识别</strong>`;
     } else if (item.field === "captions") {
       desc = `图表标注：<strong>图在下、表在上 (五号居中)</strong>`;
     } else if (item.field === "references") {
-      desc = `参考文献：<strong>${item.standard || "GB/T 7714"} (两端对齐/悬挂缩进)</strong>`;
+      desc = `参考文献：<strong>${escapeHtml(item.standard || "GB/T 7714")} (两端对齐/悬挂缩进)</strong>`;
     } else if (item.field === "lists") {
-      desc = `列表编号：<strong>${item.style || "编号列表"}</strong>`;
+      desc = `列表编号：<strong>${escapeHtml(item.style || "编号列表")}</strong>`;
     } else {
-      desc = `${item.field}：${JSON.stringify(item.value || "")}`;
+      desc = `${field}：${escapeHtml(JSON.stringify(item.value || ""))}`;
     }
     return `
       <div class="cv-item">
@@ -1451,6 +1467,7 @@ async function handleFile(file) {
     if (!queued.task_id) throw new Error("本地服务没有返回对话 AI 分析任务");
     setStatus(`已将【${file.name}】交给当前对话 AI，等待分析结果自动回填...`);
     const result = await waitForConversationalAnalysis(queued.task_id);
+    if (state.sessionSubmitted) return;
 
     if (result.cross_validation) {
       renderCrossValidation(result.cross_validation);
@@ -1485,12 +1502,12 @@ async function handleFile(file) {
         : `✓ AI 双轨印证完成：${result.document.paragraphs} 个段落，${result.document.sections.length} 个分节，已自动配置参数`);
     }
     if (btn) {
-      btn.disabled = false;
+      btn.disabled = state.sessionSubmitted;
       btn.textContent = "✓ AI 分析完成 (已填充模板)";
     }
   } catch (error) {
     if (btn) {
-      btn.disabled = false;
+      btn.disabled = state.sessionSubmitted;
       btn.textContent = "🤖 重新进行 AI 分析";
     }
     setStatus(error.message, true);
@@ -1543,6 +1560,7 @@ async function loadSession() {
 }
 
 async function analyzeText() {
+  if (state.sessionSubmitted) return;
   const text = $("#requirementsText").value.trim();
   if (!text) {
     setStatus("格式要求为空", true);
@@ -1557,6 +1575,7 @@ async function analyzeText() {
     });
     const result = await response.json();
     if (!response.ok) throw new Error(result.error || "识别失败");
+    if (state.sessionSubmitted) return;
     state.analysis = result;
     state.customHeadingLevels.clear();
     state.spec = mergeIntoSelected(result.spec_patch || {});
@@ -1648,18 +1667,23 @@ function activateSettingsPanel(panelName) {
 
 function bindEvents() {
   $("#headerSectionNumberInput").addEventListener("input", (event) => {
+    if (isWorkflowLocked()) return;
     state.spec.headers_footers ??= {};
     if (event.target.value === "") delete state.spec.headers_footers.section_number;
     else state.spec.headers_footers.section_number = Number(event.target.value);
     renderPreview();
   });
-  $("#presetSelect").addEventListener("change", (event) => applyPreset(event.target.value));
+  $("#presetSelect").addEventListener("change", (event) => {
+    if (state.sessionSubmitted) return;
+    applyPreset(event.target.value);
+  });
   $$('[data-settings-tab]').forEach((tab) => {
     tab.addEventListener("click", () => activateSettingsPanel(tab.dataset.settingsTab));
   });
   activateSettingsPanel("source");
   $$("[data-spec-path]").forEach((input) => {
     input.addEventListener("input", () => {
+      if (isWorkflowLocked()) return;
       const value = input.type === "checkbox"
         ? input.checked
         : input.type === "number"
@@ -1680,6 +1704,7 @@ function bindEvents() {
   });
   // Body font size select
   $("#bodyFontSizeSelect")?.addEventListener("change", (event) => {
+    if (isWorkflowLocked()) return;
     const val = event.target.value;
     if (val === "custom") {
       $("#bodyCustomFontSizeRow").hidden = false;
@@ -1703,6 +1728,7 @@ function bindEvents() {
 
   // Body custom font size input
   $("#bodyFontSizeInput")?.addEventListener("input", (event) => {
+    if (isWorkflowLocked()) return;
     const numPt = Number(event.target.value) || 12;
     setPath(state.spec, "body.font_size_pt", numPt);
     const unit = $("#bodyFirstLineIndentUnitSelect")?.value || "chars";
@@ -1718,6 +1744,7 @@ function bindEvents() {
 
   // Body first line indent unit select
   $("#bodyFirstLineIndentUnitSelect")?.addEventListener("change", (event) => {
+    if (isWorkflowLocked()) return;
     const unit = event.target.value;
     const pt = state.spec.body?.font_size_pt || 12;
     const mm = indentMm(state.spec.body, "first_line_indent", pt);
@@ -1729,6 +1756,7 @@ function bindEvents() {
 
   // Body first line indent value input
   $("#bodyFirstLineIndentValueInput")?.addEventListener("input", (event) => {
+    if (isWorkflowLocked()) return;
     const val = Number(event.target.value) || 0;
     const unit = $("#bodyFirstLineIndentUnitSelect")?.value || "chars";
     const pt = state.spec.body?.font_size_pt || 12;
@@ -1740,6 +1768,7 @@ function bindEvents() {
 
   // Body line spacing kind select
   $("#bodyLineSpacingKindSelect")?.addEventListener("change", (event) => {
+    if (isWorkflowLocked()) return;
     const kind = event.target.value;
     state.spec.body ??= {};
     if (kind === "exact") {
@@ -1755,12 +1784,13 @@ function bindEvents() {
     } else {
       state.spec.body.line_spacing = { kind: "multiple", value: 1.5 };
     }
-    updateLineSpacingUI("body", state.spec.body.line_spacing, false);
+    updateLineSpacingUI("body", state.spec.body.line_spacing, isWorkflowLocked());
     renderPreview();
   });
 
   // Body line spacing value input
   $("#lineSpacingInput")?.addEventListener("input", (event) => {
+    if (isWorkflowLocked()) return;
     const kind = $("#bodyLineSpacingKindSelect")?.value || "multiple";
     state.spec.body ??= {};
     if (kind === "exact" || kind === "at_least") {
@@ -1773,6 +1803,7 @@ function bindEvents() {
 
   // Reference line spacing kind select
   $("#referenceLineSpacingKindSelect")?.addEventListener("change", (event) => {
+    if (isWorkflowLocked()) return;
     const kind = event.target.value;
     state.spec.references ??= {};
     if (kind === "exact") {
@@ -1788,12 +1819,13 @@ function bindEvents() {
     } else {
       state.spec.references.line_spacing = { kind: "multiple", value: 1 };
     }
-    updateLineSpacingUI("reference", state.spec.references.line_spacing, false);
+    updateLineSpacingUI("reference", state.spec.references.line_spacing, isWorkflowLocked());
     renderPreview();
   });
 
   // Reference line spacing value input
   $("#referenceSpacingInput")?.addEventListener("input", (event) => {
+    if (isWorkflowLocked()) return;
     const kind = $("#referenceLineSpacingKindSelect")?.value || "multiple";
     state.spec.references ??= {};
     if (kind === "exact" || kind === "at_least") {
@@ -1806,6 +1838,7 @@ function bindEvents() {
 
   // Heading font size select
   $("#headingFontSizeSelect")?.addEventListener("change", (event) => {
+    if (isWorkflowLocked()) return;
     const val = event.target.value;
     const heading = headingForLevel(state.selectedHeadingLevel, true);
     if (val === "custom") {
@@ -1817,13 +1850,14 @@ function bindEvents() {
       heading.font_size_pt = numPt;
       $("#headingSizeInput").value = numPt;
       state.customHeadingLevels.add(state.selectedHeadingLevel);
-      updateHeadingEditor(false);
+      updateHeadingEditor(isWorkflowLocked());
       renderPreview();
     }
   });
 
   // Caption figure font size select
   $("#captionFigureFontSizeSelect")?.addEventListener("change", (event) => {
+    if (isWorkflowLocked()) return;
     const val = event.target.value;
     state.spec.captions ??= {};
     state.spec.captions.figure ??= {};
@@ -1841,6 +1875,7 @@ function bindEvents() {
 
   // Caption table font size select
   $("#captionTableFontSizeSelect")?.addEventListener("change", (event) => {
+    if (isWorkflowLocked()) return;
     const val = event.target.value;
     state.spec.captions ??= {};
     state.spec.captions.table ??= {};
@@ -1858,6 +1893,7 @@ function bindEvents() {
 
   // Reference font size select
   $("#referenceFontSizeSelect")?.addEventListener("change", (event) => {
+    if (isWorkflowLocked()) return;
     const val = event.target.value;
     state.spec.references ??= {};
     if (val === "custom") {
@@ -1881,6 +1917,7 @@ function bindEvents() {
 
   // Reference custom font size input
   $("#referenceSizeInput")?.addEventListener("input", (event) => {
+    if (isWorkflowLocked()) return;
     const numPt = Number(event.target.value) || 10.5;
     setPath(state.spec, "references.font_size_pt", numPt);
     const unit = $("#referenceHangingIndentUnitSelect")?.value || "chars";
@@ -1895,6 +1932,7 @@ function bindEvents() {
 
   // Reference hanging indent unit select
   $("#referenceHangingIndentUnitSelect")?.addEventListener("change", (event) => {
+    if (isWorkflowLocked()) return;
     const unit = event.target.value;
     const pt = state.spec.references?.font_size_pt || 10.5;
     const mm = indentMm(state.spec.references, "hanging_indent", pt);
@@ -1906,6 +1944,7 @@ function bindEvents() {
 
   // Reference hanging indent value input
   $("#referenceHangingIndentValueInput")?.addEventListener("input", (event) => {
+    if (isWorkflowLocked()) return;
     const val = Number(event.target.value) || 0;
     const unit = $("#referenceHangingIndentUnitSelect")?.value || "chars";
     const pt = state.spec.references?.font_size_pt || 10.5;
@@ -1917,11 +1956,12 @@ function bindEvents() {
 
   const bindHeadingField = (selector, property, eventName, convert = (input) => input.value) => {
     $(selector)?.addEventListener(eventName, (event) => {
+      if (isWorkflowLocked()) return;
       const heading = headingForLevel(state.selectedHeadingLevel, true);
       heading[property] = convert(event.target);
       if (property.endsWith("_indent_chars")) delete heading[property.replace(/_chars$/, "_mm")];
       state.customHeadingLevels.add(state.selectedHeadingLevel);
-      updateHeadingEditor(false);
+      updateHeadingEditor(isWorkflowLocked());
       renderPreview();
     });
   };
@@ -1938,7 +1978,7 @@ function bindEvents() {
   $$("[data-heading-level]").forEach((button) => {
     button.addEventListener("click", () => {
       state.selectedHeadingLevel = Number(button.dataset.headingLevel);
-      updateHeadingEditor(isOfficialTemplateWorkflow() && !state.analysis?.source);
+      updateHeadingEditor(isWorkflowLocked());
     });
   });
   $("#fileInput").addEventListener("change", (event) => stageFile(event.target.files[0]));
