@@ -196,5 +196,13 @@ class FormatCoreTests(unittest.TestCase):
     def test_character_style_is_rejected(self):
         with self.assertRaises(FormatError): build_plan(self.source,self.output,{"operations":[self.operation("font.size.set",{"value":12},{"type":"style","name":"Emphasis"})]})
 
+    def test_builtin_style_alias_round_trips_without_case_folding_custom_names(self):
+        doc, _ = self.execute([self.operation("paragraph.style.assign", {"name": "heading 1"})])
+        self.assertEqual(doc.paragraphs[0].style.name, "Heading 1")
+        from word_format.registry import REGISTRY
+        cap = REGISTRY["paragraph.style.assign"]
+        self.assertTrue(cap.verifier("Heading 1", {"name": "heading 1"}, cap))
+        self.assertFalse(cap.verifier("Custom", {"name": "custom"}, cap))
+
 
 if __name__=="__main__": unittest.main()

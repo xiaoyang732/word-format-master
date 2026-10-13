@@ -11,7 +11,7 @@ from .namespaces import qn
 from . import operations as op
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .inspect import _style_paragraph
-from .properties import read_font, read_paragraph
+from .properties import read_font, read_paragraph, paragraph_style_name
 
 
 @dataclass(frozen=True)
@@ -98,9 +98,7 @@ def read_atomic(index,ref,cap):
                 return {"orientation": orientation, "geometry": "inconsistent"}
         return (raw or "portrait") if attr=="orient" else float(raw)*25.4/1440 if raw else None
     if cap.property=="style":
-        child=p.find("./"+qn("w:pPr")+"/"+qn("w:pStyle"))
-        sid=child.get(qn("w:val")) if child is not None else "Normal"
-        return next((s.name for s in index.document.styles if s.style_id==sid),sid)
+        return paragraph_style_name(index.document, p)
     if cap.property=="table_alignment":
         child=p.find("./"+qn("w:tblPr")+"/"+qn("w:jc"))
         return child.get(qn("w:val")) if child is not None else "left"
@@ -127,6 +125,9 @@ def equal_value(actual,expected,tolerance=0.025):
 
 def verify_atomic(actual,params,cap):
     expected=params if cap.property=="line_spacing" or cap.property.endswith("indent") else params.get("value",params.get("name"))
+    if cap.property == "style":
+        from docx.styles import BabelFish
+        expected = BabelFish.internal2ui(expected)
     if isinstance(actual,list): return bool(actual) and all(equal_value(v,expected) for v in actual)
     if cap.property.endswith("indent") and isinstance(actual,dict) and params["value"]==0:
         return abs(actual["value"])<0.025
