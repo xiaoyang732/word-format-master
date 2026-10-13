@@ -187,6 +187,7 @@ python scripts/format_cli.py audit "论文.docx" --request request.json --output
 - [直接调用指南](references/direct-format-api.md)：命令行与精确修改请求。
 - [网页交接流程](references/dashboard-workflow.md)：配置页、后台监听和验收回传。
 - [项目审查与升级记录](references/review-2026-10-10.md)：同类方案比较、本轮修复和后续优先级。
+- [最终审查整改与验收记录](references/review-2026-10-13-remediation.md)：分块提交映射、回归结果、性能实测和渲染验收边界。
 - [格式参数说明](references/format-spec.md)：支持的设置与单位。
 - [安全说明](SECURITY.md) · [项目架构](references/architecture.md)：保护边界与开发实现。
 

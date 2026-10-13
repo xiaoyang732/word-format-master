@@ -25,8 +25,10 @@ Word Format Master 是 Windows 本地工具，不是公网服务。Dashboard 固
 - 独立 `verify` 拒绝缺失、重复、截短或变更的检查项，并重跑结构验收；只读 `audit` 不调用文档写入方法。
 - 页面不会收到源 DOCX Base64 内容。
 - 源文件不会被覆盖，输出路径必须与输入路径不同。
+- CLI JSON 输出在处理前检查源文档、目标文档和请求/规范/计划/Handoff 路径冲突，包含已存在文件的硬链接别名；报告使用同目录临时文件原子替换。
 - 网页可编辑设置必须映射到已登记的确定性 DOCX/OOXML 写入方法。
 - 格式核心只执行注册操作，不执行 AI 生成的 Python 或浏览器点击。普通格式操作逐项检查无关属性与部件，结构操作单独检查正文和对象保护。
+- 参考文献转换只处理索引识别的条目；页眉文字与独立 PAGE 段落分别保护，拒绝清空混合文字/域段落。
 
 ### 会话与分析任务
 
@@ -44,6 +46,7 @@ Word Format Master 是 Windows 本地工具，不是公网服务。Dashboard 固
 - 校验 Host 请求头，降低本地服务被 DNS rebinding 利用的风险。
 - 返回 CSP、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 和 `Cache-Control: no-store`。
 - 子进程使用参数数组，不启用 `shell=True`。
+- 网页提交后统一锁定编辑；交叉验证中的动态字段和值经过 HTML 转义，视觉日志挂载到独立容器。
 - 调试访问日志默认关闭，设置 `DASHBOARD_DEBUG=1` 后才写入标准错误。
 
 ### 视觉验收完整性
