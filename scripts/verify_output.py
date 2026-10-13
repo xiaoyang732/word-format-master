@@ -14,7 +14,7 @@ from docx.oxml.ns import qn
 
 from config import LIST_NUMBERING_STYLES
 from document_structure import detect_module_spans, validate_module_order
-from word_format.properties import outline_level
+from word_format.properties import outline_level, paragraph_style_name
 
 EXPECTED_LIST_MARKERS = LIST_NUMBERING_STYLES
 
@@ -40,7 +40,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
             {
                 "index": index,
                 "text": paragraph.text.strip(),
-                "style_name": paragraph.style.name if paragraph.style else "",
+                "style_name": paragraph_style_name(document, paragraph._p),
                 "outline_level": outline_level(document, paragraph._p),
             }
             for index, paragraph in enumerate(paragraphs)
@@ -86,7 +86,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         list_paragraphs = 0
         num_ids: set[str] = set()
         for paragraph in document.paragraphs:
-            style_name = paragraph.style.name.lower() if paragraph.style else ""
+            style_name = paragraph_style_name(document, paragraph._p).lower()
             if (
                 style_name.startswith("heading")
                 or style_name.startswith("标题")
@@ -162,7 +162,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
     if placements:
         paragraphs = [
             paragraph for paragraph in document.paragraphs
-            if not paragraph.style or paragraph.style.name not in {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
+            if paragraph_style_name(document, paragraph._p) not in {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
         ]
         citation_failures = []
         for placement in placements:
@@ -178,9 +178,9 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
     toc = spec.get("table_of_contents", {})
     if toc:
         managed = {
-            paragraph.style.name
+            paragraph_style_name(document, paragraph._p)
             for paragraph in document.paragraphs
-            if paragraph.style and paragraph.style.name in {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
+            if paragraph_style_name(document, paragraph._p) in {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
         }
         all_toc_codes = [
             " ".join(node.text.split())
@@ -191,7 +191,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         toc_codes = [
             " ".join(node.text.split())
             for paragraph in document.paragraphs
-            if paragraph.style and paragraph.style.name == "WFM TOC Field"
+            if paragraph_style_name(document, paragraph._p) == "WFM TOC Field"
             for node in paragraph._p.iter(qn("w:instrText"))
             if node.text and re.search(r"\bTOC\b", node.text, re.I)
         ]
@@ -205,17 +205,16 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
                 paragraph
                 for paragraph in document.paragraphs
                 if paragraph.text.strip()
-                and paragraph.style
-                and re.fullmatch(r"Heading ([1-9])", paragraph.style.name, re.I)
-                and int(re.fullmatch(r"Heading ([1-9])", paragraph.style.name, re.I).group(1)) <= expected_level
+                and re.fullmatch(r"Heading ([1-9])", paragraph_style_name(document, paragraph._p), re.I)
+                and int(re.fullmatch(r"Heading ([1-9])", paragraph_style_name(document, paragraph._p), re.I).group(1)) <= expected_level
             ]
             title = str(toc.get("title") or "目录")
             title_matches = any(
-                paragraph.style and paragraph.style.name == "WFM TOC Heading" and paragraph.text == title
+                paragraph_style_name(document, paragraph._p) == "WFM TOC Heading" and paragraph.text == title
                 for paragraph in document.paragraphs
             )
             break_matches = any(
-                paragraph.style and paragraph.style.name == "WFM TOC Break"
+                paragraph_style_name(document, paragraph._p) == "WFM TOC Break"
                 and any(node.get(qn("w:type")) == "page" for node in paragraph._p.iter(qn("w:br")))
                 and paragraph._p.getprevious() is not None
                 and any(n.text and "TOC " in n.text for n in paragraph._p.getprevious().iter(qn("w:instrText")))

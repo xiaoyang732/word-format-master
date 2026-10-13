@@ -6,10 +6,10 @@ import copy
 import re
 from collections import Counter
 
-from docx.oxml.ns import qn
+from .namespaces import qn
 
 from .contracts import FormatError
-from .properties import FONT_TAGS, PARAGRAPH_TAGS, sanitize_properties, xml_value
+from .properties import FONT_TAGS, PARAGRAPH_TAGS, sanitize_properties, xml_value, paragraph_style_name
 
 
 def field_codes(document):
@@ -56,16 +56,17 @@ def read_complex_state(index,name):
         return {"parts":parts,"first_page":[s.different_first_page_header_footer for s in doc.sections],"odd_even":doc.settings.odd_and_even_pages_header_footer,
                 "managed":managed,"starts":[n.get(qn("w:start")) if n is not None else None for n in starts],"codes":field_codes(doc)}
     if name=="table_of_contents":
-        managed=[p for p in doc.paragraphs if p.style and p.style.name.startswith("WFM TOC")]
-        trailing=[p for p in managed if p.style.name=="WFM TOC Break" and p._p.getprevious() is not None and any(
+        managed=[p for p in doc.paragraphs if paragraph_style_name(doc,p._p).startswith("WFM TOC")]
+        trailing=[p for p in managed if paragraph_style_name(doc,p._p)=="WFM TOC Break" and p._p.getprevious() is not None and any(
             n.tag==qn("w:instrText") and n.text and "TOC " in n.text for n in p._p.getprevious().iter())]
-        return {"titles":[p.text for p in managed if p.style.name=="WFM TOC Heading"],
+        return {"titles":[p.text for p in managed if paragraph_style_name(doc,p._p)=="WFM TOC Heading"],
                 "codes":[n.text or "" for p in managed for n in p._p.iter(qn("w:instrText"))],
-                "trailing_break":bool(trailing),"heading_count":sum(p.style.name.startswith("Heading ") and bool(p.text.strip()) for p in doc.paragraphs)}
+                "trailing_break":bool(trailing),"heading_count":sum(paragraph_style_name(doc,p._p).startswith("Heading ") and bool(p.text.strip()) for p in doc.paragraphs)}
     if name in {"heading_numbering","numbered","reference_numbering"}:
         from apply_spec import _get_numbering_element, _num_format_for_num_id
         numbering=_get_numbering_element(doc)
         records=[]
+        reference_nodes = index.reference_nodes() if name=="reference_numbering" else set()
         for p in doc.paragraphs:
             np=p._p.find("./"+qn("w:pPr")+"/"+qn("w:numPr"))
             ni=np.find(qn("w:numId")) if np is not None else None
@@ -82,8 +83,8 @@ def read_complex_state(index,name):
                 start_node=lvl.find(qn("w:start")) if lvl is not None else None
                 marker=marker_node.get(qn("w:val")) if marker_node is not None else None
                 start=start_node.get(qn("w:val")) if start_node is not None else None
-            records.append({"text":p.text,"style":p.style.name,"num_id":nid,"level":int(il.get(qn("w:val")))+1 if il is not None else 1,"marker":marker,"start":start,
-                            "reference_entry":p._p in index.reference_nodes() if name=="reference_numbering" else False})
+            records.append({"text":p.text,"style":paragraph_style_name(doc,p._p),"num_id":nid,"level":int(il.get(qn("w:val")))+1 if il is not None else 1,"marker":marker,"start":start,
+                            "reference_entry":p._p in reference_nodes})
         return records
     if name=="caption_position":
         from apply_spec import _neighboring_content_element, _is_figure_paragraph
@@ -96,7 +97,7 @@ def read_complex_state(index,name):
                                "before_figure":before is not None and _is_figure_paragraph(before),"after_figure":after is not None and _is_figure_paragraph(after)})
         return states
     if name=="citations":
-        return [p.text for p in doc.paragraphs if not p.style.name.startswith("WFM TOC")]
+        return [p.text for p in doc.paragraphs if not paragraph_style_name(doc,p._p).startswith("WFM TOC")]
     raise FormatError(f"Missing structural reader for {name}")
 
 
@@ -165,6 +166,9 @@ def atomic_projection(document,index,refs,cap):
     new_style_names={r["id"][6:] for r in refs if r["kind"]=="style" and r.get("xml_sha256") is None}
     if cap.property=="style":
         new_style_names={r["new_style_name"] for r in refs if "new_style_name" in r}
+    ancestors = {a for node in targets for a in node.iterancestors()}
+    if new_style_names:
+        ancestors.add(document.styles.element)
 
     def paragraph_projection(node,ref):
         prop=cap.property
@@ -186,13 +190,16 @@ def atomic_projection(document,index,refs,cap):
             nonlocal offset
             if child.tag==qn("w:r"):
                 rpr=child.find(qn("w:rPr"));tokens=[]
+                original_format = xml_value(rpr) if rpr is not None and len(rpr) else ""
+                selected_format = sanitize_properties(rpr,prop) if prop in FONT_TAGS else original_format
+                attributes = tuple(sorted(child.attrib.items()))
                 for sub in child:
                     if sub.tag==qn("w:rPr"): continue
                     if sub.tag==qn("w:t"):
                         for char in sub.text or "":
                             selected=ref.get("start",0)<=offset<ref.get("end",10**12)
-                            fmt=sanitize_properties(rpr,prop) if selected and prop in FONT_TAGS else (xml_value(rpr) if rpr is not None and len(rpr) else "")
-                            tokens.append(("char",char,fmt,tuple(sorted(child.attrib.items()))));offset+=1
+                            fmt=selected_format if selected else original_format
+                            tokens.append(("char",char,fmt,attributes));offset+=1
                     else: tokens.append(("object",xml_value(sub),xml_value(rpr)))
                 return tokens
             if child.tag==qn("w:pPr"): return []
@@ -241,6 +248,11 @@ def atomic_projection(document,index,refs,cap):
         if node.tag==qn("w:style") and node.find(qn("w:name")) is not None:
             name=node.find(qn("w:name")).get(qn("w:val"))
             if name in new_style_names: return None
+        if node not in ancestors:
+            # C-level serialization covers every untouched subtree on both sides.
+            # Avoid a dirty cache: an unexpected handler mutation must still fail.
+            from lxml import etree
+            return etree.tostring(node)
         return (node.tag,tuple(sorted(node.attrib.items())),node.text or "",tuple(v for child in node if (v:=tree(child)) is not None))
     result={}
     for part in document.part.package.parts:

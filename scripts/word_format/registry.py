@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import re
 from typing import Callable
 
-from docx.oxml.ns import qn
+from .namespaces import qn
 
 from . import operations as op
 from .contracts import FormatError, boolean, number, require_keys, text_value

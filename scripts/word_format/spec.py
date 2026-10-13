@@ -6,7 +6,7 @@ import copy
 import json
 import re
 
-from docx.oxml.ns import qn
+from .namespaces import qn
 from config import LIST_NUMBERING_STYLES
 from document_structure import validate_module_order
 from .contracts import FormatError, boolean, number, require_keys, text_value

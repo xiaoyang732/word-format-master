@@ -4,7 +4,7 @@ import copy
 import re
 
 from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
+from .namespaces import qn
 from docx.section import Section
 
 from .contracts import FormatError, require_keys, text_value

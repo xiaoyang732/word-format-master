@@ -2,7 +2,7 @@
 
 import copy
 
-from docx.oxml.ns import qn
+from .namespaces import qn
 
 from .contracts import FormatError, require_keys
 from .properties import element, xml_value

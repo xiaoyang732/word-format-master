@@ -11,7 +11,7 @@ def ensure_protected_paths(destination, *protected):
         return
     path = Path(destination).resolve()
     if path.suffix.lower() in {".doc", ".docx", ".dotx", ".docm", ".dotm"}:
-        raise ValueError("JSON output must not use a Word document path")
+        raise ValueError("JSON output must not overwrite or use a Word document path")
     for value in protected:
         if not value:
             continue

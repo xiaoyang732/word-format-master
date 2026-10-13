@@ -5,10 +5,11 @@ from __future__ import annotations
 import copy
 import colorsys
 from typing import Any
+from functools import lru_cache
 from xml.etree import ElementTree
 
 from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
+from .namespaces import qn
 
 from .contracts import FormatError
 
@@ -74,6 +75,47 @@ def sanitize_properties(pr, property_name: str):
     return xml_value(clone) if len(clone) or clone.attrib else ""
 
 
+def style_map(document):
+    part = document.part
+    root = document.styles.element
+    cached = getattr(part, "_wfm_style_map", None)
+    if cached is None or cached[0] is not root or cached[1] != len(root):
+        cached = (root, len(root), {s.style_id: s for s in document.styles})
+        part._wfm_style_map = cached
+    return cached[2]
+
+
+def paragraph_style_name(document, paragraph):
+    pr = paragraph.find(qn("w:pPr"))
+    node = pr.find(qn("w:pStyle")) if pr is not None else None
+    sid = node.get(qn("w:val")) if node is not None else "Normal"
+    style = style_map(document).get(sid)
+    return style.name if style is not None else sid
+
+
+@lru_cache(maxsize=16)
+def _theme_root(blob):
+    return ElementTree.fromstring(blob)
+
+
+@lru_cache(maxsize=16)
+def _theme_fonts(blob):
+    from analyze_docx import parse_theme_fonts
+    class Parts:
+        def read(self, path):
+            return blob
+    return parse_theme_fonts(Parts())
+
+
+def theme_blob(document):
+    part = document.part
+    theme = getattr(part, "_wfm_theme_part", None)
+    if theme is None:
+        theme = next(p for p in part.package.parts if str(p.partname) == "/word/theme/theme1.xml")
+        part._wfm_theme_part = theme
+    return theme.blob
+
+
 def rpr_sources(document, paragraph, run=None):
     if run is not None:
         pr = run.find(qn("w:rPr"))
@@ -82,7 +124,7 @@ def rpr_sources(document, paragraph, run=None):
             char_style = pr.find(qn("w:rStyle"))
             if char_style is not None:
                 style_id = char_style.get(qn("w:val"))
-                style = next((s for s in document.styles if s.style_id == style_id), None)
+                style = style_map(document).get(style_id)
                 seen = set()
                 while style is not None and style.style_id not in seen:
                     seen.add(style.style_id)
@@ -95,7 +137,7 @@ def rpr_sources(document, paragraph, run=None):
             yield ppr.find(qn("w:rPr"))
         pstyle = ppr.find(qn("w:pStyle"))
         style_id = pstyle.get(qn("w:val")) if pstyle is not None else None
-    style = next((s for s in document.styles if s.style_id == (style_id or "Normal")), None)
+    style = style_map(document).get(style_id or "Normal")
     seen = set()
     while style is not None and style.style_id not in seen:
         seen.add(style.style_id)
@@ -111,7 +153,7 @@ def ppr_sources(document, paragraph):
     yield pr
     pstyle = pr.find(qn("w:pStyle")) if pr is not None else None
     style_id = pstyle.get(qn("w:val")) if pstyle is not None else "Normal"
-    style = next((s for s in document.styles if s.style_id == style_id), None)
+    style = style_map(document).get(style_id or "Normal")
     seen = set()
     while style is not None and style.style_id not in seen:
         seen.add(style.style_id)
@@ -147,9 +189,8 @@ def resolved_color(document, node):
                "text1": "dk1", "background1": "lt1", "text2": "dk2", "background2": "lt2",
                "hyperlink": "hlink", "followedHyperlink": "folHlink"}
     try:
-        part = next(p for p in document.part.package.parts if str(p.partname) == "/word/theme/theme1.xml")
         ns = {"a": "http://schemas.openxmlformats.org/drawingml/2006/main"}
-        scheme = ElementTree.fromstring(part.blob).find("a:themeElements/a:clrScheme", ns)
+        scheme = _theme_root(theme_blob(document)).find("a:themeElements/a:clrScheme", ns)
         slot = scheme.find("a:" + aliases.get(theme, theme), ns) if scheme is not None else None
         color = slot[0] if slot is not None and len(slot) else None
         rgb = (color.get("val") if color.tag.endswith("}srgbClr") else color.get("lastClr")) if color is not None else None
@@ -178,12 +219,8 @@ def read_font(document, paragraph, run, name):
                     continue
                 theme = node.get(qn("w:" + attr + "Theme"))
                 if theme:
-                    from analyze_docx import parse_theme_fonts
-                    class Parts:
-                        def read(self, path):
-                            return next(p.blob for p in document.part.package.parts if str(p.partname).lstrip("/") == path)
                     try:
-                        return parse_theme_fonts(Parts()).get(theme, "theme:" + theme)
+                        return _theme_fonts(theme_blob(document)).get(theme, "theme:" + theme)
                     except (StopIteration, KeyError):
                         return "theme:" + theme
                 value = node.get(qn("w:" + attr))

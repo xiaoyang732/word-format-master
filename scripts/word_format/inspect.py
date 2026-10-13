@@ -7,13 +7,13 @@ import re
 from pathlib import Path
 
 from docx import Document
-from docx.oxml.ns import qn
+from .namespaces import qn
 from docx.table import Table
 from docx.text.paragraph import Paragraph
 
 from document_structure import MODULE_MARKERS, classify_module, heading_level
 from .contracts import FormatError, json_hash, sha256, source_path
-from .properties import read_font, read_paragraph, text_runs, xml_value, outline_level
+from .properties import read_font, read_paragraph, text_runs, xml_value, outline_level, style_map
 
 
 def paragraph_text(p):
@@ -35,7 +35,7 @@ class DocumentIndex:
             top = p.getparent() is body
             style_node = p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle"))
             style_id = style_node.get(qn("w:val")) if style_node is not None else "Normal"
-            style = next((s for s in document.styles if s.style_id == style_id), None)
+            style = style_map(document).get(style_id)
             style_name = style.name if style is not None else style_id
             text = paragraph_text(p)
             outline = outline_level(document, p)

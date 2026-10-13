@@ -6,7 +6,7 @@ import copy
 
 from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import OxmlElement
-from docx.oxml.ns import qn
+from .namespaces import qn
 from docx.table import Table
 
 from .contracts import FormatError

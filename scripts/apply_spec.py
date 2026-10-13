@@ -25,6 +25,7 @@ from lxml import etree
 
 from citation_workflow import apply_citations
 from config import LIST_NUMBERING_STYLES, SUPPORTED_SPEC_SCHEMA_VERSIONS
+from word_format.properties import paragraph_style_name
 from document_structure import validate_module_order
 
 
@@ -509,7 +510,7 @@ def clear_managed_header_footer_paragraphs(document: Document, style_names: set[
             continue
         seen.add(identity)
         for paragraph in container.paragraphs:
-            if (paragraph.style and paragraph.style.name in style_names) or (
+            if (paragraph_style_name(document, paragraph._p) in style_names) or (
                 "WFM Header" in style_names and paragraph._p.get("{urn:word-format-master}managed-header") == "true"
             ):
                 clear_paragraph_content(paragraph)
@@ -679,7 +680,7 @@ TOC_MANAGED_STYLES = {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
 def _remove_managed_toc(document: Document) -> int:
     removed = 0
     for paragraph in list(document.paragraphs):
-        if paragraph.style and paragraph.style.name in TOC_MANAGED_STYLES:
+        if paragraph_style_name(document, paragraph._p) in TOC_MANAGED_STYLES:
             paragraph._p.getparent().remove(paragraph._p)
             removed += 1
     return removed
@@ -718,7 +719,7 @@ def _find_toc_insertion_anchor(document: Document):
 
     placeholder_toc_p = None
     for p in paragraphs:
-        if p.style and p.style.name in TOC_MANAGED_STYLES:
+        if paragraph_style_name(document, p._p) in TOC_MANAGED_STYLES:
             continue
         if re_toc.match(p.text.strip()):
             placeholder_toc_p = p
@@ -728,12 +729,12 @@ def _find_toc_insertion_anchor(document: Document):
     anchor_p = None
 
     for p in paragraphs:
-        if p.style and p.style.name in TOC_MANAGED_STYLES:
+        if paragraph_style_name(document, p._p) in TOC_MANAGED_STYLES:
             continue
         t = p.text.strip()
         if not t:
             continue
-        style_name = p.style.name.lower() if p.style else ""
+        style_name = paragraph_style_name(document, p._p).lower()
         is_h1 = style_name.startswith("heading 1") or style_name.startswith("标题 1") or style_name == "heading"
 
         if state == "SEEKING_ABSTRACT":
@@ -839,7 +840,7 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
     field_paragraph = _insert_body_paragraph_before(document, anchor_xml, field_style)
     cached_entries = []
     for paragraph in document.paragraphs:
-        style_name = paragraph.style.name if paragraph.style else ""
+        style_name = paragraph_style_name(document, paragraph._p)
         if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
             continue
         text = paragraph.text.strip()
@@ -1092,7 +1093,7 @@ def normalize_heading_styles(
         t = p.text.strip()
         if not t:
             continue
-        c_style = p.style.name.lower() if p.style else ""
+        c_style = paragraph_style_name(document, p._p).lower()
         is_h = c_style.startswith("heading") or c_style.startswith("标题") or c_style in {"title", "subtitle"}
         if is_h and first_heading_idx is None:
             first_heading_idx = idx
@@ -1115,7 +1116,7 @@ def normalize_heading_styles(
         text = paragraph.text.strip()
         if not text:
             continue
-        current_style = paragraph.style.name if paragraph.style else ""
+        current_style = paragraph_style_name(document, paragraph._p)
         if current_style in TOC_MANAGED_STYLES or current_style.lower().startswith("wfm toc"):
             continue
         from document_structure import heading_level, is_heading_candidate
@@ -1421,7 +1422,7 @@ def _get_numbering_element(document: Document, create: bool = False):
 
 
 def _has_numbered_list_marker(document: Document, paragraph) -> bool:
-    style_name = paragraph.style.name.lower() if paragraph.style else ""
+    style_name = paragraph_style_name(document, paragraph._p).lower()
     if (
         style_name.startswith("heading")
         or style_name.startswith("标题")
