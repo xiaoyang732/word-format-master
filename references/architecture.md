@@ -20,7 +20,8 @@
 
 - `registry.py`：可执行能力表，每项对应参数校验、唯一 handler、独立 reader、verifier 和测试。
 - `properties.py`：字体和段落原子 XML 属性的唯一写入所有者。
-- `operations.py`：每项操作的命名 handler；复杂结构操作调用已有明确职责的实现。
+- `operations.py`：每项操作的命名 handler；复杂结构操作委托核心内部的 `structures.py`，不反向导入 CLI 入口。
+- `structures.py`：复杂 OOXML 写入的唯一实现，负责目录、多级编号、参考文献、图表位置和文档级页码；基础属性委托 `properties.py`，节页眉委托 `headers.py`。
 - `headers.py`：独立节/页型的内容、STYLEREF、链接、格式与读回；`section_breaks.py`：显式下一页分节及保护校验。规则和对应表见 [header-requirements.md](header-requirements.md)。
 - `inspect.py` / `selectors.py`：源文件对象索引和严格位置解析。
 - `spec.py`：旧 Format Spec 展开器与旧网页字段映射，不能新增第二套格式实现。
@@ -45,7 +46,7 @@
 
 ### `apply_spec.py`
 
-保留网页 Handoff 身份检查和复杂结构实现，普通属性写入委托共享核心。`SUPPORTED_APPLICATION_PATHS` 由能力适配器生成，新增能力需登记 handler、参数校验、独立 reader/verifier 与回归测试。
+只保留网页 Handoff 身份检查、规范包装解析与共享核心调用。复杂结构实现归属 `word_format/structures.py`；`append_field` 和 `apply_page_numbers` 保留兼容导出。`SUPPORTED_APPLICATION_PATHS` 由能力适配器生成，新增能力需登记 handler、参数校验、独立 reader/verifier 与回归测试。
 
 ### `serve_dashboard.py`
 

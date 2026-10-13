@@ -122,44 +122,44 @@ def set_table_alignment(index,ref,params):
 
 
 def apply_three_line_table(index,ref,params):
-    from apply_spec import apply_tables
+    from .structures import apply_tables
     class Scope:
         tables=[Table(index.elements[ref["id"]],index.document._body)]
     apply_tables(Scope(),{}, {"three_line_table":params["value"]})
 
 
 def configure_headers(index,ref,params):
-    from apply_spec import apply_headers_footers
+    from .structures import apply_headers_footers
     return apply_headers_footers(index.document,params)
 
 
 def configure_page_numbers(index,ref,params):
-    from apply_spec import apply_page_numbers
+    from .structures import apply_page_numbers
     return apply_page_numbers(index.document,params)
 
 
 def configure_toc(index,ref,params):
-    from apply_spec import apply_table_of_contents
+    from .structures import apply_table_of_contents
     return apply_table_of_contents(index.document,params)
 
 
 def configure_heading_numbering(index,ref,params):
-    from apply_spec import normalize_heading_styles
+    from .structures import normalize_heading_styles
     return normalize_heading_styles(index.document,params)
 
 
 def configure_lists(index,ref,params):
-    from apply_spec import apply_numbered_lists
+    from .structures import apply_numbered_lists
     return apply_numbered_lists(index.document,{"numbered":params})
 
 
 def convert_reference_numbering(index,ref,params):
-    from apply_spec import apply_reference_style
+    from .structures import apply_reference_style
     return apply_reference_style(index.document,{},params)
 
 
 def set_caption_position(index,ref,params):
-    from apply_spec import apply_caption_positions
+    from .structures import apply_caption_positions
     return apply_caption_positions(index.document,{params["role"]:{"label":params.get("label",""),"position":params["position"]}})
 
 

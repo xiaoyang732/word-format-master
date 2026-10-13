@@ -64,7 +64,7 @@ def read_complex_state(index,name):
                 "codes":[n.text or "" for p in managed for n in p._p.iter(qn("w:instrText"))],
                 "trailing_break":bool(trailing),"heading_count":sum(paragraph_style_name(doc,p._p).startswith("Heading ") and bool(p.text.strip()) for p in doc.paragraphs)}
     if name in {"heading_numbering","numbered","reference_numbering"}:
-        from apply_spec import _get_numbering_element, _num_format_for_num_id
+        from .structures import _get_numbering_element, _num_format_for_num_id
         numbering=_get_numbering_element(doc)
         records=[]
         reference_nodes = index.reference_nodes() if name=="reference_numbering" else set()
@@ -88,7 +88,7 @@ def read_complex_state(index,name):
                             "reference_entry":p._p in reference_nodes})
         return records
     if name=="caption_position":
-        from apply_spec import _neighboring_content_element, _is_figure_paragraph
+        from .structures import _neighboring_content_element, _is_figure_paragraph
         states=[]
         for p in doc.paragraphs:
             if re.match(r"^\s*(?:图|表|Figure|Fig\.|Table)\s*\d",p.text,re.I):
