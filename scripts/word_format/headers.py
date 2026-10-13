@@ -4,13 +4,20 @@ import copy
 import re
 
 from docx.oxml import OxmlElement
-from .namespaces import qn
 from docx.section import Section
 
 from .contracts import FormatError, require_keys, text_value
 from .fields import field_codes, page_number_paragraphs
-from .properties import (element, read_font, read_paragraph,
-                         write_font, write_paragraph, xml_value, FONT_TAGS)
+from .namespaces import qn
+from .properties import (
+    FONT_TAGS,
+    element,
+    read_font,
+    read_paragraph,
+    write_font,
+    write_paragraph,
+    xml_value,
+)
 
 VARIANTS = {"default": "header", "first": "first_page_header", "even": "even_page_header"}
 
@@ -23,21 +30,36 @@ def variant_params(params, validator):
 
 
 def content_params(params):
-    require_keys(params, {"mode", "text", "style_name", "prefix", "variant"}, {"mode"}, "header content")
+    require_keys(
+        params, {"mode", "text", "style_name", "prefix", "variant"}, {"mode"}, "header content"
+    )
     variant = params.get("variant", "default")
     if variant not in VARIANTS:
         raise FormatError("Header variant must be default, first or even")
     if params["mode"] == "text":
         require_keys(params, {"mode", "text", "variant"}, {"mode", "text"}, "literal header")
-        return {"mode": "text", "text": text_value(params["text"], "text", True), "variant": variant}
+        return {
+            "mode": "text",
+            "text": text_value(params["text"], "text", True),
+            "variant": variant,
+        }
     if params["mode"] != "chapter_title":
         raise FormatError("Header mode must be text or chapter_title")
-    require_keys(params, {"mode", "style_name", "prefix", "variant"}, {"mode", "style_name"}, "chapter header")
+    require_keys(
+        params,
+        {"mode", "style_name", "prefix", "variant"},
+        {"mode", "style_name"},
+        "chapter header",
+    )
     name = text_value(params["style_name"], "style_name")
-    if any(c in name for c in ('"', '\\', '\n', '\r')):
+    if any(c in name for c in ('"', "\\", "\n", "\r")):
         raise FormatError("Unsafe STYLEREF style name")
-    return {"mode": "chapter_title", "style_name": name,
-            "prefix": text_value(params.get("prefix", ""), "prefix", True), "variant": variant}
+    return {
+        "mode": "chapter_title",
+        "style_name": name,
+        "prefix": text_value(params.get("prefix", ""), "prefix", True),
+        "variant": variant,
+    }
 
 
 def section(index, ref):
@@ -67,11 +89,20 @@ def detach(container):
     if saved is not None:
         container._element.attrib.clear()
         container._element.attrib.update(saved.attrib)
-        ids = {rel.rId: container.part.relate_to(rel.target_ref if rel.is_external else rel.target_part,
-                                               rel.reltype, rel.is_external) for rel in relationships}
+        ids = {
+            rel.rId: container.part.relate_to(
+                rel.target_ref if rel.is_external else rel.target_part, rel.reltype, rel.is_external
+            )
+            for rel in relationships
+        }
         for node in saved.iter():
             for attr, value in list(node.attrib.items()):
-                if attr.startswith("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}") and value in ids:
+                if (
+                    attr.startswith(
+                        "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+                    )
+                    and value in ids
+                ):
                     node.set(attr, ids[value])
         container._element[:] = list(saved)
 
@@ -94,18 +125,31 @@ def set_content(index, ref, params):
     if params["mode"] == "chapter_title":
         name = params["style_name"]
         if name not in index.document.styles or index.document.styles[name].type != 1:
-            raise FormatError("STYLEREF requires an existing paragraph style", "needs_clarification")
+            raise FormatError(
+                "STYLEREF requires an existing paragraph style", "needs_clarification"
+            )
         sid = index.document.styles[name].style_id
-        if not any(p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")) is not None and
-                   p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")).get(qn("w:val")) == sid
-                   for p in index.document.element.body.iter(qn("w:p"))):
-            raise FormatError("STYLEREF style has no body heading to reference", "needs_clarification")
+        if not any(
+            p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")) is not None
+            and p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")).get(qn("w:val")) == sid
+            for p in index.document.element.body.iter(qn("w:p"))
+        ):
+            raise FormatError(
+                "STYLEREF style has no body heading to reference", "needs_clarification"
+            )
     container = editable_header(index, ref, params["variant"])
-    page_paragraphs = [p for p in page_number_paragraphs(container._element) if p.getparent() is container._element]
+    page_paragraphs = [
+        p for p in page_number_paragraphs(container._element) if p.getparent() is container._element
+    ]
     protected = set(page_paragraphs)
     for paragraph in container._element.iter(qn("w:p")):
-        if paragraph not in protected and any(re.match(r"^PAGE(?:\s|$)", code, re.I) for code in field_codes(paragraph)):
-            raise FormatError("Separate mixed PAGE fields from header content before replacing it", "needs_clarification")
+        if paragraph not in protected and any(
+            re.match(r"^PAGE(?:\s|$)", code, re.I) for code in field_codes(paragraph)
+        ):
+            raise FormatError(
+                "Separate mixed PAGE fields from header content before replacing it",
+                "needs_clarification",
+            )
     original = next((p for p in container._element.iter(qn("w:p")) if p not in protected), None)
     saved_pr = copy.deepcopy(original.find(qn("w:pPr"))) if original is not None else None
     first_run = next(original.iter(qn("w:r")), None) if original is not None else None
@@ -113,7 +157,8 @@ def set_content(index, ref, params):
     for child in list(container._element):
         container._element.remove(child)
     p = container.add_paragraph()
-    if saved_pr is not None: p._p.insert(0, saved_pr)
+    if saved_pr is not None:
+        p._p.insert(0, saved_pr)
     p._p.set("{urn:word-format-master}managed-header", "true")
     if params["mode"] == "text":
         p.add_run(params["text"])
@@ -125,7 +170,8 @@ def set_content(index, ref, params):
         field.append(OxmlElement("w:r"))
         p._p.append(field)
     if saved_rpr is not None:
-        for run in p._p.iter(qn("w:r")): run.insert(0, copy.deepcopy(saved_rpr))
+        for run in p._p.iter(qn("w:r")):
+            run.insert(0, copy.deepcopy(saved_rpr))
     for paragraph in page_paragraphs:
         container._element.append(paragraph)
 
@@ -161,27 +207,85 @@ def set_format(index, ref, params, name):
                 write_font(element(run, "rPr"), name, params["value"])
             write_font(element(element(p, "pPr"), "rPr"), name, params["value"])
         else:
-            write_paragraph(element(p, "pPr"), name, {k:v for k,v in params.items() if k!="variant"} if name=="line_spacing" or name.endswith("indent") else params["value"])
+            write_paragraph(
+                element(p, "pPr"),
+                name,
+                {k: v for k, v in params.items() if k != "variant"}
+                if name == "line_spacing" or name.endswith("indent")
+                else params["value"],
+            )
 
 
-def set_east_asia(index, ref, params): set_format(index, ref, params, "font_east_asia")
-def set_latin(index, ref, params): set_format(index, ref, params, "font_latin")
-def set_size(index, ref, params): set_format(index, ref, params, "font_size_pt")
-def set_alignment(index, ref, params): set_format(index, ref, params, "alignment")
-def set_bold(index, ref, params): set_format(index, ref, params, "bold")
-def set_italic(index, ref, params): set_format(index, ref, params, "italic")
-def set_color(index, ref, params): set_format(index, ref, params, "color")
-def set_spacing_before(index, ref, params): set_format(index, ref, params, "space_before_pt")
-def set_spacing_after(index, ref, params): set_format(index, ref, params, "space_after_pt")
-def set_line_spacing(index, ref, params): set_format(index, ref, params, "line_spacing")
-def set_first_indent(index, ref, params): set_format(index, ref, params, "first_line_indent")
-def set_left_indent(index, ref, params): set_format(index, ref, params, "left_indent")
-def set_right_indent(index, ref, params): set_format(index, ref, params, "right_indent")
-def set_hanging_indent(index, ref, params): set_format(index, ref, params, "hanging_indent")
-def set_keep_next(index, ref, params): set_format(index, ref, params, "keep_with_next")
-def set_keep_together(index, ref, params): set_format(index, ref, params, "keep_together")
-def set_page_break(index, ref, params): set_format(index, ref, params, "page_break_before")
-def set_widow(index, ref, params): set_format(index, ref, params, "widow_control")
+def set_east_asia(index, ref, params):
+    set_format(index, ref, params, "font_east_asia")
+
+
+def set_latin(index, ref, params):
+    set_format(index, ref, params, "font_latin")
+
+
+def set_size(index, ref, params):
+    set_format(index, ref, params, "font_size_pt")
+
+
+def set_alignment(index, ref, params):
+    set_format(index, ref, params, "alignment")
+
+
+def set_bold(index, ref, params):
+    set_format(index, ref, params, "bold")
+
+
+def set_italic(index, ref, params):
+    set_format(index, ref, params, "italic")
+
+
+def set_color(index, ref, params):
+    set_format(index, ref, params, "color")
+
+
+def set_spacing_before(index, ref, params):
+    set_format(index, ref, params, "space_before_pt")
+
+
+def set_spacing_after(index, ref, params):
+    set_format(index, ref, params, "space_after_pt")
+
+
+def set_line_spacing(index, ref, params):
+    set_format(index, ref, params, "line_spacing")
+
+
+def set_first_indent(index, ref, params):
+    set_format(index, ref, params, "first_line_indent")
+
+
+def set_left_indent(index, ref, params):
+    set_format(index, ref, params, "left_indent")
+
+
+def set_right_indent(index, ref, params):
+    set_format(index, ref, params, "right_indent")
+
+
+def set_hanging_indent(index, ref, params):
+    set_format(index, ref, params, "hanging_indent")
+
+
+def set_keep_next(index, ref, params):
+    set_format(index, ref, params, "keep_with_next")
+
+
+def set_keep_together(index, ref, params):
+    set_format(index, ref, params, "keep_together")
+
+
+def set_page_break(index, ref, params):
+    set_format(index, ref, params, "page_break_before")
+
+
+def set_widow(index, ref, params):
+    set_format(index, ref, params, "widow_control")
 
 
 def read_header(index, ref, cap):
@@ -201,24 +305,39 @@ def read_header(index, ref, cap):
             root = copy.deepcopy(root)
             for paragraph in page_number_paragraphs(root):
                 paragraph.getparent().remove(paragraph)
-            literal=[]
+            literal = []
             field_depth = 0
+
             def visit(node):
                 nonlocal field_depth
                 for child in node:
-                    if child.tag==qn("w:fldSimple"): continue
-                    if child.tag==qn("w:fldChar"):
-                        kind=child.get(qn("w:fldCharType"))
-                        if kind == "begin": field_depth += 1
-                        elif kind == "end": field_depth = max(0, field_depth - 1)
-                    elif child.tag==qn("w:t") and field_depth == 0: literal.append(child.text or "")
-                    elif child.tag in {qn("w:br"), qn("w:cr")} and field_depth == 0: literal.append("\n")
-                    elif child.tag==qn("w:tab") and field_depth == 0: literal.append("\t")
+                    if child.tag == qn("w:fldSimple"):
+                        continue
+                    if child.tag == qn("w:fldChar"):
+                        kind = child.get(qn("w:fldCharType"))
+                        if kind == "begin":
+                            field_depth += 1
+                        elif kind == "end":
+                            field_depth = max(0, field_depth - 1)
+                    elif child.tag == qn("w:t") and field_depth == 0:
+                        literal.append(child.text or "")
+                    elif child.tag in {qn("w:br"), qn("w:cr")} and field_depth == 0:
+                        literal.append("\n")
+                    elif child.tag == qn("w:tab") and field_depth == 0:
+                        literal.append("\t")
                     visit(child)
-            if root is not None: visit(root)
-            variants[variant] = {"text": "".join(literal),
-                                 "fields": ([n.get(qn("w:instr"), "") for n in root.iter(qn("w:fldSimple"))] +
-                                            [n.text or "" for n in root.iter(qn("w:instrText"))]) if root is not None else []}
+
+            if root is not None:
+                visit(root)
+            variants[variant] = {
+                "text": "".join(literal),
+                "fields": (
+                    [n.get(qn("w:instr"), "") for n in root.iter(qn("w:fldSimple"))]
+                    + [n.text or "" for n in root.iter(qn("w:instrText"))]
+                )
+                if root is not None
+                else [],
+            }
         else:
             variants[variant] = []
             if root is not None:
@@ -226,13 +345,18 @@ def read_header(index, ref, cap):
                 for p in root.iter(qn("w:p")):
                     if p in page_paragraphs:
                         continue
-                    values = [read_font(index.document, p, r, name) for r in p.iter(qn("w:r"))] if name in FONT_TAGS else [read_paragraph(index.document, p, name)]
+                    values = (
+                        [read_font(index.document, p, r, name) for r in p.iter(qn("w:r"))]
+                        if name in FONT_TAGS
+                        else [read_paragraph(index.document, p, name)]
+                    )
                     variants[variant].extend(values or [read_font(index.document, p, None, name)])
     return variants
 
 
 def verify_header(actual, params, cap):
     from .registry import equal_value
+
     name = cap.property.removeprefix("header:")
     if name in {"first_page", "odd_even"}:
         return actual is params["value"]
@@ -240,11 +364,22 @@ def verify_header(actual, params, cap):
     if name == "content":
         if params["mode"] == "text":
             return selected == {"text": params["text"], "fields": []}
-        return selected == {"text": params["prefix"], "fields": [f'STYLEREF "{params["style_name"]}"']}
+        return selected == {
+            "text": params["prefix"],
+            "fields": [f'STYLEREF "{params["style_name"]}"'],
+        }
     if name == "link":
         return selected is params["value"]
-    expected={k:v for k,v in params.items() if k!="variant"} if name=="line_spacing" or name.endswith("indent") else params["value"]
-    return bool(selected) and all(equal_value(v, expected) or (name.endswith("indent") and expected["value"]==0 and abs(v["value"])<0.025) for v in selected)
+    expected = (
+        {k: v for k, v in params.items() if k != "variant"}
+        if name == "line_spacing" or name.endswith("indent")
+        else params["value"]
+    )
+    return bool(selected) and all(
+        equal_value(v, expected)
+        or (name.endswith("indent") and expected["value"] == 0 and abs(v["value"]) < 0.025)
+        for v in selected
+    )
 
 
 def header_projection(index, cap, params, refs):
@@ -255,11 +390,14 @@ def header_projection(index, cap, params, refs):
     originals = list(index.document.element.iter(qn("w:sectPr")))
     for pos, s in enumerate(body.iter(qn("w:sectPr"))):
         for node in list(s):
-            if node.tag == qn("w:headerReference") or (name == "first_page" and originals[pos] in selected and node.tag == qn("w:titlePg")):
+            if node.tag == qn("w:headerReference") or (
+                name == "first_page" and originals[pos] in selected and node.tag == qn("w:titlePg")
+            ):
                 s.remove(node)
     settings = copy.deepcopy(index.document.settings.element)
     if name == "odd_even":
-        for n in settings.findall(qn("w:evenAndOddHeaders")): settings.remove(n)
+        for n in settings.findall(qn("w:evenAndOddHeaders")):
+            settings.remove(n)
     values = [xml_value(body), xml_value(settings), xml_value(index.document.styles.element)]
     for s in index.document.sections:
         for variant, attr in VARIANTS.items():
@@ -271,7 +409,12 @@ def header_projection(index, cap, params, refs):
             if clone is not None:
                 for node in clone.iter():
                     for attr_name, value in list(node.attrib.items()):
-                        if attr_name.startswith("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}") and value in container.part.rels:
+                        if (
+                            attr_name.startswith(
+                                "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+                            )
+                            and value in container.part.rels
+                        ):
                             node.set(attr_name, container.part.rels[value].target_ref)
             if s._sectPr in selected and variant == params.get("variant"):
                 if name == "content":
@@ -280,37 +423,70 @@ def header_projection(index, cap, params, refs):
                     clone = OxmlElement("w:hdr") if page_paragraphs else None
                     if clone is not None:
                         clone.extend(page_paragraphs)
-                elif name == "link": clone = None
+                elif name == "link":
+                    clone = None
                 elif clone is not None:
                     page_paragraphs = set(page_number_paragraphs(clone))
-                    properties = [pr for p in clone.iter(qn("w:p")) if p not in page_paragraphs
-                                  for tag in ("rPr", "pPr") for pr in p.iter(qn("w:" + tag))]
+                    properties = [
+                        pr
+                        for p in clone.iter(qn("w:p"))
+                        if p not in page_paragraphs
+                        for tag in ("rPr", "pPr")
+                        for pr in p.iter(qn("w:" + tag))
+                    ]
                     for pr in properties:
-                        from .properties import FONT_TAGS, PARAGRAPH_TAGS, ATTRIBUTES
+                        from .properties import ATTRIBUTES, FONT_TAGS, PARAGRAPH_TAGS
+
                         for tag in FONT_TAGS.get(name, PARAGRAPH_TAGS.get(name, ())):
                             node = pr.find(qn("w:" + tag))
-                            if node is None: continue
+                            if node is None:
+                                continue
                             if name in ATTRIBUTES:
-                                for a in ATTRIBUTES[name].get(tag, ()): node.attrib.pop(qn("w:" + a), None)
-                                if not node.attrib and not len(node): pr.remove(node)
-                            else: pr.remove(node)
+                                for a in ATTRIBUTES[name].get(tag, ()):
+                                    node.attrib.pop(qn("w:" + a), None)
+                                if not node.attrib and not len(node):
+                                    pr.remove(node)
+                            else:
+                                pr.remove(node)
                     for pr in list(clone.iter(qn("w:rPr"))):
-                        if any(parent in page_paragraphs for parent in pr.iterancestors()): continue
-                        if not len(pr) and not pr.attrib: pr.getparent().remove(pr)
+                        if any(parent in page_paragraphs for parent in pr.iterancestors()):
+                            continue
+                        if not len(pr) and not pr.attrib:
+                            pr.getparent().remove(pr)
                     for pr in list(clone.iter(qn("w:pPr"))):
-                        if any(parent in page_paragraphs for parent in pr.iterancestors()): continue
-                        if not len(pr) and not pr.attrib: pr.getparent().remove(pr)
-            if clone is not None and not clone.attrib and all(n.tag==qn("w:p") and not len(n) and not n.attrib for n in clone):
-                clone=None
+                        if any(parent in page_paragraphs for parent in pr.iterancestors()):
+                            continue
+                        if not len(pr) and not pr.attrib:
+                            pr.getparent().remove(pr)
+            if (
+                clone is not None
+                and not clone.attrib
+                and all(n.tag == qn("w:p") and not len(n) and not n.attrib for n in clone)
+            ):
+                clone = None
             values.append(xml_value(clone))
         for attr in ("footer", "first_page_footer", "even_page_footer"):
             footer = getattr(s, attr)
             while footer is not None and not footer._has_definition:
                 footer = footer._prior_headerfooter
-            values.append((xml_value(footer._element) if footer is not None else "",
-                           sorted((rel.rId, rel.reltype, rel.target_ref, rel.is_external)
-                                  for rel in footer.part.rels.values()) if footer is not None else []))
-    values.append({str(p.partname): p.blob for p in index.document.part.package.parts
-                   if not re.fullmatch(r"/word/(?:header|footer)\d+\.xml", str(p.partname)) and
-                   str(p.partname) not in {"/word/document.xml", "/word/styles.xml", "/word/settings.xml"}})
+            values.append(
+                (
+                    xml_value(footer._element) if footer is not None else "",
+                    sorted(
+                        (rel.rId, rel.reltype, rel.target_ref, rel.is_external)
+                        for rel in footer.part.rels.values()
+                    )
+                    if footer is not None
+                    else [],
+                )
+            )
+    values.append(
+        {
+            str(p.partname): p.blob
+            for p in index.document.part.package.parts
+            if not re.fullmatch(r"/word/(?:header|footer)\d+\.xml", str(p.partname))
+            and str(p.partname)
+            not in {"/word/document.xml", "/word/styles.xml", "/word/settings.xml"}
+        }
+    )
     return values

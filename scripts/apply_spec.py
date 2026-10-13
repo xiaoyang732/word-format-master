@@ -12,10 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from word_format.spec import legacy_paths
+
 # Compatibility exports for callers of the former monolithic implementation.
-from word_format.structures import append_field as append_field, apply_page_numbers as apply_page_numbers
+from word_format.structures import append_field as append_field
+from word_format.structures import apply_page_numbers as apply_page_numbers
 
 SUPPORTED_APPLICATION_PATHS = legacy_paths()
+
 
 def load_json(path: str | Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8-sig"))
@@ -79,6 +82,7 @@ def normalize_spec(data: dict[str, Any]) -> dict[str, Any]:
 
 def validate_spec(spec: dict[str, Any]) -> list[str]:
     from word_format.spec import validate_spec as validate_contract
+
     try:
         validate_contract(spec)
         return []
@@ -96,9 +100,14 @@ def apply_document(
     overwrite: bool = False,
 ) -> dict[str, Any]:
     from word_format.api import apply_spec as execute_spec
+
     report = execute_spec(
-        input_path, output_path, normalize_spec(spec),
-        clear_direct=clear_direct, verification=verification, overwrite=overwrite,
+        input_path,
+        output_path,
+        normalize_spec(spec),
+        clear_direct=clear_direct,
+        verification=verification,
+        overwrite=overwrite,
     )
     if verification and verification.get("visual_execution_mode") == "dashboard-direct":
         report["verification"]["visual"] = {
@@ -111,6 +120,7 @@ def apply_document(
 
 def main() -> int:
     from cli_output import configure_cli_output
+
     configure_cli_output()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input", help="Source DOCX")
@@ -123,6 +133,7 @@ def main() -> int:
     parser.add_argument("--report", help="Write application report JSON")
     args = parser.parse_args()
     from json_output import ensure_protected_paths, write_json
+
     protected = (args.input, args.output, args.handoff, args.spec)
     try:
         ensure_protected_paths(args.report, *protected)
@@ -132,7 +143,9 @@ def main() -> int:
             if not isinstance(spec, dict):
                 raise ValueError("Task-local specification must be a JSON object")
             if _without_citations(spec) != _without_citations(handoff["spec"]):
-                raise ValueError("Task-local specification may only add validated citations to the confirmed handoff")
+                raise ValueError(
+                    "Task-local specification may only add validated citations to the confirmed handoff"
+                )
         else:
             spec = copy.deepcopy(handoff["spec"])
         report = apply_document(
@@ -140,7 +153,9 @@ def main() -> int:
             args.output,
             spec,
             clear_direct=bool(handoff.get("clear_direct_font_formatting", False)),
-            verification=handoff.get("verification") if isinstance(handoff.get("verification"), dict) else None,
+            verification=handoff.get("verification")
+            if isinstance(handoff.get("verification"), dict)
+            else None,
         )
         if args.report:
             write_json(args.report, report, *protected)

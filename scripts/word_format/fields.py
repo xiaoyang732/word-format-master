@@ -27,8 +27,12 @@ def page_number_paragraphs(root):
         style = paragraph.find("./" + qn("w:pPr") + "/" + qn("w:pStyle"))
         managed = style is not None and style.get(qn("w:val")) == "WFMPageNumber"
         visible = "".join(node.text or "" for node in paragraph.iter(qn("w:t"))).strip()
-        if managed or not visible or re.fullmatch(
-            r"(?:Page\s*)?(?:第\s*)?\d+(?:\s*(?:of|/|页，共)\s*\d+\s*页?)?", visible, re.I
+        if (
+            managed
+            or not visible
+            or re.fullmatch(
+                r"(?:Page\s*)?(?:第\s*)?\d+(?:\s*(?:of|/|页，共)\s*\d+\s*页?)?", visible, re.I
+            )
         ):
             result.append(paragraph)
     return result

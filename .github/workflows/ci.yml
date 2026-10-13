@@ -7,6 +7,20 @@ on:
     branches: [ main, master ]
 
 jobs:
+  python-style:
+    runs-on: windows-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+    - name: Install Ruff
+      run: python -m pip install ruff==0.17.0
+    - name: Check core Python style
+      run: |
+        python -m ruff check scripts/word_format scripts/apply_spec.py
+        python -m ruff format --check scripts/word_format scripts/apply_spec.py
+
   test:
     runs-on: windows-latest
     strategy:

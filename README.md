@@ -198,12 +198,17 @@ python scripts/format_cli.py audit "论文.docx" --request request.json --output
 在已安装依赖的 Python 环境中运行：
 
 ```powershell
+python -m pip install -r requirements-dev.txt
+python -m ruff check scripts/word_format scripts/apply_spec.py
+python -m ruff format --check scripts/word_format scripts/apply_spec.py
 python -B scripts/validate_project.py
 python -B scripts/smoke_test.py
 python -B -m unittest discover -s tests -v
 node --check assets/ui/app.js
 git diff --check
 ```
+
+核心 Python 代码由 Ruff 统一排版并在 CI 中检查。性能基准可用 `python scripts/benchmark_formatting.py --profile` 复现；该命令创建临时的 96 段合成论文，并报告耗时、调用次数与验收结果。
 
 网页回归使用独立的 Node.js 开发依赖，测试会自动启动并关闭本地 Dashboard，无需手工提供 URL：
 
