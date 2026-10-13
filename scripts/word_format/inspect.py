@@ -135,6 +135,15 @@ class DocumentIndex:
         part = self.parts[record["part"]]
         return Paragraph(self.elements[oid], part)
 
+    def reference_nodes(self):
+        """Only entries inside references, or standalone explicit reference styles."""
+        return {self.elements[oid] for oid in self.top_ids
+                if (self.records[oid].get("module") == "references" and
+                    self.records[oid].get("role") != "heading") or
+                (self.records[oid].get("module") is None and
+                 self.records[oid].get("style_name", "").lower() in
+                 {"bibliography", "references", "reference", "参考文献"})}
+
     def font_values(self, oid, name, start=None, end=None):
         p = self.elements[oid]
         if self.records[oid]["kind"] == "style":

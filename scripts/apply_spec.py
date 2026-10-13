@@ -1346,30 +1346,14 @@ def apply_reference_style(document: Document, body: dict[str, Any], references: 
         num.append(abstract_ref)
         numbering.append(num)
 
-    heading_pattern = re.compile(
-        r"^\s*(?:references|bibliography|works cited|参考文献|参考资料)(?:\s*[\(（].*?[\)）])?\s*$",
-        re.I,
-    )
-    known_style_names = {
-        bibliography.name.lower(),
-        "bibliography",
-        "references",
-        "reference",
-        "参考文献",
-    }
-    in_reference_section = False
+    from word_format.inspect import DocumentIndex
+    reference_nodes = DocumentIndex(document).reference_nodes()
     styled = 0
     for paragraph in document.paragraphs:
         text = paragraph.text.strip()
-        current_style = paragraph.style.name.lower() if paragraph.style else ""
-        if heading_pattern.match(text):
-            in_reference_section = True
-            continue
-        if in_reference_section and current_style.startswith("heading"):
-            in_reference_section = False
         if not text:
             continue
-        if in_reference_section or current_style in known_style_names:
+        if paragraph._p in reference_nodes:
             paragraph.style = bibliography
             if numbering_mode == "word-numbering" and num_id is not None:
                 clean_text = re.sub(r"^\s*\[\s*\d+\s*\]\s*|^\s*\d+[\.、]\s*", "", text).strip()

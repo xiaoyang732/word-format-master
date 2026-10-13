@@ -82,7 +82,8 @@ def read_complex_state(index,name):
                 start_node=lvl.find(qn("w:start")) if lvl is not None else None
                 marker=marker_node.get(qn("w:val")) if marker_node is not None else None
                 start=start_node.get(qn("w:val")) if start_node is not None else None
-            records.append({"text":p.text,"style":p.style.name,"num_id":nid,"level":int(il.get(qn("w:val")))+1 if il is not None else 1,"marker":marker,"start":start})
+            records.append({"text":p.text,"style":p.style.name,"num_id":nid,"level":int(il.get(qn("w:val")))+1 if il is not None else 1,"marker":marker,"start":start,
+                            "reference_entry":p._p in index.reference_nodes() if name=="reference_numbering" else False})
         return records
     if name=="caption_position":
         from apply_spec import _neighboring_content_element, _is_figure_paragraph
@@ -142,7 +143,7 @@ def verify_complex_state(actual,params,name):
         items=[r for r in actual if r["num_id"] not in {None,"0"} and not r["style"].startswith("Heading") and r["style"]!="Bibliography"]
         return all(r["marker"]==LIST_NUMBERING_STYLES[params.get("style","decimal-period")][1] and r["start"]==str(params.get("start",1)) for r in items)
     if name=="reference_numbering":
-        items=[r for r in actual if r["style"]=="Bibliography"]
+        items=[r for r in actual if r["reference_entry"] and r["text"].strip()]
         return all(r["marker"]=="[%1]" if params["numbering_mode"]=="word-numbering" else r["num_id"] in {None,"0"} for r in items)
     if name=="caption_position":
         label=params.get("label") or ("图" if params["role"]=="figure" else "表")
@@ -259,6 +260,7 @@ def structural_snapshot(index,cap,params,refs):
         from .headers import header_projection
         return header_projection(index,cap,params,refs)
     from .inspect import paragraph_text
+    reference_nodes = index.reference_nodes() if cap.property == "reference_numbering" else set()
     paragraphs=[]
     for p in index.document.element.body.iter(qn("w:p")):
         ps=p.find("./"+qn("w:pPr")+"/"+qn("w:pStyle"))
@@ -277,7 +279,7 @@ def structural_snapshot(index,cap,params,refs):
             objects=[xml_value(n) for n in clone.iter() if n.tag in {qn("w:bookmarkStart"),qn("w:bookmarkEnd"),qn("w:drawing"),qn("w:instrText"),qn("w:fldChar")}]
             paragraphs.append((p,text,repr(objects)))
             continue
-        if cap.property in {"heading_numbering","reference_numbering","numbered"}:
+        if cap.property in {"heading_numbering","numbered"} or (cap.property=="reference_numbering" and p in reference_nodes):
             pr=clone.find(qn("w:pPr"))
             if pr is not None:
                 for child in list(pr):
@@ -313,7 +315,7 @@ def verify_structural_preservation(index,cap,params,refs,before):
         new_text,new_xml=by_node[node]
         if xml!=new_xml: raise FormatError("Structural operation changed an unrelated body object or format")
         if text==new_text: continue
-        if cap.property in {"heading_numbering","reference_numbering"} and text.endswith(new_text):
+        if (cap.property=="heading_numbering" or (cap.property=="reference_numbering" and node in index.reference_nodes())) and text.endswith(new_text):
             removed=text[:len(text)-len(new_text)] if new_text else text
             if re.fullmatch(r"\s*(?:第[一二三四五六七八九十百千零〇0-9]+章|\d+(?:\.\d+){0,2}[、.．]?|\[\d+\]|［\d+］)\s*",removed): continue
         if cap.property=="citations":

@@ -16,6 +16,10 @@ from docx import Document
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from json_output import write_json
+from word_format import apply_plan, build_plan, verify_plan
+from word_format.contracts import FormatError
+from word_format.registry import REGISTRY
+from word_format.properties import xml_value
 
 
 class JsonSafetyTests(unittest.TestCase):
@@ -68,6 +72,34 @@ class JsonSafetyTests(unittest.TestCase):
             self.assertEqual(list(Path(folder).iterdir()), [report])
             write_json(report, {"new": "中文"})
             self.assertEqual(json.loads(report.read_text(encoding="utf-8")), {"new": "中文"})
+
+
+class ReferenceSafetyTests(unittest.TestCase):
+    def test_references_stop_at_plain_module_titles_and_protect_their_content(self):
+        with tempfile.TemporaryDirectory() as folder:
+            source, output = Path(folder) / "source.docx", Path(folder) / "output.docx"
+            doc = Document()
+            for text in ("参考文献", "[1] Reference entry", "致谢", "Thanks", "附录", "Appendix contents"):
+                doc.add_paragraph(text)
+            protected = [xml_value(p._p) for p in doc.paragraphs[2:]]
+            doc.save(source)
+            plan = build_plan(source, output, {"operations": [{"action": "reference.numbering.convert",
+                "target": {"type": "document"}, "params": {"numbering_mode": "word-numbering"}}]})
+            report = apply_plan(plan)
+            self.assertEqual(verify_plan(plan, report)["status"], "passed")
+            out = Document(output)
+            self.assertEqual(out.paragraphs[1].style.name, "Bibliography")
+            self.assertEqual(out.paragraphs[1].text, "Reference entry")
+            self.assertEqual([xml_value(p._p) for p in out.paragraphs[2:]], protected)
+            output.unlink()
+            cap = REGISTRY["reference.numbering.convert"]
+            def bad(index, ref, params):
+                cap.handler(index, ref, params)
+                index.document.paragraphs[2].style = "Bibliography"
+            with patch.dict(REGISTRY, {cap.action: type(cap)(**{**cap.__dict__, "handler": bad})}):
+                with self.assertRaises(FormatError):
+                    apply_plan(plan)
+            self.assertFalse(output.exists())
 
 
 if __name__ == "__main__":
