@@ -74,6 +74,7 @@ def build_plan(input_path, output, request, *, _document=None):
                 "decisions",
                 "preserved_rules",
                 "preserved_targets",
+                "structure_contract",
             },
             {"source", "profile_sha256", "mapping", "decisions"},
             "profile_context",
@@ -82,6 +83,19 @@ def build_plan(input_path, output, request, *, _document=None):
         authority = Path(context["source"]["path"]).resolve()
         if destination == authority or (destination.exists() and destination.samefile(authority)):
             raise FormatError("Output must not overwrite the profile source")
+        if "structure_contract" in context:
+            from .profiles import template_structure_contract
+
+            contract = template_structure_contract({"source": context["source"]})
+            if context["structure_contract"] != contract:
+                raise FormatError("Thesis structure must match the current sample")
+            verification_spec = copy.deepcopy(request.get("verification_spec", {}))
+            if not isinstance(verification_spec, dict):
+                raise FormatError("verification_spec must be an object")
+            if verification_spec.get("document_structure", contract) != contract:
+                raise FormatError("Cannot override the sample's exact structure contract")
+            verification_spec["document_structure"] = contract
+            request = {**request, "verification_spec": verification_spec}
     if "verification" in request and not isinstance(request["verification"], dict):
         raise FormatError("verification must be an object")
     if "spec" in request and "operations" in request:
@@ -101,6 +115,10 @@ def build_plan(input_path, output, request, *, _document=None):
             expanded["request_text"] = request["request_text"]
         if "profile_context" in request:
             expanded["profile_context"] = request["profile_context"]
+        if "structure_contract" in request.get("profile_context", {}):
+            expanded["verification_spec"]["document_structure"] = request["profile_context"][
+                "structure_contract"
+            ]
         request = expanded
     operations = request.get("operations")
     if not isinstance(operations, list) or len(operations) > MAX_OPERATIONS:

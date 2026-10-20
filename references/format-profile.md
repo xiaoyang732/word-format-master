@@ -46,6 +46,8 @@ python scripts/format_cli.py profile template "样例.docx" --output profile.jso
 
 混合字号或局部强调不能用多数值自动替代。未支持的表格几何、复杂编号、页眉页脚内容、字段、栏及特殊 OOXML 等进入 `issues`。样例中的姓名、题目、正文、引用和页眉专属文字不会复制到目标。
 
+样例档案还保存 `snapshot.structure_contract`：按原顺序记录模块、摘要/关键词语言、声明类型、重复次数、章节层级及证据锚点。中文摘要与英文摘要分别记录；诚信承诺、原创性声明、授权书也分别记录。表格或图片位于正文模块之前时保留封面证据；首页题目区记录为 `title_block`，分页封面记录为 `cover`，`separate_page` 保留分页/分节边界，防止擅自把首页题目另做成独立封面。检测结果需要 AI 对照完整样例和页面核实，尤其是自动分页或特殊封面，不能把未识别内容视为不存在。
+
 ## 问题决策
 
 `resolutions.json` 以问题 ID 为键。决策必须附理由：
@@ -92,6 +94,21 @@ AI 可依据材料和用户已明确的偏好作决定。需要用户判断的�
 - `preserve`：明确保留的目标段落 ID → 理由。样例模式中，非空正文部件段落必须被规则覆盖或明确保留。这里的覆盖只表示角色/目标已映射，并不证明每个属性完整迁移。
 
 段落角色由共享检测器推断；AI 必须核实标题、正文、摘要、参考文献、题注等实际含义。缺少角色、重复目标、样例不均匀或模块差异不能静默忽略。
+
+上面的保留示例适用于保留原稿内容的排版任务。按样例生成新论文时，结构必须与样例一致，不能用 `rules.*.preserve`、`mapping.preserve` 或忽略格式问题来豁免缺少/多出的模块。
+
+## 按样例生成论文
+
+结构规则为：**样例有什么就生成什么，不多也不少**。有封面就生成封面；没有英文摘要、英文关键词、诚信承诺书、目录、致谢或附录，就不自动补加。已有模块按样例保留种类、数量、语言和先后顺序，章节层级也保持一致，具体题目、姓名与研究内容替换为新论文的信息。
+
+```powershell
+python scripts/format_cli.py check-structure "草稿.docx" --profile profile.json --output structure.json
+python scripts/format_cli.py plan "草稿.docx" "输出.docx" --profile profile.json --match-structure --mapping mapping.json --resolutions resolutions.json --output plan.json
+```
+
+`check-structure` 只读比较，返回 `expected`、`actual` 和 `differences`；有差异退出码为 2。它重新读取实际样例并检查来源指纹，不能修改快照来掩盖差异。`--match-structure` 用于新论文生成，规划前拒绝结构差异，并在 `profile_context.structure_contract` 和 `verification_spec.document_structure` 中绑定样例结构；写入验收和独立复检会再次核对。该模式遵循样例的实际顺序，不强加通用论文顺序。
+
+工具不会自行编写缺失封面或研究正文，AI 应先按结构清单完成草稿。封面布局、特殊模块和识别歧义还需核对原始内容及逐页渲染，不能仅凭检测结果宣称完全一致。仅做既有论文排版时不默认启用结构重建，保留原稿正文；详见 [论文生成流程](thesis-generation.md)。
 
 ## 生成计划与验收
 

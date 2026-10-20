@@ -18,6 +18,8 @@ REQUIRED = [
     "scripts/word_format/requirement_sources.py", "scripts/word_format/requirement_rules.py",
     "scripts/render_docx.py", "scripts/verify_output.py", "tests/test_profiles.py",
     "scripts/word_format/visual.py", "tests/test_visual_evidence.py",
+    "scripts/word_format/template_structure.py", "tests/test_template_structure.py",
+    "references/thesis-generation.md",
 ]
 REMOVED = [
     "assets/ui/index.html", "assets/ui/app.js", "assets/ui/styles.css",

@@ -416,7 +416,7 @@ def validate_spec(spec):
     structure = spec.get("document_structure", {})
     require_keys(
         structure,
-        {"schema_version", "strict_order", "ordered_modules", "order_errors"},
+        {"schema_version", "strict_order", "ordered_modules", "order_errors", "match"},
         label="document_structure",
     )
     if "strict_order" in structure:
@@ -424,7 +424,15 @@ def validate_spec(spec):
     modules = structure.get("ordered_modules", [])
     if not isinstance(modules, list) or any(not isinstance(m, dict) for m in modules):
         raise FormatError("ordered_modules must be an array of objects")
-    errors = validate_module_order(modules, strict=structure.get("strict_order", True))
+    if structure.get("match") == "exact":
+        from .template_structure import validate_template_structure
+
+        validate_template_structure(structure)
+    elif "match" in structure:
+        raise FormatError("Unsupported document structure match mode")
+    errors = validate_module_order(
+        modules, strict=structure.get("strict_order", True) and structure.get("match") != "exact"
+    )
     if errors:
         raise FormatError("; ".join(errors))
     for module in modules:

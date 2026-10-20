@@ -27,7 +27,9 @@ MODULE_ORDER = (
 
 MODULE_MARKERS = {
     "declaration": re.compile(
-        r"^\s*(?:(?:诚信|原创性|独创性|学术诚信|郑重)\s*声明|(?:学位论文)?(?:版权使用|使用)?授权书|声明与授权|授权声明)\s*$",
+        r"^\s*(?:(?:本科|学士|硕士|博士)?(?:学位|毕业)?(?:论文|设计)(?:[（(](?:设计|论文)[）)])?)?\s*"
+        r"(?:(?:诚信|原创性|独创性|学术诚信|郑重)\s*(?:声明|承诺书)|"
+        r"(?:版权使用|使用)?授权书|声明与授权|授权声明|诚信承诺|承诺书|声明)\s*$",
         re.I,
     ),
     "abstract": re.compile(r"^\s*(?:摘\s*要|中文摘要|英文摘要|abstracts?)(?:\s*[:：].*)?$", re.I),
@@ -35,7 +37,7 @@ MODULE_MARKERS = {
     "toc": re.compile(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", re.I),
     "references": re.compile(r"^\s*(?:参考文献|参考资料|references|bibliography|works\s+cited)\s*$", re.I),
     "acknowledgements": re.compile(r"^\s*(?:致\s*谢|acknowledg(?:e)?ments?)\s*$", re.I),
-    "appendix": re.compile(r"^\s*(?:附\s*录|appendix)(?:\s+[A-Z0-9一二三四五六七八九十]+)?\s*$", re.I),
+    "appendix": re.compile(r"^\s*(?:附\s*录|appendix)(?:\s*[A-Z0-9一二三四五六七八九十]+(?:[\s:：、].*)?)?\s*$", re.I),
     "symbols": re.compile(r"^\s*(?:符号说明|符号表|术语表|symbols?|glossary)\s*$", re.I),
 }
 
@@ -81,8 +83,10 @@ def classify_module(text: str, style_name: str = "", outline_level: int | None =
         return None
     if normalized in {"wfmtocheading"}:
         return "toc"
+    if normalized.startswith(("toc", "wfmtoc")):
+        return None
     for kind, pattern in MODULE_MARKERS.items():
-        if pattern.match(text):
+        if pattern.match(text) or pattern.match(re.sub(r"\s+", "", text)):
             return kind
     if heading_level(text, style_name, outline_level) == 1:
         return "chapters"

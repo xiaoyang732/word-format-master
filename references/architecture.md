@@ -19,6 +19,7 @@
 | `requirement_sources.py` | TXT/MD、DOCX/DOTX、文本 PDF 的文本与位置证据，只读且核对源指纹 |
 | `requirement_rules.py` | 保守子句解析；未消费内容、否定和条件进入未决项 |
 | `profiles.py` | 格式来源、有效样例快照、规则、冲突、决策、覆盖及目标映射；编译到同一 planner |
+| `template_structure.py` | 只读提取样例模块、语言、出现次数和章节层级；按实际顺序比较生成草稿，供规划和验收共用 |
 | `inspect.py` / `selectors.py` | 源文件对象目录和严格位置解析；不猜测重复或不存在的位置 |
 | `registry.py` | 可执行 action、目标类型、参数校验、唯一 handler、reader 和 verifier |
 | `properties.py` / `operations.py` | 字体、段落和页面属性的读写及命名 handler |
@@ -33,7 +34,7 @@
 
 ## 入口与数据
 
-`format_cli.py` 提供 `capabilities / inspect / profile / audit / plan / apply / verify`。
+`format_cli.py` 提供 `capabilities / inspect / profile / check-structure / audit / plan / apply / verify`。
 `apply_spec.py` 兼容直接 `--spec` 应用，委托 `word_format.api.apply_spec()`；兼容导出的字段/页码方法仍归属核心。
 
 - Format Profile：`schema_version: 1.0`，见 [format-profile.md](format-profile.md)。
@@ -44,6 +45,8 @@
 Profile 记录原始证据和问题，`resolutions` 保留决策理由。`mapping.sections` 对应源节和目标节；`mapping.rules` 使用当前 inspect 选择器。样例未覆盖的目标段落须明确保留。Profile 不复制样例内容，不重建未支持的包级结构。
 
 计划保存 `profile_context`，绑定格式依据的路径和指纹、档案摘要、映射、决策与保留项。执行和复检重新验证依据。摘要检测误改，不提供身份认证。
+
+按样例生成论文须先审阅 `snapshot.structure_contract` 并完成草稿，再执行只读 `check-structure` 和 `plan --match-structure`。结构契约使用 `match: exact`，保留原样例顺序，不套通用模块排序；区分中英文摘要/关键词、声明类型、模块重复次数和章节层级。来源复读防止修改快照绕过对照，差异不能由格式问题的忽略或目标保留豁免。契约绑定到计划后，临时文件验收与独立复检继续检查；额外目录等结构写入不能发布不匹配的输出。此功能只检测结构，不负责编写缺失正文或代替封面视觉检查。
 
 ## 变更保护
 

@@ -101,6 +101,12 @@ The shared module detector recognizes cover, declaration, abstract, keywords, TO
 chapters, references, acknowledgements, and appendix. During application, the
 module's `style_roles` are assigned through named Word styles. Structural
 verification fails when a required module is missing or appears out of order.
+Unspecified declarations, acknowledgements and appendices are not exempt from
+the template's module contract. New sample-based drafts use the stronger
+`match: "exact"` structure contract described in
+[format-profile.md](format-profile.md): language, occurrence count, actual sample
+order and chapter hierarchy must agree, including absent parts. Exact contracts
+do not impose the legacy conventional stage ordering.
 
 ### Tables
 

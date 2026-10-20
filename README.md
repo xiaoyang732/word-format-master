@@ -72,6 +72,19 @@ python scripts/format_cli.py verify --plan plan.json --report report.json --outp
 
 局部修改使用 `plan --request request.json`；只检查使用 `audit --request request.json`。请求和选择器见 [直接调用指南](references/direct-format-api.md)。内置 `thesis-standard` 仅在用户选择时应用，学校或期刊要求优先。
 
+## 按样例生成论文
+
+**样例中有什么，生成的论文就保留什么，不多也不少。** 有封面就制作对应封面；样例没有英文摘要、英文关键词、诚信承诺书、目录、致谢或附录，就不自动补加。模块的种类、数量、语言、顺序及章节层级按样例保留，题目、姓名和研究内容使用新论文的信息。
+
+AI 先核对样例档案中的 `snapshot.structure_contract` 和实际页面，再完成草稿。生成流程必须检查结构并启用严格规划：
+
+```powershell
+python scripts/format_cli.py check-structure "草稿.docx" --profile profile.json --output structure.json
+python scripts/format_cli.py plan "草稿.docx" "论文.docx" --profile profile.json --match-structure --mapping mapping.json --resolutions resolutions.json --output plan.json
+```
+
+存在额外或缺少的模块、语言/数量不一致、顺序或章节层级变化时，规划返回差异而不生成可执行计划；写入和复检也会核对。封面布局和不明确结构仍需逐页检查。详见 [论文生成流程](references/thesis-generation.md)。
+
 ## 验收与保护
 
 计划绑定目标论文和格式依据的路径及 SHA-256，来源变化后必须重新规划。写入前拒绝参数和位置冲突，输出先保存临时文件，重新打开并验收后发布。只改字号会保留其他未请求属性；编号转换、目录、引用、页眉内容替换等结构操作须明确配置。

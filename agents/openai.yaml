@@ -1,7 +1,7 @@
 interface:
   display_name: "Word Format Master"
   short_description: "按明确要求精确调整 Word 格式、提取模板并检查论文与报告排版"
-  default_prompt: "Use $word-format-master to inspect this Word document and apply my requested formatting through the shared core. Read requirements or a formatted sample into an evidence-bearing profile, resolve uncertain rules, then plan, apply and independently verify a new DOCX."
+  default_prompt: "Use $word-format-master to inspect this Word document and apply my requested formatting through the shared core. Read requirements or a formatted sample into an evidence-bearing profile, resolve uncertain rules, then plan, apply and independently verify a new DOCX. When drafting a thesis from a sample, reproduce exactly its parts, languages, counts, order and chapter hierarchy. Include a cover only when present; never add an absent English abstract or integrity pledge. Check the draft structure and use --match-structure when planning."
 
 policy:
   allow_implicit_invocation: true

@@ -34,7 +34,15 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         return {"status": "failed", "checks": checks, "errors": [str(exc)]}
 
     requested_structure = spec.get("document_structure")
-    if isinstance(requested_structure, dict) and requested_structure.get("ordered_modules"):
+    if isinstance(requested_structure, dict) and requested_structure.get("match") == "exact":
+        from word_format.template_structure import compare_template_structure
+
+        comparison = compare_template_structure(document, requested_structure)
+        _check(checks, "document-module-structure", comparison["status"] == "passed",
+               "Exact sample parts, languages, counts, order and chapter hierarchy checked")
+        checks[-1]["comparison"] = comparison
+        errors.extend(comparison["errors"])
+    elif isinstance(requested_structure, dict) and requested_structure.get("ordered_modules"):
         paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
         target_items = [
             {
@@ -48,11 +56,10 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         actual_modules = detect_module_spans(target_items)
         expected_kinds = [str(item.get("kind") or item.get("id") or "") for item in requested_structure.get("ordered_modules", [])]
         actual_kinds = [str(item.get("kind") or item.get("id") or "") for item in actual_modules]
-        OPTIONAL_STANDARD_MODULES = {"declaration", "symbols", "acknowledgements", "appendix"}
-        required = [kind for kind in expected_kinds if kind != "chapters"]
+        required = expected_kinds
         missing = [kind for kind in required if kind not in actual_kinds]
-        unexpected = [kind for kind in actual_kinds if kind not in expected_kinds and kind not in OPTIONAL_STANDARD_MODULES]
-        order_errors = validate_module_order(actual_modules)
+        unexpected = [kind for kind in actual_kinds if kind not in expected_kinds]
+        order_errors = validate_module_order(actual_modules, strict=requested_structure.get("strict_order", True))
         passed = not missing and not unexpected and not order_errors
         detail = f"expected={expected_kinds}, actual={actual_kinds}, missing={missing}, unexpected={unexpected}, order_errors={order_errors}"
         _check(checks, "document-module-structure", passed, detail)

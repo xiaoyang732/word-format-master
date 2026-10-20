@@ -28,6 +28,7 @@ from .registry import REGISTRY
 from .requirement_rules import parse_blocks
 from .requirement_sources import extract_requirements
 from .spec import FONT, PAGE, PARA
+from .template_structure import compare_template_structure, extract_template_structure
 
 
 def _profile(source):
@@ -418,6 +419,7 @@ def template_profile(path):
         "sections_xml": [str(s._sectPr.xml) for s in document.sections],
         "section_state": [r for r in records if r["kind"] == "section"],
         "modules": analysis["inferred_spec"].get("document_structure", {}),
+        "structure_contract": extract_template_structure(document),
     }
     profile["coverage"] = {
         "represented_rules": len(profile["rules"]),
@@ -492,7 +494,14 @@ def validate_profile_source(source):
 
 
 def profile_plan(
-    input_path, destination, profile, *, resolutions=None, mapping=None, request_text=""
+    input_path,
+    destination,
+    profile,
+    *,
+    resolutions=None,
+    mapping=None,
+    request_text="",
+    match_structure=False,
 ):
     from .api import build_plan
     from .selectors import resolve_targets
@@ -514,6 +523,18 @@ def profile_plan(
         raise FormatError(f"Unknown resolution IDs: {sorted(unknown)}")
     rules = copy.deepcopy(profile["rules"])
     pending = []
+    structure_contract = None
+    if match_structure:
+        structure_result = check_template_structure(target_path, profile)
+        structure_contract = structure_result["contract"]
+        if structure_result["status"] != "passed":
+            pending.append(
+                {
+                    "id": "template-structure",
+                    "reason": "Author the draft with exactly the sample's parts before formatting; mapping.preserve cannot waive structural differences",
+                    "structure": structure_result,
+                }
+            )
     decisions = []
     for issue in profile["issues"]:
         resolution = resolutions.get(issue["id"])
@@ -673,6 +694,8 @@ def profile_plan(
         "preserved_rules": preserved_rules,
         "preserved_targets": preserve,
     }
+    if structure_contract is not None:
+        context["structure_contract"] = structure_contract
     if pending:
         return {
             "schema_version": "1.0",
@@ -693,3 +716,34 @@ def profile_plan(
         "profile_context": context,
     }
     return build_plan(input_path, destination, request)
+
+
+def template_structure_contract(profile):
+    """Read authority again; stale or edited snapshots cannot redefine its parts."""
+    validate_profile_source(profile["source"])
+    if profile["source"]["kind"] != "template":
+        raise FormatError("Exact thesis structure requires a template profile")
+    contract = extract_template_structure(_template_document(Path(profile["source"]["path"])))
+    recorded = profile.get("snapshot", {}).get("structure_contract")
+    if recorded is not None and recorded != contract:
+        raise FormatError("Template structure snapshot changed; extract a fresh profile")
+    return contract
+
+
+def check_template_structure(input_path, profile):
+    """Read-only preflight/final check for drafts authored from a sample."""
+    validate_profile(profile)
+    target = source_path(input_path)
+    target_hash = sha256(target)
+    contract = template_structure_contract(profile)
+    result = compare_template_structure(Document(target), contract)
+    validate_profile_source(profile["source"])
+    if sha256(target) != target_hash:
+        raise FormatError("Draft changed during structure checking; inspect and check again")
+    return {
+        "kind": "word-template-structure-check",
+        "source": copy.deepcopy(profile["source"]),
+        "target": {"path": str(target), "sha256": target_hash},
+        "contract": contract,
+        **result,
+    }

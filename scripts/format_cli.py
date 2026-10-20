@@ -18,7 +18,12 @@ from word_format import (
     verify_plan,
 )
 from word_format.contracts import FormatError
-from word_format.profiles import profile_plan, requirements_profile, template_profile
+from word_format.profiles import (
+    check_template_structure,
+    profile_plan,
+    requirements_profile,
+    template_profile,
+)
 
 
 def read_json(path):
@@ -45,6 +50,12 @@ def main():
     p.add_argument("kind", choices=["requirements", "template"])
     p.add_argument("input")
     p.add_argument("--output")
+    p = commands.add_parser(
+        "check-structure", help="Check a draft against exactly the sample's parts"
+    )
+    p.add_argument("input")
+    p.add_argument("--profile", required=True)
+    p.add_argument("--output")
     p = commands.add_parser("audit")
     p.add_argument("input")
     p.add_argument("--request", required=True, help="JSON request file")
@@ -58,6 +69,11 @@ def main():
     p.add_argument("--resolutions", help="JSON decisions for profile issues")
     p.add_argument("--mapping", help="JSON section and rule target mappings")
     p.add_argument("--request-text", default="", help="Human instruction retained in plan")
+    p.add_argument(
+        "--match-structure",
+        action="store_true",
+        help="Required for sample-based drafts: reject extra, missing or reordered parts",
+    )
     p.add_argument("--output")
     p = commands.add_parser("apply")
     p.add_argument("--plan", required=True)
@@ -109,7 +125,7 @@ def main():
                     for p in manifest.get("pages", [])
                     if isinstance(p, dict) and "path" in p
                 )
-        if args.command == "plan" and args.profile:
+        if args.command in {"plan", "check-structure"} and args.profile:
             profile = read_json(args.profile)
             protected.append(profile["source"]["path"])
         if args.command in {"plan", "audit"} and args.request:
@@ -125,6 +141,8 @@ def main():
             result = (requirements_profile if args.kind == "requirements" else template_profile)(
                 args.input
             )
+        elif args.command == "check-structure":
+            result = check_template_structure(args.input, profile)
         elif args.command == "audit":
             result = audit_document(args.input, request)
         elif args.command == "plan":
@@ -136,10 +154,13 @@ def main():
                     resolutions=read_json(args.resolutions) if args.resolutions else None,
                     mapping=read_json(args.mapping) if args.mapping else None,
                     request_text=args.request_text,
+                    match_structure=args.match_structure,
                 )
             else:
-                if args.mapping or args.resolutions:
-                    raise FormatError("--mapping and --resolutions require --profile")
+                if args.mapping or args.resolutions or args.match_structure:
+                    raise FormatError(
+                        "--mapping, --resolutions and --match-structure require --profile"
+                    )
                 result = build_plan(args.input, args.destination, request)
         elif args.command == "apply":
             result = apply_plan(plan, overwrite=args.overwrite)

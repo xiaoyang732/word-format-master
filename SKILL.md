@@ -30,6 +30,12 @@ Choose the appropriate direct route:
 
 Do not combine formatting with prose rewriting unless requested. For a new thesis
 draft, read [references/thesis-generation.md](references/thesis-generation.md).
+When drafting from a sample, the sample defines the complete structure: include
+every part it has, in its order, and add no absent parts. Include a cover only
+when present; never automatically add an English abstract, English keywords,
+integrity pledge, declaration, TOC, acknowledgements or appendix. Preserve the
+sample's part counts, abstract languages and chapter hierarchy. Replace personal
+metadata and research text with the new thesis's content, not the sample's.
 
 ## Extract evidence
 
@@ -76,7 +82,12 @@ For multi-section samples, explicitly map every sample section in `mapping.secti
 chapter numbers are not section numbers. Map rule IDs to current target selectors
 in `mapping.rules` for unmatched or ambiguous roles. Use `mapping.preserve` with
 reasons for target paragraphs outside sample coverage. Review all preserved rules
-and paragraphs. Do not invent, reorder or delete modules to make the sample fit.
+and paragraphs. For formatting an existing manuscript, preserve its content and
+do not invent, reorder or delete modules to make the sample fit. For a new draft,
+author exactly the sample's modules first; preservation mappings cannot excuse
+missing or extra parts. Review `snapshot.structure_contract` against the complete
+sample, including table/image covers and rendered pages. Resolve ambiguous
+structures before drafting; do not fill them from a generic thesis outline.
 
 ## Plan, apply and verify
 
@@ -91,6 +102,15 @@ Omit optional mapping/resolution files when unnecessary. A result with
 not an executable plan. Resolve and plan again. No DOCX is written until apply.
 Source changes require fresh extraction/planning. Never patch plans or reports
 to force acceptance.
+
+For every sample-based thesis draft, run `check-structure DRAFT.docx --profile
+profile.json --output structure.json` before formatting and add `--match-structure`
+to the `plan` command above. These commands compare part kinds, languages,
+occurrences, order and chapter hierarchy against the actual sample. Fix the draft
+when they differ; do not bypass the check with `ignore` or `mapping.preserve`.
+The bound structure is checked again during apply and verify. It checks detected
+structure, so page review must also confirm cover layout and any unrecognized
+content. Only a user's explicit structural override authorizes a different outline.
 
 For local changes, create a schema 2.0 request and use `--request request.json`
 instead of `--profile`. Use inspect IDs, exact chapter titles or unique quotes.
