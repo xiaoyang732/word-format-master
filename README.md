@@ -1,72 +1,35 @@
 # Word Format Master
 
-**用自然语言调整 Word 格式，让论文和报告排版更省心。**
+**把论文和格式依据交给 AI，通过本地工具完成排版与复核。**
 
 [![CI](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-Word Format Master 是一个面向 Word 排版的本地工具与 AI Skill。你可以直接告诉 AI 要改哪里，也可以在网页中调整参数后交给 AI 执行。从整篇论文规范化到一个段落的行距、几个字的字号，都可以按明确要求处理，生成新的 Word 文件并保留原稿。
+提供目标论文，再提供学校的格式要求文档、已排好版的论文样例，或直接说明修改要求。AI 读取材料、处理格式冲突、匹配目标位置，再调用确定性的格式引擎生成新的 DOCX。原稿与格式依据保持不变。
 
-> “只把第三章正文改为宋体、小四，行距 1.5 倍，其他格式保持。”
+> “按《学校论文要求.docx》整理《我的论文.docx》，另存新文件。无法确定的要求先列出来。”
 >
-> “正文页眉显示当前章节标题，偶数页显示论文题目，字号小五。”
+> “用《排版样例.docx》作为格式依据，保留我的正文、姓名和数据，列出未覆盖的格式。”
+>
+> “只把第三章正文改为宋体、小四、1.5 倍行距。”
 
-[功能介绍](#功能介绍) · [快速开始](#快速开始) · [请求示例](#请求示例) · [常见问题](#常见问题)
+## 能处理什么
 
-## 适合哪些场景？
-
-- **论文交稿前统一排版**：按照学校模板或明确要求，调整正文、各级标题、目录、图表和参考文献。
-- **只修改指定位置**：单独处理某章、某段、表格中的文字或一段选定文字，保留其他位置的格式。
-- **复用已有模板**：从 DOCX/DOTX 模板提取支持的格式设置，在网页中查看并调整。
-- **处理复杂页眉**：为摘要、正文、参考文献设置不同内容，配置动态章节标题、首页和奇偶页页眉。
-- **检查格式问题**：先审查文档，查看格式差异，再决定是否修改。
-
-## 功能介绍
-
-| 功能 | 可以做什么 |
+| 输入或能力 | 处理方式 |
 |---|---|
-| 字体与字号 | 分别设置中文、西文字体，调整字号、粗体、斜体和颜色 |
-| 段落排版 | 调整对齐、行距、段前段后距、首行/悬挂/左右缩进和段落分页控制 |
-| 页面布局 | 设置纸张大小、方向、页边距、装订线及页眉页脚距离；支持指定节 |
-| 标题与列表 | 设置各级标题格式，按明确要求使用 Word 自动编号和多级标题编号 |
-| 目录 | 基于真实标题生成 Word 目录字段，配置目录标题、级数及目录后的分页 |
-| 图表与题注 | 调整图名、表名格式与位置，设置表格对齐、重复标题行和三线表 |
-| 参考文献与引用 | 调整文献段落格式与编号；在明确请求时，让 AI 分析引用位置并使用已有文献插入引用 |
-| 页眉页脚与页码 | 设置固定文字或动态章节标题、题目与章节组合、分节页眉、首页/奇偶页不同和页码字段 |
-| 模板与格式检查 | 提取 DOCX/DOTX 的支持格式、识别文档模块，检查修改结果；可配合 Word/LibreOffice 逐页视觉验收 |
+| 格式要求文档 | 读取 UTF-8 TXT/Markdown、DOCX/DOTX、文本 PDF，保留原文和位置证据 |
+| 已排版论文样例 | 提取 DOCX/DOTX 有效字体、字号、段落属性、全部页面节及结构清单 |
+| 精确局部修改 | 按章节、角色、段落、表格单元格或普通文字范围修改 |
+| 页面与段落 | 纸张、方向、边距、装订线、行距、缩进、段距及分页控制 |
+| 字体与标题 | 中西文字体、字号、粗斜体、颜色、标题层级与明确请求的自动编号 |
+| 论文结构 | 明确配置目录字段、页码、分节页眉、首页与奇偶页、题注位置、三线表及文献编号 |
+| 验收 | 逐项回读格式、检查内容和无关属性保全，并可渲染逐页检查 |
 
-### 整篇处理，也能精确修改
-
-可以按正文、标题、参考文献等类型批量调整，也可以只修改指定章节、段落或文字。位置与要求明确时，AI 直接执行；遇到同名章节、重复文字或冲突要求时，会先澄清。
-
-例如，只要求改字号时，会保留已有文字、粗体和段落设置。目录生成、编号转换、引用插入和新建分节等操作，需要明确提出。
-
-### 两种方式，按习惯选择
-
-| 使用方式 | 适合什么时候 | 如何操作 |
-|---|---|---|
-| **直接告诉 AI** | 修改要求已经明确，或只需改一个局部位置 | 提供文档路径、修改范围和要求，由 AI 调用本地工具完成 |
-| **网页配置** | 希望逐项查看参数、调整模板或预览排版示意 | 让 AI 打开配置页，由你调整并点击“确认设置并交给 AI” |
-
-直接模式无需打开网页。网页模式由你确认设置，AI 接收确认结果后执行。
-
-### 复用学校模板与排版要求
-
-可以提供学校的 Word 模板，也可以粘贴字体、字号、页边距等文字要求。模板提取和文字识别会得到可调整的设置，无法确定的部分留待确认。
-
-项目提供一个学位论文排版预设，适合作为起点。**学校、期刊的正式模板和明确要求优先**；内置预设与通用排版建议不能保证满足所有机构的交稿要求。
-
-### 保留原稿，检查结果
-
-修改会另存为新的 DOCX，不覆盖源文件。输出前会检查请求的格式是否写入，并核对未请求修改的内容和属性；检查失败时不发布半成品。
-
-还可选择 Microsoft Word 或 LibreOffice 渲染，检查实际分页、页眉、表格和字形。网页预览是排版示意，最终效果以文档渲染为准。
+样例分析和自动迁移有明确边界：同一角色中的混合格式、复杂页眉页脚、字段、编号和特殊对象会进入待处理问题；支持的项目才生成执行规则。扫描 PDF 需要 OCR，DOC 需先转为 DOCX。不会用通用预设补齐材料没写出的要求，也不会把样例文字复制进目标论文。
 
 ## 快速开始
 
-### 1. 准备环境
-
-目前面向 **Windows 10/11、Python 3.10 及以上**。格式修改和结构检查无需安装 Word；实际分页与视觉验收需要 Microsoft Word 或 LibreOffice。
+面向 Windows 10/11、Python 3.10 及以上。格式写入和结构检查无需 Word；实际分页和视觉验收需要 Microsoft Word 或 LibreOffice。
 
 ```powershell
 git clone https://github.com/xiaoyang732/word-format-master.git
@@ -75,155 +38,87 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-### 2. 在 AI 会话中使用
-
-使用具备本地文件读取和命令执行能力的 AI 工具。项目的 Skill 入口是 [SKILL.md](SKILL.md)；可按所用工具的技能加载方式添加，也可直接让 AI 读取该文件并按其中的流程操作。
-
-首次使用时，可以这样说：
+在具备本地文件读取和命令执行能力的 AI 工具中加载 [SKILL.md](SKILL.md)，或这样说：
 
 ```text
-请读取 <项目目录>/SKILL.md，使用 word-format-master 处理文档。
-
-文档：C:/Documents/论文.docx
-要求：只将第三章正文设为宋体、小四、1.5 倍行距。
-保留其他格式，输出到 C:/Documents/论文-排版后.docx。
+请读取 <项目目录>/SKILL.md，使用 word-format-master。
+目标论文：C:/Documents/论文.docx
+格式依据：C:/Documents/学校格式要求.docx
+输出：C:/Documents/论文-排版后.docx
+请检查全部要求，处理明确可确定的格式，报告冲突、未覆盖项及验收状态。
 ```
 
-将示例路径替换为实际路径。AI 会检查文档、定位修改范围、执行并返回结果与验收说明。
+用户通过当前 AI 会话提出需求。下面的 CLI 和 JSON 由 AI 组织，不要求用户手工配置。
 
-### 3. 如果更喜欢网页配置
+## 要求文档与样例工作流
 
-直接告诉 AI：
-
-```text
-使用 word-format-master 打开这份论文的网页配置页。
-我会在网页里调整参数，确认后再执行。
-```
-
-也可手动启动配置页：
+两种来源任选其一生成格式档案：
 
 ```powershell
-.\.venv\Scripts\python.exe scripts/serve_dashboard.py --input "C:/Documents/论文.docx" --output "C:/Documents/论文-排版后.docx"
+python scripts/format_cli.py profile requirements "学校要求.docx" --output profile.json
+python scripts/format_cli.py profile template "排版样例.docx" --output profile.json
 ```
 
-浏览器会打开本地页面。你可以选择预设、导入模板、输入文字要求并调整参数，点击“确认设置并交给 AI”后，由正在使用本技能的 AI 会话接续执行。单独启动网页不会自动连接一个新的 AI 服务。
-
-## 请求示例
-
-以下示例均需同时提供实际文档路径。
-
-**按学校要求统一论文格式**
-
-```text
-按照我提供的学校模板整理整篇论文。
-先检查模板中可识别的格式；无法确定的要求列出来，不要自行补齐。
-另存为新文件。
-```
-
-**只改一段文字**
-
-```text
-在“研究方法”章节中，只将“本研究采用混合方法”这几个字改为 14 磅并加粗。
-其他文字和段落格式保持。
-```
-
-**设置分章与奇偶页页眉**
-
-```text
-正文奇数页页眉显示当前章节标题，偶数页显示“城市热环境研究”。
-中文宋体，西文 Times New Roman，字号小五；奇数页右对齐，偶数页左对齐。
-先检查现有分节；需要新增分节的位置请指出。
-```
-
-**整理目录与标题编号**
-
-```text
-把正文章标题设置为 Word 原生三级自动编号，并生成三级目录。
-摘要、参考文献、致谢不参与章节编号。
-```
-
-**先检查，不修改**
-
-```text
-检查这份论文的正文、标题、图表和参考文献格式是否符合我提供的要求。
-列出不一致的位置，本次不要修改文件。
-```
-
-命令行只读检查使用与修改相同的请求文件：
+档案保存来源 SHA-256、证据锚点、可执行规则、原始快照、覆盖范围和待处理问题。AI 检查问题后记录明确决策；多个页面节需要映射到目标论文的实际节编号。
 
 ```powershell
-python scripts/format_cli.py audit "论文.docx" --request request.json --output audit.json
+python scripts/format_cli.py inspect "论文.docx" --output inspect.json
+python scripts/format_cli.py plan "论文.docx" "论文-排版后.docx" --profile profile.json --mapping mapping.json --resolutions resolutions.json --output plan.json
+python scripts/format_cli.py apply --plan plan.json --report report.json
+python scripts/format_cli.py verify --plan plan.json --report report.json --output verification.json
 ```
 
-报告包含每个目标的期望值、实际有效值和通过/失败计数。有差异时退出码为 2，完整报告仍会保存。只检查请求中指定的属性，不生成新 Word 文件。请求格式见[直接调用指南](references/direct-format-api.md)。
+没有映射或问题时可省略 `--mapping`、`--resolutions`。未解决问题会返回 `needs_clarification`，此时保存的是审阅结果，不能用作执行计划。决策和显式保留项会随执行报告保存。详见 [格式档案契约](references/format-profile.md)。
+
+局部修改使用 `plan --request request.json`；只检查使用 `audit --request request.json`。请求和选择器见 [直接调用指南](references/direct-format-api.md)。内置 `thesis-standard` 仅在用户选择时应用，学校或期刊要求优先。
+
+## 验收与保护
+
+计划绑定目标论文和格式依据的路径及 SHA-256，来源变化后必须重新规划。写入前拒绝参数和位置冲突，输出先保存临时文件，重新打开并验收后发布。只改字号会保留其他未请求属性；编号转换、目录、引用、页眉内容替换等结构操作须明确配置。
+
+独立 `verify` 检查报告是否完整覆盖计划，并重新读取输出。JSON 报告也不能覆盖输入、格式依据或目标文档。已有输出默认不覆盖。
+
+```powershell
+python scripts/render_docx.py "论文-排版后.docx" --output-dir render --method auto
+```
+
+最终分页、字形、表格、页眉和 Word 字段需要实际渲染并逐页检查。没有完成渲染和检查时，只能报告结构通过，视觉为 `skipped` 或 `pending`。Word 与 LibreOffice 可能有分页差异；不能对任意 Word 文件承诺所有格式都能自动复制。
+
+AI 完成页面检查后，可用 `verify --visual-report visual.json --render-manifest render/render-manifest.json` 绑定并复核视觉证据，拒绝过期或缺页报告。完整命令和报告格式见 [直接调用指南](references/direct-format-api.md#绑定视觉验收)。
 
 ## 常见问题
 
-**必须通过网页才能修改吗？**
+**会改写正文吗？** 普通格式操作保留正文。明确的编号、引用和目录操作按声明的结构影响执行。正文润色需要另行提出。
 
-不需要。直接模式下，告诉 AI 文档、位置和要求即可。网页适合想逐项调整参数时使用。
+**会上传文档吗？** 本地工具不调用大模型 API。AI 会话如何处理文档上下文取决于所用 AI 工具的配置。
 
-**会改写正文吗？**
+**支持所有 Word 格式吗？** 支持 DOCX 修改和 DOCX/DOTX 样例提取。宏文档、Strict OOXML 写入、复杂文字范围及部分包级结构暂不支持；未支持项会保留并报告。
 
-普通格式调整保留文字内容。明确要求的编号转换、题注、目录和引用操作会按各自规则处理。正文润色和改写不属于本项目的自动格式功能。
+**能只检查、不修改吗？** 可以。`audit` 不保存 DOCX，报告每个目标的期望值、有效值和差异；有差异退出码为 2，完整报告仍保存。
 
-**文档会上传到外部服务吗？**
-
-项目的分析与格式处理在本地运行，网页仅监听本机地址，格式工具本身不调用大模型 API。所用 AI 工具如何处理会话及文档上下文，取决于该工具的配置和隐私政策。
-
-**支持哪些 Word 文件？**
-
-支持 DOCX 格式修改，以及 DOCX/DOTX 模板分析。旧版 DOC 需先转换为 DOCX；宏文档和 Strict OOXML 写入暂不支持。
-
-**能保证与 Word 中显示完全一致吗？**
-
-最终效果需要实际渲染检查。目录、页码和动态章节页眉等字段需要 Word 或支持的渲染器刷新；Word 与 LibreOffice 的分页可能不同。当前不支持直接按“第几页”定位修改，含复杂字段、修订或绘图的局部文字范围可能被拒绝。
-
-## 更多文档
-
-- [Skill 使用流程](SKILL.md)：AI 如何检查、修改和交付 Word 文档。
-- [页眉设置指南](references/header-requirements.md)：分节、动态章节、首页与奇偶页要求。
-- [标准与预设](references/standards-registry.md)：排版依据及学校模板优先级。
-- [直接调用指南](references/direct-format-api.md)：命令行与精确修改请求。
-- [网页交接流程](references/dashboard-workflow.md)：配置页、后台监听和验收回传。
-- [项目审查与升级记录](references/review-2026-10-10.md)：同类方案比较、本轮修复和后续优先级。
-- [最终审查整改与验收记录](references/review-2026-10-13-remediation.md)：分块提交映射、回归结果、性能实测和渲染验收边界。
-- [格式参数说明](references/format-spec.md)：支持的设置与单位。
-- [安全说明](SECURITY.md) · [项目架构](references/architecture.md)：保护边界与开发实现。
-
-<details>
-<summary>参与开发与运行检查</summary>
-
-欢迎通过 [Issues](https://github.com/xiaoyang732/word-format-master/issues) 反馈问题或建议功能。格式问题请说明期望效果、实际效果、操作范围和运行环境；分享样例前请移除个人信息。
-
-在已安装依赖的 Python 环境中运行：
+## 开发验证
 
 ```powershell
 python -m pip install -r requirements-dev.txt
-python -m ruff check scripts/word_format scripts/apply_spec.py
-python -m ruff format --check scripts/word_format scripts/apply_spec.py
-python -B scripts/validate_project.py
-python -B scripts/smoke_test.py
-python -B -m unittest discover -s tests -v
-node --check assets/ui/app.js
+python -m ruff check scripts/word_format scripts/apply_spec.py scripts/format_cli.py
+python -m ruff format --check scripts/word_format scripts/apply_spec.py scripts/format_cli.py
+python scripts/validate_project.py
+python scripts/smoke_test.py
+python -m unittest discover -s tests -v
 git diff --check
 ```
 
-核心 Python 代码由 Ruff 统一排版并在 CI 中检查。性能基准可用 `python scripts/benchmark_formatting.py --profile` 复现；该命令创建临时的 96 段合成论文，并报告耗时、调用次数与验收结果。
+每项新格式能力必须登记参数约束、唯一写入方法、独立回读和验收。性能基准见 `python scripts/benchmark_formatting.py --profile`。
 
-网页回归使用独立的 Node.js 开发依赖，测试会自动启动并关闭本地 Dashboard，无需手工提供 URL：
+## 更多文档
 
-```powershell
-npm ci
-npx playwright install chromium
-npm run check
-npm test
-```
-
-也可通过 `WFM_PYTHON` 指定 Python，通过 `WFM_BROWSER_CHANNEL=msedge` 选择本机 Edge，或向 `npm test -- URL` 传入已有测试服务。CI 单独执行桌面与移动端网页回归。每项新格式能力应同时提供参数约束、对应修改代码和回读验收。
-
-</details>
-
-## 开源协议
+- [Skill 工作流](SKILL.md)
+- [格式档案、映射与冲突决策](references/format-profile.md)
+- [直接调用指南](references/direct-format-api.md)
+- [兼容格式规范](references/format-spec.md)
+- [页眉设置](references/header-requirements.md)
+- [标准与预设](references/standards-registry.md)
+- [架构](references/architecture.md) · [安全边界](SECURITY.md)
+- [改造方案与实现进度](references/direct-ai-only-roadmap.md)
 
 [MIT License](LICENSE)。

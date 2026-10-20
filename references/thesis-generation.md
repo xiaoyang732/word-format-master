@@ -1,8 +1,8 @@
-# Thesis draft handoff and regression checks
+# Thesis drafting and regression checks
 
 Read this when a user explicitly requests a thesis draft, or when diagnosing
 formatting failures from a generated thesis. Existing-document formatting still
-uses the normal direct or confirmed Dashboard workflow.
+uses the direct profile/request, plan, apply and verify workflow.
 
 ## Authoring boundary
 

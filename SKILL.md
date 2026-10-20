@@ -1,167 +1,152 @@
 ---
 name: word-format-master
-description: Inspect and edit Word formatting through deterministic local code, for whole documents, chapters, paragraphs or text ranges. Use direct AI requests or user-configured dashboard handoffs through the same format core. Also analyze DOCX/DOTX templates and audit formatting. Legacy DOC must first be converted to DOCX.
+description: Inspect, audit and edit Word formatting through deterministic local code. Use direct AI instructions, requirement documents or formatted DOCX/DOTX samples to build evidence-bearing profiles, resolve mappings, plan, apply and verify. Preserve source documents; convert legacy DOC before use.
 ---
 
 # Word Format Master
 
-Use a template-first, evidence-backed workflow. Keep source documents unchanged, represent formatting as explicit JSON tokens, and verify both package structure and rendered pages before delivery.
+Use the current AI conversation and local CLI. AI interprets intent and evidence;
+registered code reads, validates, writes and verifies DOCX. Never create independent
+document-editing scripts. Editing project code is separate from formatting documents.
 
-## Resolve Paths
+## Resolve paths and scope
 
-Set `SKILL_DIR` to the directory containing this file. Use absolute paths for every input, output, temporary directory, script, and asset.
+Set `SKILL_DIR` to this directory. Resolve `PYTHON_BIN` to an available Python
+executable after checking `import docx`. Use absolute paths for scripts, source
+files, output, profiles, plans and reports. Keep intermediate files in a task folder.
+Never overwrite the target manuscript or formatting source.
 
-Before running any command shown below, resolve `PYTHON_BIN`. In AI Agent Desktop environments, resolve and set it to the available Python executable. Do not assume the environment variable already exists. Outside that runtime, use an absolute `python` executable only after `& "C:\absolute\path\python.exe" -c "import docx"` succeeds.
+Identify target, output, scope and authority from the user's message and files.
+Continue when clear; ask only about missing information that changes the result,
+conflicting evidence or ambiguous targets. Do not ask for routine permission to
+carry out a clearly requested format edit.
 
-## Choose the Entrance
+Choose the appropriate direct route:
 
-For a direct AI request, inspect the document and call `format_cli.py` without launching a browser. When the source, scope and parameters are clear, execute directly into a new DOCX. Ask only about ambiguous requirements or selectors. Do not add unspecified defaults or apply a full preset to a local edit.
+1. **Requirement material**: extract from TXT/MD, DOCX/DOTX or text PDF.
+2. **Formatted sample**: extract effective supported formatting from DOCX/DOTX.
+3. **Local change**: inspect and translate the instruction into registered actions.
+4. **Audit only**: check expected values without applying or saving a DOCX.
 
-For webpage configuration, launch the Dashboard and let the human edit and submit it. AI must not click confirmation, fill controls or fabricate a handoff on the human's behalf. The confirmed handoff uses the same planner, registry and executor as direct requests.
+Do not combine formatting with prose rewriting unless requested. For a new thesis
+draft, read [references/thesis-generation.md](references/thesis-generation.md).
 
-Existing handoffs remain bound to their exact source and output paths and source SHA-256. Direct requests do not require a handoff. Editing code in this project is separate from modifying user documents.
+## Extract evidence
 
-## Direct AI Workflow
-
-Read [references/direct-format-api.md](references/direct-format-api.md) for request contracts and selectors. Use absolute paths:
+Read [references/format-profile.md](references/format-profile.md) for profiles,
+mappings and resolutions; [references/direct-format-api.md](references/direct-format-api.md)
+for operations and selectors.
 
 ```powershell
-& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" capabilities
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" capabilities --output capabilities.json
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" profile requirements REQUIREMENTS.docx --output profile.json
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" profile template SAMPLE.docx --output profile.json
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" inspect INPUT.docx --output inspect.json
-& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" plan INPUT.docx OUTPUT.docx --request request.json --output plan.json
+```
+
+Run one extraction command matching the source. Save pasted requirements verbatim
+as UTF-8 text before extraction. The parser recognizes common clauses; it is not
+a complete natural-language interpreter. Read complete source blocks and every
+issue. Translate unparsed semantics into explicit replacement rules with evidence
+and reasons. Do not ignore unmatched wording when positive tokens were recognized.
+
+Sample profiles record effective role properties, direct XML, styles, all page
+sections, fields and feature inventory. Mixed values stay unresolved. Do not use
+majority values or presets to fill missing properties. Review role detection
+against text and inspect IDs; bold text alone does not establish a heading.
+Tables, numbering, headers, footers and special structures may require explicit
+operations. Never copy sample-specific names, titles, body text or headers.
+
+Legacy DOC requires conversion to a separate DOCX. Scanned PDF needs OCR with
+page evidence. Strict OOXML and macro formats are unsupported for writing.
+
+## Resolve authority and mappings
+
+Priority: explicit user choice > supplied institution/publisher template > written
+requirements > named standard > user-selected preset > existing manuscript values.
+See [references/standards-registry.md](references/standards-registry.md). Preserve
+conflicting evidence and record the choice. Do not add presets to partial requests.
+
+Record `choose`, `replace` or `ignore` decisions with reasons in resolutions JSON.
+Use available evidence and prior user instructions; ask when evidence cannot decide.
+An ignore reason must explain preservation or non-applicability, not hide unsupported
+work. Retain ignored items in the delivery's coverage summary.
+
+For multi-section samples, explicitly map every sample section in `mapping.sections`;
+chapter numbers are not section numbers. Map rule IDs to current target selectors
+in `mapping.rules` for unmatched or ambiguous roles. Use `mapping.preserve` with
+reasons for target paragraphs outside sample coverage. Review all preserved rules
+and paragraphs. Do not invent, reorder or delete modules to make the sample fit.
+
+## Plan, apply and verify
+
+```powershell
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" plan INPUT.docx OUTPUT.docx --profile profile.json --mapping mapping.json --resolutions resolutions.json --output plan.json
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" apply --plan plan.json --report report.json
-& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" verify --plan plan.json --report report.json
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" verify --plan plan.json --report report.json --output verification.json
 ```
 
-Map the user's intent to registered operations, never generate ad hoc document-editing scripts. Use inspect IDs, exact chapter titles, filtered paragraph ordinals or unique quotes. A plan resolves selectors and detects conflicts before execution; source changes require a new plan. Atomic format edits preserve text, objects and unrelated properties. Heading/reference numbering conversion, citation insertion and TOC generation are separate explicit operations.
+Omit optional mapping/resolution files when unnecessary. A result with
+`kind: word-format-profile-review` and `status: needs_clarification` is a review,
+not an executable plan. Resolve and plan again. No DOCX is written until apply.
+Source changes require fresh extraction/planning. Never patch plans or reports
+to force acceptance.
 
-## Select One Route
+For local changes, create a schema 2.0 request and use `--request request.json`
+instead of `--profile`. Use inspect IDs, exact chapter titles or unique quotes.
+Do not use a full-document profile for a local edit. Shared styles require an
+explicit style target; unrequested properties and text stay unchanged.
 
-Choose exactly one route:
-
-1. **Distill template**: inspect a DOCX/DOTX and produce a reusable format specification.
-2. **Interpret requirements**: convert pasted formatting instructions into supported tokens with evidence and confidence.
-3. **Execute confirmed handoff**: apply only an existing, user-confirmed `HANDOFF.json` for its matching source DOCX.
-4. **Audit only**: use `format_cli.py audit INPUT.docx --request request.json --output audit.json` with the requested operations or spec. Report object IDs, expected and effective values; do not apply the plan or create a DOCX. Read [references/direct-format-api.md](references/direct-format-api.md) for report and exit-code semantics.
-5. **Configure interactively**: when the user chooses webpage configuration, preprocess the source document, launch the dashboard, let the human inspect or adjust tokens, then execute the handoff.
-6. **Direct formatting**: translate clear instructions to registered operations and execute the direct workflow above.
-
-Do not combine formatting with content rewriting unless the user explicitly requests both.
-
-When the user explicitly requests a new thesis draft, read
-[references/thesis-generation.md](references/thesis-generation.md). Authoring
-content is separate from formatting an existing DOCX; use real Heading styles
-for chapter titles and keep chapter-description prose as body text. A formatting
-pass does not establish that research results or references are authentic.
-
-## Load References
-
-- Read [references/format-spec.md](references/format-spec.md) before creating, merging, or applying a specification.
-- Read [references/standards-registry.md](references/standards-registry.md) when selecting an academic preset or interpreting an authority hierarchy.
-- Read [references/header-requirements.md](references/header-requirements.md) for section-scoped headers, first/even page variants, dynamic chapter fields and explicit section boundaries. Use registered header actions; insert requested boundaries in a separate plan and inspect the new section IDs before setting headers.
-- Read [references/project-research.md](references/project-research.md) only when extending the implementation or choosing a new engine.
-- Read [references/architecture.md](references/architecture.md) before changing API routes, session lifecycle, module boundaries, or data-contract versions.
-
-## Analyze Inputs
-
-For DOCX/DOTX input, run:
+For audit-only tasks:
 
 ```powershell
-& $PYTHON_BIN "$SKILL_DIR/scripts/analyze_docx.py" INPUT.docx --output analysis.json
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" audit INPUT.docx --request request.json --output audit.json
 ```
 
-Inspect Strict and Transitional OOXML, styles, inheritance, direct formatting, numbering, sections, headers, footers, tables, fields, and package parts. Do not infer the whole template from the first page or from `Document.paragraphs` alone.
+For Format Spec 1.0, read [references/format-spec.md](references/format-spec.md).
+It expands through the same registry. Official publisher packages remain the
+authority where numeric rules cannot represent their layout or submission format.
 
-Treat an uploaded DOCX/DOTX used as a formatting template as a complete formatting snapshot. Populate every supported Dashboard setting from that template's final effective values, resolving direct formatting, style inheritance, document defaults, and theme fonts. Use explicit `false`/empty values only for genuinely absent features such as headers, footers, page numbers, and table of contents. Never deep-merge a distilled template over a built-in preset or use the preset to fill fields that the uploaded template does not define.
+Read [references/header-requirements.md](references/header-requirements.md) for
+section/variant headers and STYLEREF. Header content, numbering, citations, TOC
+and section insertion are explicit structural operations. Insert boundaries in
+a separate plan, then inspect the new DOCX. Use real fields for supported TOCs
+and page numbers. Do not claim unregistered SEQ/REF creation is supported.
 
-For thesis-style documents, also extract the ordered module contract from the
-body sequence: cover, declaration, abstract, keywords, table of contents, symbols, chapters,
-references, acknowledgements, and appendix. Each present module carries its
-paragraph anchors and role-specific style tokens; absent modules remain absent.
-The same detector is used during application and structural verification, so a
-missing or out-of-order module fails acceptance instead of being silently
-reclassified.
+## Render and deliver
 
-For pasted requirements, run:
+Structural verification is mandatory. Use `render_docx.py INPUT.docx --output-dir
+RENDER_DIR --method auto` for visual evidence; choose `word` or `libreoffice` when
+specified. Explicit choices must not fall back silently. Inspect every page for
+clipping, missing glyphs, broken tables, page breaks, headers and blank pages.
+Repair the owning rules/request and rerender if needed.
+
+The engine cannot evaluate Word fields; the renderer must refresh them. If
+rendering is unavailable, report visual `skipped` with a reason. If pages await
+inspection, use `pending`. Neither is a visual pass; never fabricate a report.
+
+After page inspection, create the bound visual JSON described in
+[references/direct-format-api.md](references/direct-format-api.md), then run:
 
 ```powershell
-& $PYTHON_BIN "$SKILL_DIR/scripts/parse_requirements.py" requirements.txt --output detected.json
+& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" verify --plan plan.json --report report.json --visual-report visual.json --render-manifest RENDER_DIR/render-manifest.json --output verification.json
 ```
 
-Keep unmatched requirements unresolved. Never invent missing margins, fonts, numbering, or citation rules.
+Hash the actual output and render manifest; never reuse an old review after
+rerendering. If the renderer was explicitly selected, retain that selection in
+the plan or pass `--render-method`. The checker verifies every page file hash.
 
-Legacy `.doc` files are not accepted by the Dashboard. If institution material is supplied as `.doc`, convert a read-only copy to `.docx` with Microsoft Word for analysis, record the conversion as evidence, and use a newer user-supplied `.docx` mother template when one is available.
+Deliver the new DOCX and a concise summary of authority, applied/verified
+properties, preserved/ignored items, unsupported work and visual status. Claim
+full compliance only when every required property is represented and verified,
+including visual checks. Do not promise arbitrary Word formats all migrate.
+Keep internal JSON and page images out of delivery unless useful or requested.
 
-## Resolve Authority
+For batches, inspect and plan each manuscript separately. Reusing a profile does
+not authorize reusing source-bound IDs.
 
-Merge values in this order:
+Example requests: “按这份学校要求整理论文并另存新文件”；“读取排版样例，应用支持的
+格式并列出未覆盖项”；“只改第三章正文”；“Apply this sample's formatting to each
+manuscript; preserve their content.”
 
-1. User-locked field
-2. Uploaded institution, publisher, or organization template
-3. Explicit institution or publisher instructions
-4. Named citation or academic standard
-5. Selected built-in preset
-6. Existing document value
-
-Preserve each field's source, confidence, and override reason. Only apply a preset when the user requests whole-document normalization against that preset. Existing values remain the authority for unrequested properties in local edits.
-
-When the user selects **标准学位论文/毕业论文规范模板** (`thesis-standard`) for whole-document normalization, its rules are:
-- **页面边距**：标准 A4 纵向，页边距上 25.4mm、下 25.4mm、左 25.0mm、右 25.0mm，装订线 0mm，页眉/页脚距边界 15.0mm。
-- **正文排版**：中文小四号宋体（12pt），西文小四号 Times New Roman，1.5 倍行距，段前段后 0 磅，首行缩进 2 字符（7.4mm），两端对齐。
-- **标题层级**：一级标题（章）三号（16pt）黑体居中加粗，1.5 倍行距，段前 18 磅、段后 12 磅；二级标题（节）四号（14pt）黑体左对齐加粗，1.5 倍行距，段前 12 磅、段后 6 磅；三级标题（小节）小四号（12pt）黑体左对齐加粗，1.5 倍行距，段前 6 磅、段后 6 磅；各级标题支持独立控制首行缩进。
-- **标题颜色**：封面 Title/Subtitle、一级至三级标题及独立模块标题使用显式黑色（`000000`），覆盖 Office 主题色及已有直接文字颜色。其他模板的明确颜色仍按权威顺序处理；局部编辑不自动套用此规则。
-- **标题编号**：必须采用 Word 原生多级列表自动编号（`w:numPr` 绑定到 `abstractNum`），一级标题为“第X章”，二级标题为“X.X”，三级标题为“X.X.X”；标题段落纯文本中自动剥离手打序号；摘要、目录、参考文献、致谢、附录等独立章节保持无编号。
-- **页眉页脚**：默认保留已有页眉，不自动添加固定文字。启用页眉后按明确规范选择内容、宋体/Times New Roman、五号或小五及对齐方式；分节、动态章节、首页和奇偶页独立配置。页脚居中插入阿拉伯数字页码。
-- **图表规范**：图名在图下，表名在表上（标准三线表），文字五号宋体/Times New Roman（10.5pt），居中对齐，段前段后 6 磅。
-- **目录规范**：标题“目　　录”（黑体三号居中），按三级标题生成，正文小四号宋体，1.5 倍行距。
-- **参考文献**：采用 GB/T 7714-2015 顺序编码制，五号宋体/Times New Roman（10.5pt），单倍行距，缩进-文本之前 0 字符，悬挂缩进 2 字符（7.4mm）。
-
-## Launch Dashboard
-
-Read [references/dashboard-workflow.md](references/dashboard-workflow.md) before launching the Dashboard. It owns server startup, background handoff and template-analysis listeners, human confirmation, citations and visual-report callbacks. Launch the required listeners in the same turn as the server.
-
-## Apply Formatting
-
-For the webpage route, `apply_spec.py` verifies the confirmed handoff's source and output paths before passing the spec to the shared core. For direct requests use `format_cli.py`; it needs no Dashboard session.
-
-```powershell
-& $PYTHON_BIN "$SKILL_DIR/scripts/apply_spec.py" INPUT.docx OUTPUT.docx `
-  --handoff HANDOFF.json `
-  --spec task-local-confirmed-spec.json
-```
-
-Omit `--spec` when no citation placement must be added. When supplied, it may differ from `handoff.spec` only in `citations`; all formatting values remain locked to the user-confirmed handoff. Do not invoke the script with `--spec` alone, `--preset-id`, or a manually reconstructed handoff.
-
-Preserve the source file. The legacy direct-font cleanup switch now overrides only requested properties on selected objects; it does not erase unrelated emphasis or table formatting. Local edits write the requested property without changing shared styles unless a style target is explicit.
-
-Never pass an `official-template` workflow to `apply_spec.py`. Download or obtain the current publisher or institution template, analyze it, and use that DOCX/DOTX as the authoring authority. Treat an extracted numeric specification as an audit aid, not a replacement for the template package.
-
-For parameterized workflows, apply figure/table caption styles separately, preserve unmanaged publisher header/footer content, insert page numbers as PAGE/NUMPAGES fields, and format reference paragraphs through a named Bibliography/reference style. Reuse and rebuild an existing standalone PAGE-field paragraph in the selected header/footer instead of adding a duplicate; structural acceptance requires exactly one PAGE field in each target part. When `table_of_contents.enabled` is true, write a real `TOC` Word field from Heading styles, not a static manual list; `title`, `max_heading_level`, and `page_break_after` are deterministic write tokens. The field also carries a cached heading-label snapshot so LibreOffice can show non-empty visual evidence; Word remains the authority for refreshed page numbers. Do not hand-type caption, page, directory, or citation numbers. Add missing captions with `SEQ Figure`/`SEQ Table` fields and cross-references with `REF`; update all fields in Word before delivery.
-
-Before running the apply script, merge AI's validated citation placements into a task-local copy of `handoff.spec`. Keep the original handoff unchanged. For an `official-template` handoff, copy the matching official template to the requested output path and use the publisher package's own styles and OOXML; do not call `apply_spec.py`.
-
-## Validate
-
-Run structural checks before delivery:
-
-```powershell
-& $PYTHON_BIN "$SKILL_DIR/scripts/analyze_docx.py" OUTPUT.docx --output final-analysis.json
-```
-
-Then run `scripts/render_docx.py` with the confirmed `verification.render_method`. Automatic mode renders with Microsoft Word when available and LibreOffice as a fallback; an explicit Word or LibreOffice choice has no fallback. Inspect every generated page PNG at 100% zoom for clipping, overlap, broken tables, missing glyphs, page-break drift, header/footer placement, and unexpected blank pages. Reapply or repair the owning specification and rerender until clean.
-
-The Dashboard renderer status is advisory for the current machine: it detects installed executables and any managed LibreOffice runtime. Download progress covers the real package transfer and MSI extraction; completion is reported only after `soffice` is found and executable.
-
-Always run the structural acceptance checks included in the application report. Honor the Dashboard visual-review switch separately. If enabled, render every page and ask the selected model to inspect the images only when its runtime declares image-input support. The AI owns the structured visual report; the user does not import a report file. If the selected model lacks image input or capability cannot be established, set visual status to `skipped`, state the reason, and continue without claiming a visual pass. `pending` means the dashboard is still waiting for AI work and is never a pass; the local download-only button has no connected image model and must report `skipped` rather than `pending`.
-
-Disclose these limitations when they apply:
-
-- Browser preview is advisory and is not Word's pagination engine.
-- `python-docx` can write and detect TOC, REF, PAGEREF, bibliography, and other fields, but cannot evaluate them; update fields in Word before final delivery. A TOC only uses real Heading styles, never bold body text.
-- Structural acceptance must fail when a TOC is enabled but no non-empty Heading paragraph exists within its selected level range. Ask AI or the user to assign the intended paragraphs to real Word Heading styles before rerunning the formatter; never accept an empty directory page as a visual pass.
-- `official-template` workflows are not numeric presets. Use the matching current publisher or institution package, preserve its semantic styles and package structure, and follow its downstream submission requirements.
-- Macro-enabled DOCM/DOTM files are unsupported by the dashboard MVP.
-
-## Deliver
-
-Return the formatted DOCX and a concise summary of the chosen authority, applied preset or template, unresolved rules, and render status. Do not return temporary uploads, page images, or internal analysis JSON unless the user asks for them.
+When extending implementation, read [references/architecture.md](references/architecture.md).

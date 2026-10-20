@@ -9,7 +9,7 @@ Use this matrix when extending the implementation. It records which ideas are ad
 - Prefer official documentation, official repositories, published specifications, and maintained package documentation.
 - Treat popularity as a discovery signal, not proof of fitness.
 - Record architecture patterns separately from reusable code and template licensing.
-- Keep this project dependency-light: the dashboard and analyzers run with Python's standard library; `python-docx` and `lxml` are used only for DOCX application.
+- Keep this project dependency-light: the local CLI uses Python, `python-docx` and `lxml`; PDF extraction/rendering uses the declared PDF dependencies.
 
 ## Adopted Project Matrix
 
@@ -17,7 +17,7 @@ Use this matrix when extending the implementation. It records which ideas are ad
 |---|---|---|---|---|
 | [OpenAI Build skills](https://learn.chatgpt.com/docs/build-skills) | Agent workflow | Progressive disclosure, concise trigger metadata, scripts and references | Lean `SKILL.md`; detailed research and schemas in `references/`; deterministic operations in `scripts/` | Do not turn the skill into a general application framework |
 | [openai/skills](https://github.com/openai/skills) document tooling | Agent workflow | Preset tokens, template distillation, structural audits, render-and-inspect gate | Evidence-backed format spec, explicit numeric values, non-destructive edits, render gate | Do not claim render success without page inspection |
-| [ppt-master](https://github.com/hugohe3/ppt-master) | Routed skill | Thin entry point, one active workflow, user gates, stable paths | Exactly one route per request; template-first route; local interactive dashboard | Do not copy presentation-specific design or scripts |
+| [ppt-master](https://github.com/hugohe3/ppt-master) | Routed skill | Thin entry point, one active workflow, user gates, stable paths | Exactly one route per request; template-first evidence and explicit scope | Do not copy presentation-specific design or scripts |
 | [python-docx](https://github.com/python-openxml/python-docx) | DOCX API | High-level paragraphs, runs, styles, sections, headers, footers, tables | Primary safe application layer in `apply_spec.py` | Use direct OOXML for unsupported fields; do not expect field evaluation |
 | [python-docx-template](https://github.com/elapouya/python-docx-template) | Template filling | Preserve a designer-authored DOCX while replacing controlled slots | Future slot-map route; template remains the visual authority | Not a general normalization engine |
 | [docxtemplater](https://github.com/open-xml-templating/docxtemplater) | Template filling | Structured tags, modules, browser/Node workflows | Adopt the separation between content data and document template | Core and commercial modules have different capabilities/licenses |
@@ -26,8 +26,8 @@ Use this matrix when extending the implementation. It records which ideas are ad
 | [docx4j](https://github.com/plutext/docx4j) | OOXML model | JAXB object model and deep numbering/field support | Use as a reference for advanced OOXML coverage | Java runtime is outside MVP |
 | [Pandoc](https://github.com/jgm/pandoc) | Conversion | Reference DOCX, semantic content conversion, citation filters | Future import/export route; keep content conversion separate from formatting normalization | Round-tripping loses some Word-specific constructs |
 | [Mammoth](https://github.com/mwilliamson/python-mammoth) | DOCX to HTML | Semantic rather than visual conversion | Useful for text/structure extraction and accessibility preview | Not suitable for layout-faithful preview |
-| [docx-preview](https://github.com/VolodymyrBaydalka/docxjs) | Browser preview | Fast client-side DOCX approximation | Architecture supports adding an advisory preview layer | Never use as the final pagination authority |
-| [LibreOffice](https://git.libreoffice.org/core) | Rendering | Headless conversion and PDF output on the supported Windows runtime | Selectable renderer and automatic fallback; Dashboard can provision an official Windows runtime into the ignored local `.runtime/` directory | Layout can differ from Microsoft Word; an explicit Word choice must not fall back silently |
+| [docx-preview](https://github.com/VolodymyrBaydalka/docxjs) | Browser preview | Fast client-side DOCX approximation | Research reference only; current delivery uses renderer page images | Never use as the final pagination authority |
+| [LibreOffice](https://git.libreoffice.org/core) | Rendering | Headless conversion and PDF output on the supported Windows runtime | Detect installed Word/LibreOffice and use explicit renderer selection; the CLI does not provision runtimes | Layout can differ from Microsoft Word; an explicit Word choice must not fall back silently |
 | [unoserver](https://github.com/unoconv/unoserver) | Conversion service | Reuse one LibreOffice process for repeated conversion | Candidate for batch/server deployments | Unnecessary for the single-user MVP |
 | [ONLYOFFICE Document Server](https://github.com/ONLYOFFICE/DocumentServer) | Editing/rendering | Full web editor and collaborative rendering | Reference for a future hosted edition | Too heavy and license-sensitive for a local skill MVP |
 
@@ -41,7 +41,7 @@ Use this matrix when extending the implementation. It records which ideas are ad
 | [Docling](https://github.com/docling-project/docling) | Document understanding | Rich structural extraction and normalized document models | Candidate for complex audit reports; not required by the dependency-light local MVP |
 | [Quarto](https://github.com/quarto-dev/quarto-cli) | Publishing | Use a reference DOCX as a repeatable style authority | Reinforces template-first precedence and the explicit split between semantic content and Word styling |
 | [docx-templates](https://github.com/guigrpa/docx-templates) | Template automation | Validate command/data boundaries and preserve a designer-owned template | Adopt strict separation between user content, format tokens, and template package; do not execute expressions from uploaded files |
-| [Carbone](https://github.com/carboneio/carbone) | Report templating | Treat templates as immutable inputs and render to new outputs | Source files are never overwritten; dashboard applications always produce a new DOCX |
+| [Carbone](https://github.com/carboneio/carbone) | Report templating | Treat templates as immutable inputs and render to new outputs | Source files are never overwritten; formatting applications produce a new DOCX |
 | [docx2pdf](https://github.com/AlJohri/docx2pdf) | Native rendering | Use Microsoft Word automation where installed for highest-fidelity PDF conversion | Word rendering is the preferred final authority; LibreOffice is the documented fallback |
 | [OpenTBS](https://github.com/Skrol29/opentbs) | ZIP/XML templating | Make narrow package-level edits without rebuilding the whole document | Use direct OOXML only for evidence or unsupported constructs; keep high-level edits in `python-docx` |
 | [UniOffice](https://github.com/unidoc/unioffice) | Typed OOXML API | Strongly typed Word generation and manipulation | Reference for future service implementations; avoid adding a second runtime to the MVP |
@@ -54,7 +54,7 @@ Reviewed the named upstream repositories and two related projects at their then-
 |---|---|---|---|
 | [the-shy123456/thesis-docx](https://github.com/the-shy123456/thesis-docx) | `failure-patterns-and-quality-gates.md` checks effective styles, hidden indentation and field drift; Word PDF helper refreshes story fields | Clarify quality gates; refresh fields across Word story ranges before PDF export | A rendered WPS page is not proof of Microsoft Word or university-template parity |
 | [WEN-JY/academic-research-skills](https://github.com/WEN-JY/academic-research-skills) | `docx-thesis-format` separates explicit institutional JSON rules from check/fix scripts, including allowed margin profiles | Add read-only audit to the existing planner/reader rather than copy one school's numeric profile | Zhejiang University values are not universal thesis requirements |
-| [Jonnys-Li/software-thesis-docx-skill](https://github.com/Jonnys-Li/software-thesis-docx-skill) | Manifest owns source order, figures and formatting mode; template extractor captures semantic roles | Keep template precedence, isolate dashboard workflow from the skill entrypoint | Repo-to-thesis content generation is a different route from formatting an existing DOCX |
+| [Jonnys-Li/software-thesis-docx-skill](https://github.com/Jonnys-Li/software-thesis-docx-skill) | Manifest owns source order, figures and formatting mode; template extractor captures semantic roles | Keep template precedence, separate drafting from the direct formatting workflow | Repo-to-thesis content generation is a different route from formatting an existing DOCX |
 | [zxyasfas/paper_format_agent](https://github.com/zxyasfas/paper_format_agent) | Content fingerprint and synthetic text-survival benchmark report explicit coverage gaps | Strengthen report completeness and render-source fingerprinting; retain per-operation package-preservation checks | A body-text fingerprint alone cannot prove preservation of fields, footnotes or drawings |
 | [zouchenzhen/docx-template-translator-skill](https://github.com/zouchenzhen/docx-template-translator-skill) | Separates Pandoc content conversion, template adaptation and Word finalization | Document a possible future conversion route distinct from deterministic formatting | Template-specific generated Python should not bypass this project's registered operation boundary |
 
@@ -74,7 +74,7 @@ The project combines five proven patterns:
 1. Route one task at a time, following `ppt-master` and OpenAI skill design.
 2. Represent format as an explicit, inspectable JSON specification.
 3. Use `python-docx` for common edits and direct OOXML inspection for evidence.
-4. Use a browser only for configuration; execute the selected Word or LibreOffice renderer through `scripts/render_docx.py` and treat its page PNGs as the visual evidence.
+4. Use the current AI conversation for configuration; execute the selected Word or LibreOffice renderer through `scripts/render_docx.py` and bind its page PNGs to the visual review.
 5. Preserve the original and report unsupported constructs instead of silently flattening them.
 
 ## Adoption Traceability
@@ -86,9 +86,9 @@ The project combines five proven patterns:
 | Reference-DOCX/template-first precedence | Authority rules in `SKILL.md` and `references/standards-registry.md` |
 | Package-aware inspection | `scripts/analyze_docx.py`, including ZIP limits, styles, inheritance, sections, nested content parts, and complex-object warnings |
 | Conservative style application | `scripts/apply_spec.py`, named styles, explicit page geometry, opt-in direct-format cleanup, and no in-place writes |
-| Semantic requirement extraction | `scripts/parse_requirements.py`, with field-level evidence, confidence, and unresolved text |
-| Local editable control surface | `scripts/serve_dashboard.py` and `assets/ui/` |
-| Native-render quality gate | `scripts/render_docx.py` executes Word COM export or LibreOffice headless export, then rasterizes every PDF page; browser preview is explicitly advisory |
+| Semantic requirement extraction | `word_format/requirement_sources.py` and `requirement_rules.py`, with source anchors, confidence and unresolved wording |
+| Direct AI control | `scripts/format_cli.py` and evidence-bearing profiles |
+| Native-render quality gate | `scripts/render_docx.py` exports and rasterizes every page; `word_format/visual.py` binds the output and page inventory to the review |
 
 ## Explicit Non-Goals
 

@@ -41,20 +41,22 @@ class JsonSafetyTests(unittest.TestCase):
             original = source.read_bytes()
             alias = folder / "alias.json"
             os.link(source, alias)
-            handoff = folder / "handoff.json"
-            handoff.write_text("{}", encoding="utf-8")
+            spec = folder / "spec.json"
+            spec_text = json.dumps({"schema_version": "1.0", "body": {"font_size_pt": 12}})
+            spec.write_text(spec_text, encoding="utf-8")
             output = folder / "result.docx"
             for report in (source, alias, folder / "sub" / ".." / "source.docx"):
                 for script, args in (
                     ("analyze_docx.py", [source, "--output", report]),
                     ("analyze_citations.py", [source, "--output", report]),
-                    ("apply_spec.py", [source, output, "--handoff", handoff, "--report", report]),
+                    ("apply_spec.py", [source, output, "--spec", spec, "--report", report]),
                     ("format_cli.py", ["inspect", source, "--output", report]),
                 ):
                     with self.subTest(script=script, report=report):
                         result = subprocess.run([sys.executable, str(ROOT / "scripts" / script), *map(str, args)],
                                                 capture_output=True, timeout=30)
                         self.assertNotEqual(result.returncode, 0)
+                        self.assertNotIn(b"unrecognized arguments", result.stderr)
                         self.assertEqual(hashlib.sha256(source.read_bytes()).digest(), hashlib.sha256(original).digest())
                         self.assertTrue(zipfile.is_zipfile(source))
                         self.assertFalse(output.exists())
@@ -65,9 +67,9 @@ class JsonSafetyTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(requirements.read_text(encoding="utf-8"), "正文宋体")
             result = subprocess.run([sys.executable, str(ROOT / "scripts/apply_spec.py"), str(source), str(output),
-                                     "--handoff", str(handoff), "--report", str(handoff)], capture_output=True, timeout=30)
+                                     "--spec", str(spec), "--report", str(spec)], capture_output=True, timeout=30)
             self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(handoff.read_text(encoding="utf-8"), "{}")
+            self.assertEqual(spec.read_text(encoding="utf-8"), spec_text)
 
     def test_atomic_json_write_preserves_previous_report_on_failure(self):
         with tempfile.TemporaryDirectory() as folder:

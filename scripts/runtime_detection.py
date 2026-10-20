@@ -1,36 +1,16 @@
 #!/usr/bin/env python3
-"""Detect and optionally provision local Word rendering runtimes."""
+"""Detect installed local Word rendering runtimes."""
 
 from __future__ import annotations
 
-import hashlib
 import importlib.util
 import json
 import os
 import re
 import shutil
-import subprocess
 import sys
 from pathlib import Path
-from typing import Any, Callable
-from urllib.parse import urlparse
-from urllib.request import Request, urlopen
-
-from config import (
-    DOWNLOAD_TIMEOUT,
-    HTTP_REQUEST_TIMEOUT,
-    LIBREOFFICE_DOWNLOAD_HOST,
-    LIBREOFFICE_DOWNLOAD_PAGE,
-)
-
-OFFICIAL_DOWNLOAD_PAGE = LIBREOFFICE_DOWNLOAD_PAGE
-DOWNLOAD_HOST = LIBREOFFICE_DOWNLOAD_HOST
-DOWNLOAD_PATTERN = re.compile(
-    r"https://download\.documentfoundation\.org/libreoffice/stable/[^\"'\s<>]+/"
-    r"LibreOffice_[^\"'\s<>]+_Win_x86-64\.msi",
-    re.IGNORECASE,
-)
-RuntimeProgress = Callable[[dict[str, Any]], None]
+from typing import Any
 
 
 def _existing_file(candidates: list[Path]) -> Path | None:
@@ -246,105 +226,4 @@ def detect_renderers(runtime_root: str | Path) -> dict[str, Any]:
         "renderer_ready": preferred is not None,
         "pdf_rasterizer": pdf_rasterizer,
         "visual_ready": preferred is not None and pdf_rasterizer["available"],
-        "official_download_page": OFFICIAL_DOWNLOAD_PAGE,
     }
-
-
-def resolve_official_download() -> dict[str, str]:
-    if os.name != "nt":
-        raise RuntimeError("AI 下载运行包目前只支持 Windows；请从官网下载对应系统版本")
-    request = Request(OFFICIAL_DOWNLOAD_PAGE, headers={"User-Agent": "Word-Format-Master/1.0"})
-    with urlopen(request, timeout=30) as response:
-        html = response.read(4 * 1024 * 1024).decode("utf-8", errors="replace")
-    match = DOWNLOAD_PATTERN.search(html)
-    if not match:
-        raise RuntimeError("未能从 LibreOffice 官网解析当前 Windows 运行包地址")
-    url = match.group(0)
-    parsed = urlparse(url)
-    if parsed.scheme != "https" or parsed.netloc.lower() != DOWNLOAD_HOST:
-        raise RuntimeError("下载地址不是受信任的 LibreOffice 官方域名")
-    filename = Path(parsed.path).name
-    return {"url": url, "filename": filename, "page": OFFICIAL_DOWNLOAD_PAGE}
-
-
-def _emit(progress: RuntimeProgress | None, **payload: Any) -> None:
-    if progress:
-        progress(payload)
-
-
-def download_libreoffice(runtime_root: str | Path, progress: RuntimeProgress | None = None) -> dict[str, Any]:
-    root = Path(runtime_root).resolve()
-    download_dir = root / "downloads"
-    install_dir = root / "libreoffice"
-    download_dir.mkdir(parents=True, exist_ok=True)
-    root.mkdir(parents=True, exist_ok=True)
-    package = resolve_official_download()
-    archive = download_dir / package["filename"]
-    partial = archive.with_suffix(archive.suffix + ".part")
-
-    try:
-        _emit(progress, status="downloading", phase="下载 LibreOffice 官方运行包", percent=1, downloaded=0, total=0)
-        request = Request(package["url"], headers={"User-Agent": "Word-Format-Master/1.0"})
-
-        # Download with SHA-256 computation
-        sha256_hash = hashlib.sha256()
-        with urlopen(request, timeout=60) as response:
-            total = int(response.headers.get("Content-Length") or 0)
-            downloaded = 0
-            with partial.open("wb") as destination:
-                while True:
-                    chunk = response.read(1024 * 1024)
-                    if not chunk:
-                        break
-                    destination.write(chunk)
-                    sha256_hash.update(chunk)
-                    downloaded += len(chunk)
-                    percent = min(88, int(downloaded * 88 / total)) if total else 1
-                    _emit(progress, status="downloading", phase="下载 LibreOffice 官方运行包", percent=percent, downloaded=downloaded, total=total)
-
-        # Verify download completed successfully
-        if total > 0 and downloaded != total:
-            raise RuntimeError(f"下载不完整：期望 {total} 字节，实际下载 {downloaded} 字节")
-
-        computed_hash = sha256_hash.hexdigest()
-        _emit(progress, status="verifying", phase="验证下载文件完整性", percent=89, downloaded=downloaded, total=total)
-
-        # Log the hash for verification (consider fetching official checksums in future)
-        (download_dir / f"{archive.name}.sha256").write_text(
-            f"{computed_hash}  {archive.name}\n",
-            encoding="utf-8"
-        )
-
-        partial.replace(archive)
-        _emit(progress, status="installing", phase="解包并检测 LibreOffice", percent=90, downloaded=downloaded, total=total)
-    except Exception as exc:
-        # Clean up partial download on any error
-        if partial.exists():
-            try:
-                partial.unlink()
-            except OSError:
-                pass
-        raise
-    if archive.suffix.lower() != ".msi":
-        raise RuntimeError(f"暂不支持的 LibreOffice 运行包格式：{archive.suffix}")
-    msiexec = shutil.which("msiexec.exe") or str(Path(os.environ.get("WINDIR", r"C:\Windows")) / "System32" / "msiexec.exe")
-    if not Path(msiexec).is_file():
-        raise RuntimeError("未找到 Windows MSI 解包工具 msiexec.exe")
-    install_dir.mkdir(parents=True, exist_ok=True)
-    result = subprocess.run(
-        [msiexec, "/a", str(archive), "/qn", f"TARGETDIR={install_dir}"],
-        check=False,
-        capture_output=True,
-        timeout=900,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(f"LibreOffice 解包失败，msiexec 返回码 {result.returncode}")
-    executable = _find_libreoffice(root)
-    if not executable:
-        raise RuntimeError("解包完成但未找到 soffice 可执行文件")
-    (root / "runtime-manifest.json").write_text(
-        json.dumps({"libreoffice_path": str(executable), "source_url": package["url"]}, ensure_ascii=False, indent=2) + "\n",
-        encoding="utf-8",
-    )
-    _emit(progress, status="ready", phase="LibreOffice 已安装并可用", percent=100, downloaded=downloaded, total=total)
-    return {"status": "ready", "path": str(executable), "source_url": package["url"]}

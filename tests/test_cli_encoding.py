@@ -12,8 +12,6 @@ from docx import Document
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from apply_spec import SUPPORTED_APPLICATION_PATHS
-from dashboard_session import build_ai_handoff, prepare_dashboard_session
 from word_format import build_plan
 from word_format.contracts import sha256
 
@@ -49,17 +47,12 @@ class CliEncodingTests(unittest.TestCase):
         self.assertNotIn("\\u", result.stdout)
         return json.loads(result.stdout)
 
-    def test_confirmed_handoff_report_stdout_and_file_preserve_chinese(self):
+    def test_direct_spec_report_stdout_and_file_preserve_chinese(self):
         for to_file in (False, True):
             with self.subTest(to_file=to_file):
                 output = self.output if not to_file else self.folder / "报告文件模式.docx"
-                session = prepare_dashboard_session(self.source, output)
-                handoff = build_ai_handoff(
-                    session, {"spec": {"body": {"font_size_pt": 12}}, "verification": {"visual_enabled": False}},
-                    skill_dir=ROOT, registry=SUPPORTED_APPLICATION_PATHS,
-                )
-                path = self.write_json("handoff.json", handoff)
-                args = [self.source, output, "--handoff", path]
+                path = self.write_json("spec.json", {"body": {"font_size_pt": 12}})
+                args = [self.source, output, "--spec", path]
                 if to_file:
                     report_path = self.folder / "报告.json"
                     result = self.run_cli("apply_spec.py", *args, "--report", report_path)
@@ -105,7 +98,7 @@ class CliEncodingTests(unittest.TestCase):
         for script, args in (
             ("format_cli.py", ["plan", self.source, self.output, "--request", invalid_request]),
             ("analyze_docx.py", [missing]),
-            ("apply_spec.py", [self.source, self.output, "--handoff", self.folder / "不存在的交接.json"]),
+            ("apply_spec.py", [self.source, self.output, "--spec", self.folder / "不存在的规范.json"]),
             ("render_docx.py", [self.source, "--output-dir", self.folder / "pages", "--dpi", "1"]),
         ):
             with self.subTest(script=script):

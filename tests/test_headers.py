@@ -140,7 +140,7 @@ class HeaderTests(unittest.TestCase):
             with self.assertRaises(FormatError): apply_plan(plan)
         self.assertFalse(self.output.exists())
 
-    def test_spec_expands_web_fields_to_same_handlers(self):
+    def test_spec_expands_fields_to_same_handlers(self):
         spec = {"headers_footers": {"different_odd_even": True,
             "header": {"enabled": True, "mode": "chapter_title", "style_name": "Heading 1", "font_size_pt": 9, "alignment": "right"},
             "even_header": {"enabled": True, "text": "Thesis title", "font_size_pt": 9, "alignment": "left"},
@@ -210,7 +210,7 @@ class HeaderTests(unittest.TestCase):
         self.assertEqual(self.text(doc.sections[0].header),"original")
         self.assertEqual(self.text(doc.sections[1].even_page_header),"Thesis title")
 
-    def test_selected_web_section_and_conflicting_indents(self):
+    def test_selected_spec_section_and_conflicting_indents(self):
         doc,_=self.execute(spec={"page":{"header_distance_mm":17},"headers_footers":{"section_number":2,"preserve_existing":True,
             "header":{"enabled":True,"text":"selected"}}})
         self.assertEqual([self.text(s.header) for s in doc.sections],["original","selected","original"])
@@ -262,7 +262,7 @@ class HeaderTests(unittest.TestCase):
             with self.assertRaises(FormatError): apply_plan(plan)
         self.assertFalse(self.output.exists())
 
-    def test_requirements_parser_and_web_paths_have_exact_handlers(self):
+    def test_requirements_parser_and_spec_paths_have_exact_handlers(self):
         parsed=parse_requirements('奇偶页不同。奇数页页眉显示章节标题，宋体小五号，右对齐。偶数页页眉文字：论文题目。偶数页页眉宋体五号，左对齐。')["spec_patch"]
         self.assertTrue(parsed["headers_footers"]["different_odd_even"])
         self.assertEqual(parsed["headers_footers"]["header"]["mode"],"chapter_title")

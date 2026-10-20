@@ -757,7 +757,7 @@ def spec_request(index, spec, clear_direct=False):
     )
     return {
         "schema_version": "2.0",
-        "origin": "dashboard",
+        "origin": "direct",
         "operations": operations,
         "verification_spec": copy.deepcopy(spec),
         "notes": [

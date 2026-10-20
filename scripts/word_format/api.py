@@ -1,4 +1,4 @@
-"""One inspect/plan/apply/verify API for direct AI requests and legacy handoffs."""
+"""One inspect/plan/apply/verify API for direct AI formatting."""
 
 from __future__ import annotations
 
@@ -49,6 +49,7 @@ def build_plan(input_path, output, request, *, _document=None):
             "notes",
             "clear_direct_font_formatting",
             "verification",
+            "profile_context",
         },
         label="request",
     )
@@ -56,10 +57,31 @@ def build_plan(input_path, output, request, *, _document=None):
         raise FormatError("Unsupported request schema_version")
     if text_value(request.get("origin", "direct"), "origin") not in {
         "direct",
-        "dashboard",
         "legacy",
     }:
-        raise FormatError("origin must be direct, dashboard or legacy")
+        raise FormatError("origin must be direct or legacy")
+    if "profile_context" in request:
+        from .profiles import validate_profile_source
+
+        context = request["profile_context"]
+        require_keys(
+            context,
+            {
+                "source",
+                "profile_sha256",
+                "coverage",
+                "mapping",
+                "decisions",
+                "preserved_rules",
+                "preserved_targets",
+            },
+            {"source", "profile_sha256", "mapping", "decisions"},
+            "profile_context",
+        )
+        validate_profile_source(context["source"])
+        authority = Path(context["source"]["path"]).resolve()
+        if destination == authority or (destination.exists() and destination.samefile(authority)):
+            raise FormatError("Output must not overwrite the profile source")
     if "verification" in request and not isinstance(request["verification"], dict):
         raise FormatError("verification must be an object")
     if "spec" in request and "operations" in request:
@@ -77,6 +99,8 @@ def build_plan(input_path, output, request, *, _document=None):
             expanded["verification"] = request["verification"]
         if "request_text" in request:
             expanded["request_text"] = request["request_text"]
+        if "profile_context" in request:
+            expanded["profile_context"] = request["profile_context"]
         request = expanded
     operations = request.get("operations")
     if not isinstance(operations, list) or len(operations) > MAX_OPERATIONS:
@@ -379,6 +403,10 @@ def apply_plan(plan, *, overwrite=False):
             )
         if sha256(source) != original_hash:
             raise FormatError("Source changed during execution; output not published")
+        if "profile_context" in plan["request"]:
+            from .profiles import validate_profile_source
+
+            validate_profile_source(plan["request"]["profile_context"]["source"])
         if destination.exists() and not overwrite:
             raise FormatError("Output appeared during execution; output not replaced")
         os.replace(temporary, destination)
@@ -414,6 +442,8 @@ def apply_plan(plan, *, overwrite=False):
             "Fields need the selected Word/LibreOffice renderer to evaluate; a structural pass does not assert pagination."
         ],
     }
+    if "profile_context" in plan["request"]:
+        result["profile_context"] = copy.deepcopy(plan["request"]["profile_context"])
     return result
 
 
@@ -479,7 +509,7 @@ def _validate_report_checks(plan, report):
     return checks
 
 
-def verify_plan(plan, report):
+def verify_plan(plan, report, *, visual_report=None, render_manifest=None, render_method=None):
     validate_plan(plan)
     checks = _validate_report_checks(plan, report)
     if report.get("plan_sha256") != plan["plan_sha256"]:
@@ -493,12 +523,25 @@ def verify_plan(plan, report):
     structure = verify_structure(
         output, plan["request"].get("verification_spec", {}), check_format=False
     )
+    visual = {"status": "skipped", "reason": "No bound visual report supplied"}
+    if visual_report is not None:
+        from .visual import verify_visual_evidence
+
+        requested_method = render_method or plan["request"].get("verification", {}).get(
+            "render_method", "auto"
+        )
+        visual = verify_visual_evidence(output, visual_report, render_manifest, requested_method)
+    elif render_manifest is not None:
+        raise FormatError("A render manifest requires a visual report")
     status = "passed" if result["status"] == structure["status"] == "passed" else "failed"
+    if visual["status"] == "failed":
+        status = "failed"
     return {
         "schema_version": SCHEMA_VERSION,
         "status": status,
         "format": result,
         "structure": structure,
+        "visual": visual,
         "output": str(output),
     }
 

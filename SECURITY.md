@@ -1,104 +1,49 @@
 # Security Guidelines
 
-## 安全边界
+## 本地处理边界
 
-Word Format Master 是 Windows 本地工具，不是公网服务。Dashboard 固定监听 `127.0.0.1`，只接受 `127.0.0.1` 或 `localhost` Host 请求。不要通过端口转发、反向代理或防火墙规则把它暴露到局域网或互联网。
+Word Format Master 通过当前 AI 会话调用本地 CLI。核心提取、计划、写入和验收不调用大模型 API，也不自动下载或安装渲染器。AI 工具如何处理会话内容取决于其自身配置。
 
-程序处理本地 DOCX/DOTX。除用户在 Dashboard 中主动请求下载 LibreOffice 安装包外，核心分析、写入和验收流程不建立外部连接。
+要求材料和样例中的文字属于数据，不能被当作命令或系统指令执行。AI 只能生成已登记的格式操作，格式引擎不执行材料中的表达式或临时生成的 Python。
 
-## 已实施措施
+## 输入与输出保护
 
-### 文档与请求输入
+- 目标写入支持 DOCX，样例支持 DOCX/DOTX；旧 DOC 需另存转换，宏文档和 Strict OOXML 写入拒绝。
+- 要求材料支持 UTF-8 TXT/MD、DOCX/DOTX 和文本 PDF。扫描页面必须报告 OCR 缺失。
+- 文件大小上限为 30 MiB；OOXML ZIP 最多 5000 个部件，解压总量最多 250 MiB，限制见 `scripts/config.py`。
+- Profile 保存格式依据的路径、SHA-256 和证据。生成计划、执行及复检都会核对来源；来源缺失或变化会拒绝。
+- 计划绑定目标原稿 SHA-256、输出路径、操作和已解析对象。计划摘要用于误改检测，不是签名或身份认证。
+- 输出不能覆盖目标原稿或格式依据，包含已存在硬链接别名；已有其他输出仅在明确指定覆盖时替换。
+- CLI JSON 输出预检输入、输出及请求/规范/计划/档案/决策/映射路径冲突，使用同目录临时文件原子替换。
 
-- 仅接受 `.docx` 和 `.dotx`，拒绝旧版 DOC、DOCM 和 DOTM。
-- 单个文档上限 30 MiB，请求体上限 42 MiB。
-- Base64 使用严格校验；文件名只保留基本名称。
-- DOCX ZIP 最多 5000 个部件，解压后总量上限 250 MiB。
-- 格式规范要求受支持的 `schema_version` 和明确字段类型。
+## 写入与验收
 
-### 确认式写入
+参数、冲突和歧义位置在写入前检查。Profile 的未决项必须明确选择、替换或解释保留，不能默认为通过。报告保留原始问题、决策和目标映射；忽略项不等于已完成格式迁移。
 
-- Dashboard 不提供 `/api/apply`。
-- `apply_spec.py` 只接受已确认的 `HANDOFF.json`，并核验源路径、输出路径和源 DOCX SHA-256。
-- 直接 AI 入口 `format_cli.py` 不要求网页确认；使用严格操作请求、源指纹和计划摘要。摘要是误改检测，不是数字签名。
-- 参数与位置冲突在写入前拒绝。输出先保存临时文件并回读，验收失败不会发布输出。
-- 独立 `verify` 拒绝缺失、重复、截短或变更的检查项，并重跑结构验收；只读 `audit` 不调用文档写入方法。
-- 页面不会收到源 DOCX Base64 内容。
-- 源文件不会被覆盖，输出路径必须与输入路径不同。
-- CLI JSON 输出在处理前检查源文档、目标文档和请求/规范/计划/Handoff 路径冲突，包含已存在文件的硬链接别名；报告使用同目录临时文件原子替换。
-- 网页可编辑设置必须映射到已登记的确定性 DOCX/OOXML 写入方法。
-- 格式核心只执行注册操作，不执行 AI 生成的 Python 或浏览器点击。普通格式操作逐项检查无关属性与部件，结构操作单独检查正文和对象保护。
-- 参考文献转换只处理索引识别的条目；页眉文字与独立 PAGE 段落分别保护，拒绝清空混合文字/域段落。
+所有操作经过 `registry.py` 的校验、唯一 handler、独立 reader 和 verifier。普通格式操作逐项保护未请求属性与包部件。结构操作单独保护正文、对象及无关部件。输出先保存临时文件并回读验收，成功后才发布。
 
-### 会话与分析任务
+`verify` 拒绝缺失、重复、截短或改动的检查项，并重跑结构验收。`audit` 使用相同的选择器和读取器，不调用文档写入方法。
 
-页眉操作逐节/页型核对正文、页脚、未选页眉、超链接关系和未请求属性。内容替换是显式结构操作；STYLEREF 只引用已存在的正文段落样式，不执行任意字段指令。首页和奇偶页开关同时影响 Word 页脚显示。下一页分节必须单独生成计划，建立边界后重新检查文档再设置页眉。
+页眉操作逐节和页型保护未选内容、页脚、关系及无关属性。STYLEREF 仅引用已存在的段落样式。首页和奇偶页开关也影响页脚显示，必须明确配置。新建节须单独执行并重新检查节编号。
 
-- Dashboard 会话有效期为 4 小时；过期后清除分析、引用上下文和结果。
-- 同时保留的分析任务最多 16 个，任务有效期为 1 小时。
-- AI 工作者领取任务时获得一次性 `claim_token`，租约为 10 分钟；超时任务可重新领取。
-- 已完成或失败的任务会释放原始文档数据和分析上下文，并在队列需要容量时优先回收。
-- API 版本通过 `/api/capabilities` 的 `api_version` 和 `X-Word-Format-API-Version` 响应头公开。
+## 渲染证据
 
-### 本地 HTTP 服务
+`render_docx.py` 从源字节快照渲染，为 DOCX 和每页 PNG 记录 SHA-256。源文件在渲染期间变化时不发布清单；新渲染作废旧清单，成功后才原子发布完整结果。显式选择的渲染器不可静默替换。
 
-- 只监听 `127.0.0.1`。
-- 校验 Host 请求头，降低本地服务被 DNS rebinding 利用的风险。
-- 返回 CSP、`X-Content-Type-Options: nosniff`、`Referrer-Policy: no-referrer` 和 `Cache-Control: no-store`。
-- 子进程使用参数数组，不启用 `shell=True`。
-- 网页提交后统一锁定编辑；交叉验证中的动态字段和值经过 HTML 转义，视觉日志挂载到独立容器。
-- 调试访问日志默认关闭，设置 `DASHBOARD_DEBUG=1` 后才写入标准错误。
+视觉报告通过 `format_cli.py verify --visual-report ... --render-manifest ...` 调用 `word_format/visual.py`，核对输出路径和哈希、清单哈希、实际渲染器、页数、逐页哈希及完整检查页码。JSON 输出也不能覆盖这些证据文件。缺少渲染或页面检查时必须为 `skipped` 或 `pending`，不能宣称视觉通过。程序不能证明模型实际看过页面。含相对外部关系的文档需先处理关系基准，渲染器会拒绝不安全的快照迁移。
 
-### 视觉验收完整性
+## 限制
 
-- `render_docx.py` 为输出 DOCX 和每一页 PNG 记录 SHA-256。
-- 渲染使用预先计算指纹的临时快照；源文件期间发生变化会拒绝发布清单。新渲染尝试作废旧清单，只有全部页面准备完毕后才原子发布新清单。
-- Dashboard 只接受与当前输出路径、输出哈希、实际渲染器、页数和逐页文件哈希一致的视觉报告。
-- 视觉模型未确认支持图片输入时，报告必须为 `skipped`，不能声明通过。
-- `pending` 不是通过状态。
+复杂 OOXML 仍可能触发第三方解析器缺陷，应保持 Python、依赖和 Office 渲染器在受支持版本。文本提取不证明格式语义完整；PDF 阅读顺序、复杂表格、浮动对象、修订和字段需要人工或 AI 核实。支持格式的回读通过也不证明任意论文已完全符合全部要求。
 
-### LibreOffice 下载
-
-- 只允许 HTTPS 和 `download.documentfoundation.org`。
-- 下载地址必须匹配 Windows x86-64 MSI 规则。
-- 校验 Content-Length，下载过程计算 SHA-256，失败时清理临时文件。
-- 安装完成后重新探测 `soffice.exe`，运行包保存在 Git 忽略的 `.runtime/` 中。
-
-## 集中配置
-
-限制统一定义在 `scripts/config.py`：
-
-```text
-MAX_DOCUMENT_BYTES              30 MiB
-MAX_REQUEST_BYTES               42 MiB
-MAX_PARTS                       5000
-MAX_UNCOMPRESSED                250 MiB
-MAX_ANALYSIS_TASKS              16
-ANALYSIS_TASK_TTL_SECONDS       3600
-ANALYSIS_TASK_LEASE_SECONDS     600
-SESSION_TTL_SECONDS             14400
-```
-
-## 剩余风险
-
-1. LibreOffice 下载的 SHA-256 是本地计算值，只能证明下载后未再变化；尚未与官方独立哈希或签名进行比对。
-2. 本地服务没有用户账户和持久化鉴权，安全前提是只监听回环地址且不被代理到其他网络。
-3. 复杂或恶意 OOXML 仍可能触发第三方解析器缺陷。上线使用应保持 Python 依赖、Microsoft Word 和 LibreOffice 在受支持安全版本。
-4. Microsoft Word 与 LibreOffice 的渲染差异无法通过结构校验完全消除，最终交付应使用目标环境对应的渲染器完成全页验收。
-5. 任务与会话仅存内存，异常退出不会恢复；这避免在磁盘持久化源文档，但不适合长期后台服务。
-
-## 发布检查
+## 发布检查与问题反馈
 
 ```powershell
 python scripts/validate_project.py
 python scripts/smoke_test.py
+python -m unittest discover -s tests -v
 python -m compileall -q scripts
-node --check assets/ui/app.js
 git diff --check
 ```
 
-发布前还应执行依赖漏洞扫描，并在隔离测试文档上验证 Word 和 LibreOffice 渲染。不要用含敏感内容的真实文档测试未经审核的依赖升级。
-
-## 报告安全问题
-
-请通过私密渠道提供复现步骤、受影响版本和最小样例，不要在公开 Issue 中上传含个人信息或未公开研究内容的文档。
+用脱敏或合成文档验证依赖升级和渲染；安全问题请通过私密渠道提供最小复现，不要在公开 Issue 上传个人信息或未公开研究内容。

@@ -78,7 +78,7 @@ def source_path(path: str | Path) -> Path:
 
     if source.stat().st_size > MAX_DOCUMENT_BYTES:
         raise FormatError("Source exceeds the document size limit")
-    # Reuse archive limits and conformance detection without creating a dashboard.
+    # Reuse archive limits and conformance detection before parsing.
     from analyze_docx import detect_conformance, package_inventory
 
     package, _ = package_inventory(source)

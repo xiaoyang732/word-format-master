@@ -1,6 +1,6 @@
 # Direct Format API 2.0
 
-两种入口共享 `scripts/word_format`。AI 负责把人类要求转换为结构化请求；格式引擎不调用大模型、不操作浏览器，也不执行动态生成的 Python 代码。
+直接请求与格式档案共享 `scripts/word_format`。AI 负责把人类要求转换为结构化请求；格式引擎不调用大模型、不操作浏览器，也不执行动态生成的 Python 代码。
 
 页眉内容、动态章节标题、奇偶页、分节链接和格式的逐项代码对应见 [页眉契约](header-requirements.md)。支持 `header.*` 独立操作和显式 `section.break.next_page.insert`；新建节后须重新 inspect 并生成页眉计划。
 
@@ -75,7 +75,7 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 | 样式指派 | `paragraph.style.assign` | 只接受段落样式；可显式创建新样式 |
 | 页眉页脚、页码、目录、编号、题注位置、引用 | 登记的 configure / convert / insert 操作 | 明确列出结构影响，独立验收 |
 
-整篇旧规范可用 `{"spec": {...}}` 替代 `operations`；两者不能同时提供。旧规范会展开成同一注册表的操作。网页提交的 Handoff 经 `apply_spec.py` 的身份检查后也走此适配器。
+整篇旧规范可用 `{"spec": {...}}` 替代 `operations`；两者不能同时提供。旧规范会展开成同一注册表的操作。`apply_spec.py INPUT.docx OUTPUT.docx --spec spec.json` 也委托同一核心，无需额外会话。要求文档和样例使用 [Format Profile](format-profile.md) 提取证据，再通过 `plan --profile` 编译。
 
 ## 保护与验收
 
@@ -84,3 +84,30 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 普通格式操作在内存中逐项比较整个包，只屏蔽被请求的属性；文字范围允许拆分普通 run，但检查选区外格式、书签、超链接和对象。结构操作单独检查正文文字、对象和无关部件，并只允许声明的转换。保存到临时文件后回读全部操作，再通过结构验收，最后发布输出。失败不会发布半成品。
 
 结构通过不等于视觉通过。Word 字段计算、最终分页、溢出和字形仍需 `render_docx.py` 与逐页检查。缺少渲染或视觉检查时应报告 skipped / pending，不能声明视觉通过。Strict OOXML 写入、宏文档和复杂范围暂不支持；分节仅支持明确的顶层段落后下一页分节。
+
+## 绑定视觉验收
+
+渲染全部页面后，由支持图片输入的当前 AI 逐页检查，并保存 `visual.json`。用户无需导入报告。报告须包含实际模型 ID、输出 DOCX 的 SHA-256、渲染清单文件的 SHA-256、实际渲染方法，以及全部已检查页码：
+
+```json
+{
+  "status": "passed",
+  "model": {"id": "实际检查页面的模型", "supports_image_input": true},
+  "output_sha256": "输出DOCX的实际SHA-256",
+  "manifest_sha256": "render-manifest.json文件的实际SHA-256",
+  "renderer": {"method": "word"},
+  "reviewed_pages": [1, 2],
+  "findings": []
+}
+```
+
+示例只代表两页文档。页码必须完整且不重复，不能用小数或布尔值。若发现缺陷，状态为 `failed`，在 findings 中写明页码与问题；修复并重新渲染后生成新的检查报告。
+
+```powershell
+python scripts/render_docx.py result.docx --output-dir render --method word
+python scripts/format_cli.py verify --plan plan.json --report report.json --visual-report visual.json --render-manifest render/render-manifest.json --output verification.json
+```
+
+`word_format/visual.py` 核对清单来源、版本、哈希、渲染器、页数、每张实际图片及完整检查页码；证据过期、缺页或改动时拒绝。渲染器默认遵守计划中的 `verification.render_method`，可用 `--render-method` 明确指定。结果同时报告 `format`、`structure`、`visual`，视觉失败也使总状态失败。
+
+没有传视觉报告时，`visual.status` 为 `skipped`，即使格式与结构通过，也不能描述为视觉通过。模型图片输入能力未确认时同样为 `skipped`，可附原因而不提供渲染清单。程序校验证据完整性，不能代替模型实际查看页面。

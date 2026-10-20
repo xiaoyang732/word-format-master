@@ -5,96 +5,25 @@ from __future__ import annotations
 
 import copy
 import json
-import hashlib
-import os
-import subprocess
-import sys
 import tempfile
-import threading
-import urllib.error
-import urllib.request
-from http.server import ThreadingHTTPServer
 from pathlib import Path
 
+from analyze_docx import analyze_docx
+from apply_spec import append_field, apply_document
+from citation_workflow import build_citation_task
 from docx import Document
 from docx.enum.text import WD_TAB_ALIGNMENT
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Inches
-
-from analyze_docx import analyze_docx
-from apply_spec import SUPPORTED_APPLICATION_PATHS, append_field, apply_document, validate_spec
-from citation_workflow import build_citation_task
-from dashboard_session import build_ai_handoff, prepare_dashboard_session, public_dashboard_session, record_visual_verification
 from render_docx import resolve_renderer
 from runtime_detection import detect_renderers
-from serve_dashboard import DashboardHandler, _cleanup_analysis_tasks
-from config import MAX_ANALYSIS_TASKS, utc_now
 from verify_output import validate_visual_report
-
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def assert_dashboard_api_surface() -> None:
-    server = ThreadingHTTPServer(("127.0.0.1", 0), DashboardHandler)
-    server.dashboard_session = None
-    server.dashboard_session_lock = threading.Lock()
-    server.dashboard_runtime_lock = threading.Lock()
-    server.dashboard_runtime_job = {"status": "idle", "percent": 0}
-    server.dashboard_analysis_tasks = {}
-    server.dashboard_analysis_lock = threading.Lock()
-    worker = threading.Thread(target=server.serve_forever, daemon=True)
-    worker.start()
-    base_url = f"http://127.0.0.1:{server.server_address[1]}"
-    try:
-        with urllib.request.urlopen(f"{base_url}/api/capabilities", timeout=5) as response:
-            capabilities = json.loads(response.read().decode("utf-8"))
-            assert response.headers["X-Word-Format-API-Version"] == "1"
-        assert capabilities["api_version"] == "1"
-        untrusted_request = urllib.request.Request(
-            f"{base_url}/api/capabilities",
-            headers={"Host": "example.invalid"},
-        )
-        try:
-            urllib.request.urlopen(untrusted_request, timeout=5)
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 403
-        else:
-            raise AssertionError("dashboard accepted an untrusted Host header")
-        request = urllib.request.Request(
-            f"{base_url}/api/apply",
-            data=b"{}",
-            method="POST",
-            headers={"Content-Type": "application/json"},
-        )
-        try:
-            urllib.request.urlopen(request, timeout=5)
-        except urllib.error.HTTPError as exc:
-            assert exc.code == 404
-        else:
-            raise AssertionError("direct /api/apply endpoint must remain unavailable")
-    finally:
-        server.shutdown()
-        server.server_close()
-        worker.join(timeout=5)
-
-
 def main() -> int:
-    queue_server = type("QueueServer", (), {})()
-    queue_server.dashboard_analysis_lock = threading.Lock()
-    queue_server.dashboard_analysis_tasks = {
-        f"task-{index:02d}": {
-            "status": "completed",
-            "created_at": utc_now(),
-            "completed_at": f"{index:02d}",
-        }
-        for index in range(MAX_ANALYSIS_TASKS)
-    }
-    _cleanup_analysis_tasks(queue_server, reserve_slot=True)
-    assert len(queue_server.dashboard_analysis_tasks) == MAX_ANALYSIS_TASKS - 1
-    assert "task-00" not in queue_server.dashboard_analysis_tasks
-
     presets = json.loads((ROOT / "assets" / "presets.json").read_text(encoding="utf-8"))
     thesis_std = next(
         item for item in presets["presets"] if item["id"] == "thesis-standard"
@@ -146,9 +75,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="word-format-master-smoke-") as temp:
         runtime = detect_renderers(Path(temp) / "runtime")
         assert "platform" not in runtime
-        assert set(runtime) >= {"word", "libreoffice", "preferred", "renderer_ready", "pdf_rasterizer", "visual_ready", "official_download_page"}
+        assert set(runtime) >= {"word", "libreoffice", "preferred", "renderer_ready", "pdf_rasterizer", "visual_ready"}
         assert runtime["pdf_rasterizer"]["available"] is True
-        assert runtime["official_download_page"].startswith("https://www.libreoffice.org/")
         renderer_snapshot = {
             "word": {"id": "word", "name": "Microsoft Word", "available": True, "path": "WINWORD.EXE", "method": "installed executable"},
             "libreoffice": {"id": "libreoffice", "name": "LibreOffice", "available": True, "path": "soffice", "method": "installed executable"},
@@ -411,20 +339,6 @@ def main() -> int:
         assert report["verification"]["structure"]["status"] == "passed"
         assert report["verification"]["visual"]["status"] == "skipped"
 
-        direct_visual_output = Path(temp) / "direct-visual.docx"
-        direct_visual = apply_document(
-            source,
-            direct_visual_output,
-            spec,
-            verification={
-                "visual_enabled": True,
-                "visual_model": "current",
-                "visual_execution_mode": "dashboard-direct",
-            },
-        )
-        assert direct_visual["verification"]["visual"]["status"] == "skipped"
-        assert "本地下载模式" in direct_visual["verification"]["visual"]["reason"]
-
         # Test heading first-line indent control for H2 and H3
         indent_heading_spec = json.loads(json.dumps(spec))
         indent_heading_spec["headings"] = [
@@ -455,7 +369,7 @@ def main() -> int:
         existing_hdr_doc.save(existing_hdr_source)
 
         # Apply standard preset (preserve_existing: true, header.enabled: false)
-        apply_report = apply_document(existing_hdr_source, existing_hdr_output, thesis_std)
+        apply_document(existing_hdr_source, existing_hdr_output, thesis_std)
         applied_analysis = analyze_docx(existing_hdr_output)
         assert any(
             "东南大学本科毕业设计（论文）" in part["text"]
@@ -512,235 +426,6 @@ def main() -> int:
         )
         assert any("Cleared" in change and "header/footer" in change for change in template_clear_report["changes"])
 
-        session_output = Path(temp) / "session-formatted.docx"
-        session = prepare_dashboard_session(source, session_output)
-        public_session = public_dashboard_session(session)
-        assert "data" not in public_session["input"]
-        assert validate_spec({"body": {"font_size_pt": "invalid"}})
-        assert session["citation_context"]["status"] == "ready"
-        assert session["citation_context"]["paragraph_count"] >= 1
-        assert session["citation_context"]["reference_count"] >= 1
-        imported_template_session = prepare_dashboard_session(source, Path(temp) / "imported-template-session.docx")
-        imported_template_spec = json.loads(json.dumps(blank_template_spec))
-        imported_template_spec["mode"] = "parameterized"
-        imported_template_spec["template_required"] = False
-        imported_template_handoff = build_ai_handoff(
-            imported_template_session,
-            {"spec": imported_template_spec, "verification": {"visual_enabled": False}},
-            skill_dir=ROOT,
-            registry=SUPPORTED_APPLICATION_PATHS,
-            renderers=renderer_snapshot,
-        )
-        assert imported_template_handoff["execution_mode"] == "parameterized"
-        invalid_template_session = prepare_dashboard_session(source, Path(temp) / "invalid-template-session.docx")
-        invalid_template_spec = json.loads(json.dumps(imported_template_spec))
-        invalid_template_spec["template_required"] = True
-        try:
-            build_ai_handoff(
-                invalid_template_session,
-                {"spec": invalid_template_spec, "verification": {"visual_enabled": False}},
-                skill_dir=ROOT,
-                registry=SUPPORTED_APPLICATION_PATHS,
-                renderers=renderer_snapshot,
-            )
-            raise AssertionError("parameterized template incorrectly entered official-template mode")
-        except ValueError as exc:
-            assert "template_required" in str(exc)
-        blocked_session = prepare_dashboard_session(source, Path(temp) / "blocked-session.docx")
-        try:
-            build_ai_handoff(
-                blocked_session,
-                {"spec": spec, "verification": {"visual_enabled": True, "render_method": "auto"}},
-                skill_dir=ROOT,
-                registry=SUPPORTED_APPLICATION_PATHS,
-                renderers={
-                    "word": {"name": "Microsoft Word", "available": False},
-                    "libreoffice": {"name": "LibreOffice", "available": False},
-                    "preferred": None,
-                    "visual_ready": False,
-                },
-            )
-            raise AssertionError("visual verification was enabled without a renderer")
-        except ValueError as exc:
-            assert "无法启用视觉验收" in str(exc)
-        handoff = build_ai_handoff(
-            session,
-            {
-                "spec": spec,
-                "clear_direct_font_formatting": True,
-                "citation_request": True,
-                "verification": {"visual_enabled": True, "visual_model": "custom", "custom_model_id": "image-test", "render_method": "libreoffice"},
-            },
-            skill_dir=ROOT,
-            registry=SUPPORTED_APPLICATION_PATHS,
-            renderers=renderer_snapshot,
-        )
-        assert handoff["execution_mode"] == "parameterized"
-        assert any(item["path"] == "body.font_latin" for item in handoff["application_methods"])
-        assert any(item["path"] == "lists.numbered.style" for item in handoff["application_methods"])
-        assert any(item["path"] == "table_of_contents.max_heading_level" for item in handoff["application_methods"])
-        assert handoff["citation_context"]["task"]["paragraphs"]
-        assert handoff["citation_request"] is True
-        assert "Analyze citation_context.task" in " ".join(handoff["next_steps"])
-        assert handoff["tools"]["apply"]["path"].endswith("scripts\\apply_spec.py") or handoff["tools"]["apply"]["path"].endswith("scripts/apply_spec.py")
-        assert "--handoff" in handoff["tools"]["apply"]["arguments"]
-        assert handoff["visual_verification"]["status"] == "pending"
-        assert handoff["verification"]["render_method"] == "libreoffice"
-        assert handoff["verification"]["custom_model_id"] == "image-test"
-        assert handoff["tools"]["verify_visual"]["path"].endswith("scripts\\render_docx.py") or handoff["tools"]["verify_visual"]["path"].endswith("scripts/render_docx.py")
-        assert handoff["tools"]["verify_visual"]["renderer_selection"]["fallback_policy"] == "no-fallback"
-        assert handoff["tools"]["verify_visual"]["renderer_selection"]["selected_method"] == "libreoffice"
-        assert handoff["tools"]["verify_visual"]["report_contract"]["page_count"]
-        try:
-            build_ai_handoff(
-                session,
-                {"spec": spec, "verification": {"visual_enabled": False}},
-                skill_dir=ROOT,
-                registry=SUPPORTED_APPLICATION_PATHS,
-                renderers=renderer_snapshot,
-            )
-            raise AssertionError("a submitted dashboard session was overwritten")
-        except ValueError as exc:
-            assert "不能重复提交" in str(exc)
-
-        handoff_path = Path(temp) / "confirmed-handoff.json"
-        handoff_path.write_text(json.dumps(handoff, ensure_ascii=False), encoding="utf-8")
-        cli_command = [
-            sys.executable,
-            str(ROOT / "scripts" / "apply_spec.py"),
-            str(source),
-            str(session_output),
-            "--handoff",
-            str(handoff_path),
-        ]
-        # Exercise the CLI under the same legacy pipe encoding as Windows CI;
-        # the CLI must select UTF-8 itself, and callers must decode it explicitly.
-        cli_environment = {**os.environ, "PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"}
-        confirmed_run = subprocess.run(cli_command, capture_output=True, text=True, encoding="utf-8", env=cli_environment, check=False)
-        assert confirmed_run.returncode == 0, confirmed_run.stderr
-        confirmed_report = json.loads(confirmed_run.stdout)
-        assert session_output.is_file()
-        assert Path(confirmed_report["output"]).samefile(session_output)
-        direct_spec_run = subprocess.run(
-            [
-                sys.executable,
-                str(ROOT / "scripts" / "apply_spec.py"),
-                str(source),
-                str(Path(temp) / "blocked-direct-spec.docx"),
-                "--spec",
-                str(handoff_path),
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=cli_environment,
-            check=False,
-        )
-        assert direct_spec_run.returncode != 0
-        tampered_spec = json.loads(json.dumps(handoff["spec"]))
-        tampered_spec["body"]["font_size_pt"] = 99
-        tampered_spec_path = Path(temp) / "tampered-spec.json"
-        tampered_spec_path.write_text(json.dumps(tampered_spec, ensure_ascii=False), encoding="utf-8")
-        tampered_run = subprocess.run(
-            [*cli_command, "--spec", str(tampered_spec_path)],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            env=cli_environment,
-            check=False,
-        )
-        assert tampered_run.returncode == 2
-        assert "only add validated citations" in tampered_run.stderr
-
-        session_output.write_bytes(output.read_bytes())
-        try:
-            record_visual_verification(
-                session,
-                {
-                    "session_id": session["id"],
-                    "output_sha256": hashlib.sha256(session_output.read_bytes()).hexdigest(),
-                    "report": {"model": {"id": "other-model", "supports_image_input": False}, "status": "skipped"},
-                },
-            )
-            raise AssertionError("visual verification accepted a different custom model")
-        except ValueError as exc:
-            assert "自定义模型 ID" in str(exc)
-        try:
-            record_visual_verification(
-                session,
-                {
-                    "session_id": session["id"],
-                    "output_sha256": hashlib.sha256(session_output.read_bytes()).hexdigest(),
-                    "report": {
-                        "model": {"id": "image-test", "supports_image_input": True},
-                        "renderer": {"method": "libreoffice", "page_files": ["page-1.png"]},
-                        "status": "passed",
-                        "reviewed_pages": [1],
-                    },
-                },
-            )
-            raise AssertionError("visual verification accepted a passed report without page_count")
-        except ValueError as exc:
-            assert "渲染页数" in str(exc)
-        try:
-            record_visual_verification(
-                session,
-                {
-                    "session_id": session["id"],
-                    "output_sha256": hashlib.sha256(session_output.read_bytes()).hexdigest(),
-                    "page_count": 2,
-                    "report": {
-                        "model": {"id": "image-test", "supports_image_input": True},
-                        "renderer": {"method": "word", "page_files": ["page-1.png", "page-2.png"]},
-                        "status": "passed",
-                        "reviewed_pages": [1, 2],
-                    },
-                },
-            )
-            raise AssertionError("visual verification accepted a renderer that contradicted the user selection")
-        except ValueError as exc:
-            assert "渲染器" in str(exc)
-        render_dir = Path(temp) / "rendered-pages"
-        render_dir.mkdir()
-        page_files = []
-        for index in (1, 2):
-            page_path = render_dir / f"page-{index}.png"
-            page_path.write_bytes(f"smoke-page-{index}".encode("ascii"))
-            page_files.append(page_path)
-        manifest = {
-            "schema_version": "1.0",
-            "source": str(session_output),
-            "source_sha256": hashlib.sha256(session_output.read_bytes()).hexdigest(),
-            "selected_method": "libreoffice",
-            "page_count": 2,
-            "pages": [
-                {
-                    "number": index,
-                    "path": str(page_path),
-                    "sha256": hashlib.sha256(page_path.read_bytes()).hexdigest(),
-                }
-                for index, page_path in enumerate(page_files, start=1)
-            ],
-        }
-        manifest_path = render_dir / "render-manifest.json"
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False), encoding="utf-8")
-        visual_result = record_visual_verification(
-            session,
-            {
-                "session_id": session["id"],
-                "output_sha256": hashlib.sha256(session_output.read_bytes()).hexdigest(),
-                "page_count": 2,
-                "report": {
-                    "model": {"id": "image-test", "supports_image_input": True},
-                    "renderer": {"method": "libreoffice", "manifest_path": str(manifest_path), "page_files": [str(path) for path in page_files]},
-                    "status": "passed",
-                    "reviewed_pages": [1, 2],
-                    "findings": [],
-                },
-            },
-        )
-        assert visual_result["status"] == "passed"
-        assert session["visual_verification"]["output_sha256"] == hashlib.sha256(session_output.read_bytes()).hexdigest()
         skipped_visual = validate_visual_report(
             {"model": {"id": "text-only-test", "supports_image_input": False}, "status": "passed"},
             page_count=2,
@@ -824,9 +509,8 @@ def main() -> int:
         assert presets["template_workflows"] == []
         assert len(presets["presets"]) >= 1
 
-    assert_dashboard_api_surface()
 
-    print("DOCX smoke test passed: lists, citations, page size, captions, TOC, references, headers, fields, verification, AI handoff, three-level headings, declaration module, three-line tables")
+    print("DOCX smoke test passed: lists, citations, page size, captions, TOC, references, headers, fields, verification, three-level headings, declaration module, three-line tables")
     return 0
 
 
