@@ -1,47 +1,113 @@
 ---
 name: word-format-master
-description: Inspect, audit and edit Word formatting through deterministic local code. Use direct AI instructions, requirement documents or formatted DOCX/DOTX samples to build evidence-bearing profiles, resolve mappings, plan, apply and verify. Preserve source documents; convert legacy DOC before use.
+description: Word 论文与报告自动排版工具。把你的论文和学校格式要求（或排好版的样例文档）交给 AI，即可自动完成字体、段落、页边距、页眉页码、目录与参考文献等格式调整，并逐项复核验收，全程保护原稿安全。
 ---
 
-# Word Format Master
+# Word Format Master（Word 论文与报告智能排版工具）
 
-Use the current AI conversation and local CLI. AI interprets intent and evidence;
-registered code reads, validates, writes and verifies DOCX. Never create independent
-document-editing scripts. Editing project code is separate from formatting documents.
+**把论文和格式要求交给 AI，自动完成 Word 排版与格式检查，原稿安全不破坏。**
 
-## Resolve paths and scope
+你只需要提供**待排版的 Word 文档**，再给出一份**学校/期刊的格式要求**、一份**已经排好版的样例文档**，或者**直接用一句话说出你想怎么改**。AI 会自动读懂要求、对齐章节结构，并调用本地排版引擎生成排好版的新文档。
 
-Set `SKILL_DIR` to this directory. Resolve `PYTHON_BIN` to an available Python
-executable after checking `import docx`. Use absolute paths for scripts, source
-files, output, profiles, plans and reports. Keep intermediate files in a task folder.
-Never overwrite the target manuscript or formatting source.
+---
 
-Identify target, output, scope and authority from the user's message and files.
-Continue when clear; ask only about missing information that changes the result,
-conflicting evidence or ambiguous targets. Do not ask for routine permission to
-carry out a clearly requested format edit.
+## 一、 它能帮你做什么？
 
-Choose the appropriate direct route:
+### 1. 四大常用场景
+- **按《格式要求文档》排版**：支持读取 Word（`.docx`/`.dotx`）、PDF、TXT、Markdown 格式的排版规范，自动提取字体、字号、行距、页边距等规定并应用到你的论文中。
+- **照着《已排版样例》排版**：没有规则说明？直接丢一份往届优秀论文或模板样例（`.docx`/`.dotx`），自动提取其中的版式风格并迁移到你的文档（**只学格式，绝不照抄样例里的文字和姓名**）。
+- **一句话局部修改**：直接告诉 AI“只把第三章正文改成宋体小四、1.5 倍行距”或“把全文表格改成三线表”，指哪改哪，绝不乱动其他段落。
+- **只做格式体检（不改原文件）**：提交前想确认格式是否合规？支持只检查不修改，逐条对比要求并生成清晰的格式问题清单。
 
-1. **Requirement material**: extract from TXT/MD, DOCX/DOTX or text PDF.
-2. **Formatted sample**: extract effective supported formatting from DOCX/DOTX.
-3. **Local change**: inspect and translate the instruction into registered actions.
-4. **Audit only**: check expected values without applying or saving a DOCX.
+### 2. 支持调整的格式范围
 
-Do not combine formatting with prose rewriting unless requested. For a new thesis
-draft, read [references/thesis-generation.md](references/thesis-generation.md).
-When drafting from a sample, the sample defines the complete structure: include
-every part it has, in its order, and add no absent parts. Include a cover only
-when present; never automatically add an English abstract, English keywords,
-integrity pledge, declaration, TOC, acknowledgements or appendix. Preserve the
-sample's part counts, abstract languages and chapter hierarchy. Replace personal
-metadata and research text with the new thesis's content, not the sample's.
+| 类别 | 支持调整的具体内容 |
+| :--- | :--- |
+| **页面设置** | 纸张大小（如 A4）、纸张方向（横/纵）、上下左右页边距、装订线距离与位置 |
+| **字体与标题** | 中英文字体（如宋体 + Times New Roman）、字号、加粗、斜体、颜色、多级标题样式与自动编号 |
+| **段落排版** | 行距（多倍/固定值）、首行缩进、悬挂缩进、左右缩进、段前/段后间距、对齐方式、孤行与分页控制 |
+| **论文结构** | 自动生成目录、分节页眉页脚、首页不同/奇偶页不同、页码格式、图表题注对齐、三线表、参考文献编号整理 |
+| **质量核对** | 自动回读校验每项格式是否生效、检查正文文字是否一字不差、支持渲染成页面图片逐页检查排版效果 |
 
-## Extract evidence
+> **安全边界说明**：
+> - **原稿绝对安全**：所有修改都会另存为新文件，绝不覆盖你的原稿和参考文档。
+> - **不自作主张**：如果要求文档里某处规定模糊或前后矛盾，AI 会先列出来向你确认，不会用默认格式乱填；也不会擅自改写你的论文正文。
+> - **格式前置提示**：老版本 `.doc` 需先转为 `.docx`；扫描图片版 PDF 需先经过文字识别（OCR）。
 
-Read [references/format-profile.md](references/format-profile.md) for profiles,
-mappings and resolutions; [references/direct-format-api.md](references/direct-format-api.md)
-for operations and selectors.
+---
+
+## 二、 怎么使用？
+
+### 第一步：准备环境
+支持 Windows 10/11，需安装 Python 3.10 及以上版本（基础排版无需安装 Office；如需渲染成页面图片进行视觉检查，电脑需装有 Microsoft Word 或 LibreOffice）。
+
+```powershell
+git clone https://github.com/xiaoyang732/word-format-master.git
+cd word-format-master
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+```
+
+### 第二步：直接用日常语言跟 AI 对话
+无需自己编写代码或拼装命令，在 AI 工具中启用本技能后，直接像下面这样说即可：
+
+- **用法 1：按学校要求文档排版**
+  > “帮我按 `D:/学校论文格式要求.docx` 整理 `D:/我的论文.docx`，另存为 `D:/我的论文-已排版.docx`。如果有不明确或冲突的要求先列出来问我。”
+- **用法 2：照着优秀样例排版**
+  > “用 `D:/排版样例.docx` 作为格式参考，帮我排版 `D:/我的论文.docx` 并另存为新文件，保留我自己的正文和数据。”
+- **用法 3：局部快速修改**
+  > “把 `D:/我的论文.docx` 里的所有一级标题改成黑体三号居中，正文改成宋体小四、1.5 倍行距、首行缩进 2 字符。”
+- **用法 4：参照样例结构写新论文**
+  > “参考 `D:/排版样例.docx` 的结构帮我起草一篇新论文。样例里有哪些模块和章节层级就照着来，不要多加样例里没有的模块。”
+- **用法 5：只检查不修改**
+  > “对照 `D:/学校论文格式要求.docx` 检查一下 `D:/我的论文.docx` 有哪些格式不合格的地方，只出检查报告，不用改文件。”
+
+---
+
+## 三、 项目框架与工作原理
+
+为什么不让 AI 直接临时写一段 Python 脚本去改你的 Word？因为临时脚本很容易漏改属性、破坏复杂样式，甚至误删正文内容。
+
+本项目采用 **“AI 负责理解意图 + 本地确定性引擎负责精准执行”** 的分层架构：
+
+### 1. 四步标准工作流
+```text
+[1. 读取解析 Inspect/Profile] ──► [2. 规则对齐与规划 Plan] ──► [3. 安全写入 Apply] ──► [4. 独立复核 Verify]
+```
+1. **读取解析（Inspect & Profile）**：扫描目标论文的章节与段落结构，同时从要求文档或样例文档中提取排版规则，保留原文依据。
+2. **规则对齐与规划（Plan）**：将排版规则与论文中的各个模块（封面、摘要、各级标题、正文、参考文献、致谢等）一一对应，生成可预览的修改计划。遇到冲突或歧义时先交由用户决定。
+3. **安全写入（Apply）**：由经过严格测试的 63 项标准格式算子执行修改，只改请求指定的属性，先写入临时文件，确保原子性与原稿安全。
+4. **独立复核（Verify & Render）**：重新打开生成的文档，逐项比对格式数值、校验正文与未修改部分是否完好无损，并支持渲染为页面图片检查分页、页眉和表格跨页效果。
+
+### 2. 核心目录结构
+```text
+word-format-master/
+├── SKILL.md                  # 技能说明与 AI 执行指南
+├── README.md                 # 项目说明文档
+├── assets/
+│   └── presets.json          # 内置标准排版预设（仅在用户主动选择时使用）
+├── scripts/
+│   ├── format_cli.py         # 核心命令行入口（提取、检查、规划、执行、验收）
+│   ├── render_docx.py        # 页面视觉渲染工具（调用 Word / LibreOffice 导出页面图）
+│   ├── verify_output.py      # 输出文档结构与格式复核工具
+│   └── word_format/          # 底层确定性排版核心库（63 项标准格式操作算子）
+└── references/               # 详细接口规范与进阶参考文档
+```
+
+---
+
+## 四、 AI 执行指令与命令行参考（供 AI Agent 自动调用）
+
+> 以下内容供 AI 智能体在执行任务时内部调用，普通用户无需手动操作。
+
+### 1. 路径与基本准则
+- 将 `SKILL_DIR` 设为本技能根目录，定位已安装 `python-docx` 的 Python 解释器为 `PYTHON_BIN`。
+- 所有路径均使用绝对路径，中间产物存放在临时任务目录中，**严禁覆盖用户原稿或格式参考源文档**。
+- 仅调用下方注册的 CLI 工具执行文档读写，禁止自行编写独立的文档修改脚本。
+- 若根据样例起草新论文，先阅读 [references/thesis-generation.md](references/thesis-generation.md)：样例包含什么模块就生成什么模块，保持模块种类、数量、语言、顺序和章节层级完全一致，绝不自动添加样例中没有的英文摘要、承诺书、目录、致谢或附录。
+
+### 2. 提取格式依据与文档结构
+详见 [references/format-profile.md](references/format-profile.md) 与 [references/direct-format-api.md](references/direct-format-api.md)。
 
 ```powershell
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" capabilities --output capabilities.json
@@ -50,123 +116,27 @@ for operations and selectors.
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" inspect INPUT.docx --output inspect.json
 ```
 
-Run one extraction command matching the source. Save pasted requirements verbatim
-as UTF-8 text before extraction. The parser recognizes common clauses; it is not
-a complete natural-language interpreter. Read complete source blocks and every
-issue. Translate unparsed semantics into explicit replacement rules with evidence
-and reasons. Do not ignore unmatched wording when positive tokens were recognized.
+- 规则优先级：用户明确指定 > 学校/期刊样例模板 > 书面要求文档 > 指定标准 > 用户主动选择的预设 > 原稿现有格式（参见 [references/standards-registry.md](references/standards-registry.md)）。
+- 存在未决冲突或模糊规则时，在 `resolutions.json` 中记录 `choose`、`replace` 或 `ignore` 决策及理由；多节样例需在 `mapping.sections` 中显式映射节号。
 
-Sample profiles record effective role properties, direct XML, styles, all page
-sections, fields and feature inventory. Mixed values stay unresolved. Do not use
-majority values or presets to fill missing properties. Review role detection
-against text and inspect IDs; bold text alone does not establish a heading.
-Tables, numbering, headers, footers and special structures may require explicit
-operations. Never copy sample-specific names, titles, body text or headers.
-
-Legacy DOC requires conversion to a separate DOCX. Scanned PDF needs OCR with
-page evidence. Strict OOXML and macro formats are unsupported for writing.
-
-## Resolve authority and mappings
-
-Priority: explicit user choice > supplied institution/publisher template > written
-requirements > named standard > user-selected preset > existing manuscript values.
-See [references/standards-registry.md](references/standards-registry.md). Preserve
-conflicting evidence and record the choice. Do not add presets to partial requests.
-
-Record `choose`, `replace` or `ignore` decisions with reasons in resolutions JSON.
-Use available evidence and prior user instructions; ask when evidence cannot decide.
-An ignore reason must explain preservation or non-applicability, not hide unsupported
-work. Retain ignored items in the delivery's coverage summary.
-
-For multi-section samples, explicitly map every sample section in `mapping.sections`;
-chapter numbers are not section numbers. Map rule IDs to current target selectors
-in `mapping.rules` for unmatched or ambiguous roles. Use `mapping.preserve` with
-reasons for target paragraphs outside sample coverage. Review all preserved rules
-and paragraphs. For formatting an existing manuscript, preserve its content and
-do not invent, reorder or delete modules to make the sample fit. For a new draft,
-author exactly the sample's modules first; preservation mappings cannot excuse
-missing or extra parts. Review `snapshot.structure_contract` against the complete
-sample, including table/image covers and rendered pages. Resolve ambiguous
-structures before drafting; do not fill them from a generic thesis outline.
-
-## Plan, apply and verify
+### 3. 规划、执行与验收
 
 ```powershell
+# 基于要求或样例档案进行规划、应用与复核
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" plan INPUT.docx OUTPUT.docx --profile profile.json --mapping mapping.json --resolutions resolutions.json --output plan.json
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" apply --plan plan.json --report report.json
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" verify --plan plan.json --report report.json --output verification.json
 ```
 
-Omit optional mapping/resolution files when unnecessary. A result with
-`kind: word-format-profile-review` and `status: needs_clarification` is a review,
-not an executable plan. Resolve and plan again. No DOCX is written until apply.
-Source changes require fresh extraction/planning. Never patch plans or reports
-to force acceptance.
-
-For every sample-based thesis draft, run `check-structure DRAFT.docx --profile
-profile.json --output structure.json` before formatting and add `--match-structure`
-to the `plan` command above. These commands compare part kinds, languages,
-occurrences, order and chapter hierarchy against the actual sample. Fix the draft
-when they differ; do not bypass the check with `ignore` or `mapping.preserve`.
-The bound structure is checked again during apply and verify. It checks detected
-structure, so page review must also confirm cover layout and any unrecognized
-content. Only a user's explicit structural override authorizes a different outline.
-
-For local changes, create a schema 2.0 request and use `--request request.json`
-instead of `--profile`. Use inspect IDs, exact chapter titles or unique quotes.
-Do not use a full-document profile for a local edit. Shared styles require an
-explicit style target; unrequested properties and text stay unchanged.
-
-For audit-only tasks:
-
-```powershell
-& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" audit INPUT.docx --request request.json --output audit.json
-```
-
-For Format Spec 1.0, read [references/format-spec.md](references/format-spec.md).
-It expands through the same registry. Official publisher packages remain the
-authority where numeric rules cannot represent their layout or submission format.
-
-Read [references/header-requirements.md](references/header-requirements.md) for
-section/variant headers and STYLEREF. Header content, numbering, citations, TOC
-and section insertion are explicit structural operations. Insert boundaries in
-a separate plan, then inspect the new DOCX. Use real fields for supported TOCs
-and page numbers. Do not claim unregistered SEQ/REF creation is supported.
-
-## Render and deliver
-
-Structural verification is mandatory. Use `render_docx.py INPUT.docx --output-dir
-RENDER_DIR --method auto` for visual evidence; choose `word` or `libreoffice` when
-specified. Explicit choices must not fall back silently. Inspect every page for
-clipping, missing glyphs, broken tables, page breaks, headers and blank pages.
-Repair the owning rules/request and rerender if needed.
-
-The engine cannot evaluate Word fields; the renderer must refresh them. If
-rendering is unavailable, report visual `skipped` with a reason. If pages await
-inspection, use `pending`. Neither is a visual pass; never fabricate a report.
-
-After page inspection, create the bound visual JSON described in
-[references/direct-format-api.md](references/direct-format-api.md), then run:
-
-```powershell
-& $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" verify --plan plan.json --report report.json --visual-report visual.json --render-manifest RENDER_DIR/render-manifest.json --output verification.json
-```
-
-Hash the actual output and render manifest; never reuse an old review after
-rerendering. If the renderer was explicitly selected, retain that selection in
-the plan or pass `--render-method`. The checker verifies every page file hash.
-
-Deliver the new DOCX and a concise summary of authority, applied/verified
-properties, preserved/ignored items, unsupported work and visual status. Claim
-full compliance only when every required property is represented and verified,
-including visual checks. Do not promise arbitrary Word formats all migrate.
-Keep internal JSON and page images out of delivery unless useful or requested.
-
-For batches, inspect and plan each manuscript separately. Reusing a profile does
-not authorize reusing source-bound IDs.
-
-Example requests: “按这份学校要求整理论文并另存新文件”；“读取排版样例，应用支持的
-格式并列出未覆盖项”；“只改第三章正文”；“Apply this sample's formatting to each
-manuscript; preserve their content.”
-
-When extending implementation, read [references/architecture.md](references/architecture.md).
+- **按样例生成论文结构校验**：对基于样例起草的论文，排版前必须运行 `check-structure DRAFT.docx --profile profile.json --output structure.json`，并在 `plan` 时加上 `--match-structure`。
+- **局部直接修改**：构造 schema 2.0 请求 JSON，使用 `plan INPUT.docx OUTPUT.docx --request request.json --output plan.json`。
+- **仅检查不修改（Audit）**：
+  ```powershell
+  & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" audit INPUT.docx --request request.json --output audit.json
+  ```
+- **视觉渲染与页面复核**：
+  ```powershell
+  & $PYTHON_BIN "$SKILL_DIR/scripts/render_docx.py" OUTPUT.docx --output-dir RENDER_DIR --method auto
+  & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" verify --plan plan.json --report report.json --visual-report visual.json --render-manifest RENDER_DIR/render-manifest.json --output verification.json
+  ```
+  分页、页眉、表格断页和域刷新详见 [references/header-requirements.md](references/header-requirements.md) 与 [references/architecture.md](references/architecture.md)。

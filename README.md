@@ -1,35 +1,43 @@
-# Word Format Master
+# Word Format Master（Word 论文与报告智能排版工具）
 
-**把论文和格式依据交给 AI，通过本地工具完成排版与复核。**
+**把论文和格式要求交给 AI，自动完成 Word 排版与格式检查，原稿安全不破坏。**
 
 [![CI](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-提供目标论文，再提供学校的格式要求文档、已排好版的论文样例，或直接说明修改要求。AI 读取材料、处理格式冲突、匹配目标位置，再调用确定性的格式引擎生成新的 DOCX。原稿与格式依据保持不变。
+你只需要提供**待排版的 Word 文档**，再给出一份**学校/期刊的格式要求**、一份**已经排好版的样例文档**，或者**直接用一句话说出你想怎么改**。AI 会自动读懂要求、对齐章节结构，并调用本地排版引擎生成排好版的新文档。
 
-> “按《学校论文要求.docx》整理《我的论文.docx》，另存新文件。无法确定的要求先列出来。”
->
-> “用《排版样例.docx》作为格式依据，保留我的正文、姓名和数据，列出未覆盖的格式。”
->
-> “只把第三章正文改为宋体、小四、1.5 倍行距。”
+---
 
-## 能处理什么
+## 一、 它能帮你做什么？
 
-| 输入或能力 | 处理方式 |
-|---|---|
-| 格式要求文档 | 读取 UTF-8 TXT/Markdown、DOCX/DOTX、文本 PDF，保留原文和位置证据 |
-| 已排版论文样例 | 提取 DOCX/DOTX 有效字体、字号、段落属性、全部页面节及结构清单 |
-| 精确局部修改 | 按章节、角色、段落、表格单元格或普通文字范围修改 |
-| 页面与段落 | 纸张、方向、边距、装订线、行距、缩进、段距及分页控制 |
-| 字体与标题 | 中西文字体、字号、粗斜体、颜色、标题层级与明确请求的自动编号 |
-| 论文结构 | 明确配置目录字段、页码、分节页眉、首页与奇偶页、题注位置、三线表及文献编号 |
-| 验收 | 逐项回读格式、检查内容和无关属性保全，并可渲染逐页检查 |
+### 1. 四大常用场景
+- **按《格式要求文档》排版**：支持读取 Word（`.docx`/`.dotx`）、PDF、TXT、Markdown 格式的排版规范，自动提取字体、字号、行距、页边距等规定并应用到你的论文中。
+- **照着《已排版样例》排版**：没有规则说明？直接丢一份往届优秀论文或模板样例（`.docx`/`.dotx`），自动提取其中的版式风格并迁移到你的文档（**只学格式，绝不照抄样例里的文字和姓名**）。
+- **一句话局部修改**：直接告诉 AI“只把第三章正文改成宋体小四、1.5 倍行距”或“把全文表格改成三线表”，指哪改哪，绝不乱动其他段落。
+- **只做格式体检（不改原文件）**：提交前想确认格式是否合规？支持只检查不修改，逐条对比要求并生成清晰的格式问题清单。
 
-样例分析和自动迁移有明确边界：同一角色中的混合格式、复杂页眉页脚、字段、编号和特殊对象会进入待处理问题；支持的项目才生成执行规则。扫描 PDF 需要 OCR，DOC 需先转为 DOCX。不会用通用预设补齐材料没写出的要求，也不会把样例文字复制进目标论文。
+### 2. 支持调整的格式范围
 
-## 快速开始
+| 类别 | 支持调整的具体内容 |
+| :--- | :--- |
+| **页面设置** | 纸张大小（如 A4）、纸张方向（横/纵）、上下左右页边距、装订线距离与位置 |
+| **字体与标题** | 中英文字体（如宋体 + Times New Roman）、字号、加粗、斜体、颜色、多级标题样式与自动编号 |
+| **段落排版** | 行距（多倍/固定值）、首行缩进、悬挂缩进、左右缩进、段前/段后间距、对齐方式、孤行与分页控制 |
+| **论文结构** | 自动生成目录、分节页眉页脚、首页不同/奇偶页不同、页码格式、图表题注对齐、三线表、参考文献编号整理 |
+| **质量核对** | 自动回读校验每项格式是否生效、检查正文文字是否一字不差、支持渲染成页面图片逐页检查排版效果 |
 
-面向 Windows 10/11、Python 3.10 及以上。格式写入和结构检查无需 Word；实际分页和视觉验收需要 Microsoft Word 或 LibreOffice。
+> **安全边界说明**：
+> - **原稿绝对安全**：所有修改都会另存为新文件，绝不覆盖你的原稿和参考文档。
+> - **不自作主张**：如果要求文档里某处规定模糊或前后矛盾，AI 会先列出来向你确认，不会用默认格式乱填；也不会擅自改写你的论文正文。
+> - **格式前置提示**：老版本 `.doc` 需先转为 `.docx`；扫描图片版 PDF 需先经过文字识别（OCR）。
+
+---
+
+## 二、 怎么使用？
+
+### 第一步：准备环境
+支持 Windows 10/11，需安装 Python 3.10 及以上版本（基础排版无需安装 Office；如需渲染成页面图片进行视觉检查，电脑需装有 Microsoft Word 或 LibreOffice）。
 
 ```powershell
 git clone https://github.com/xiaoyang732/word-format-master.git
@@ -38,78 +46,84 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-在具备本地文件读取和命令执行能力的 AI 工具中加载 [SKILL.md](SKILL.md)，或这样说：
+### 第二步：在 AI 工具中直接对话
+在支持本地文件读写与命令执行的 AI 工具中加载 [SKILL.md](SKILL.md)，直接用日常语言提出需求即可（无需手动敲命令）：
 
+- **用法 1：按学校要求文档排版**
+  > “帮我按 `D:/学校论文格式要求.docx` 整理 `D:/我的论文.docx`，另存为 `D:/我的论文-已排版.docx`。如果有不明确或冲突的要求先列出来问我。”
+- **用法 2：照着优秀样例排版**
+  > “用 `D:/排版样例.docx` 作为格式参考，帮我排版 `D:/我的论文.docx` 并另存为新文件，保留我自己的正文和数据。”
+- **用法 3：局部快速修改**
+  > “把 `D:/我的论文.docx` 里的所有一级标题改成黑体三号居中，正文改成宋体小四、1.5 倍行距、首行缩进 2 字符。”
+- **用法 4：参照样例结构写新论文**
+  > “参考 `D:/排版样例.docx` 的结构帮我起草一篇新论文。样例里有哪些模块和章节层级就照着来，不要多加样例里没有的模块。”
+- **用法 5：只检查不修改**
+  > “对照 `D:/学校论文格式要求.docx` 检查一下 `D:/我的论文.docx` 有哪些格式不合格的地方，只出检查报告，不用改文件。”
+
+---
+
+## 三、 项目框架与工作原理
+
+为什么不让 AI 直接临时写一段 Python 脚本去改你的 Word？因为临时脚本很容易漏改属性、破坏复杂样式，甚至误删正文内容。
+
+本项目采用 **“AI 负责理解意图 + 本地确定性引擎负责精准执行”** 的分层架构：
+
+### 1. 四步标准工作流
 ```text
-请读取 <项目目录>/SKILL.md，使用 word-format-master。
-目标论文：C:/Documents/论文.docx
-格式依据：C:/Documents/学校格式要求.docx
-输出：C:/Documents/论文-排版后.docx
-请检查全部要求，处理明确可确定的格式，报告冲突、未覆盖项及验收状态。
+[1. 读取解析 Inspect/Profile] ──► [2. 规则对齐与规划 Plan] ──► [3. 安全写入 Apply] ──► [4. 独立复核 Verify]
+```
+1. **读取解析（Inspect & Profile）**：扫描目标论文的章节与段落结构，同时从要求文档或样例文档中提取排版规则，保留原文依据。
+2. **规则对齐与规划（Plan）**：将排版规则与论文中的各个模块（封面、摘要、各级标题、正文、参考文献、致谢等）一一对应，生成可预览的修改计划。遇到冲突或歧义时先交由用户决定。
+3. **安全写入（Apply）**：由经过严格测试的 63 项标准格式算子执行修改，只改请求指定的属性，先写入临时文件，确保原子性与原稿安全。
+4. **独立复核（Verify & Render）**：重新打开生成的文档，逐项比对格式数值、校验正文与未修改部分是否完好无损，并支持渲染为页面图片检查分页、页眉和表格跨页效果。
+
+### 2. 核心目录结构
+```text
+word-format-master/
+├── SKILL.md                  # 技能说明与 AI 执行指南
+├── README.md                 # 项目说明文档
+├── assets/
+│   └── presets.json          # 内置标准排版预设（仅在用户主动选择时使用）
+├── scripts/
+│   ├── format_cli.py         # 核心命令行入口（提取、检查、规划、执行、验收）
+│   ├── render_docx.py        # 页面视觉渲染工具（调用 Word / LibreOffice 导出页面图）
+│   ├── verify_output.py      # 输出文档结构与格式复核工具
+│   └── word_format/          # 底层确定性排版核心库（63 项标准格式操作算子）
+├── tests/                    # 自动化单元测试集
+└── references/               # 详细接口规范与进阶参考文档
 ```
 
-用户通过当前 AI 会话提出需求。下面的 CLI 和 JSON 由 AI 组织，不要求用户手工配置。
-
-## 要求文档与样例工作流
-
-两种来源任选其一生成格式档案：
+### 3. 命令行工作流示例（由 AI 在后台自动组织调用）
 
 ```powershell
+# 1. 从要求文档或排版样例提取规则档案
 python scripts/format_cli.py profile requirements "学校要求.docx" --output profile.json
 python scripts/format_cli.py profile template "排版样例.docx" --output profile.json
-```
 
-档案保存来源 SHA-256、证据锚点、可执行规则、原始快照、覆盖范围和待处理问题。AI 检查问题后记录明确决策；多个页面节需要映射到目标论文的实际节编号。
-
-```powershell
+# 2. 扫描原稿、生成计划、执行修改并独立复核
 python scripts/format_cli.py inspect "论文.docx" --output inspect.json
-python scripts/format_cli.py plan "论文.docx" "论文-排版后.docx" --profile profile.json --mapping mapping.json --resolutions resolutions.json --output plan.json
+python scripts/format_cli.py plan "论文.docx" "论文-排版后.docx" --profile profile.json --output plan.json
 python scripts/format_cli.py apply --plan plan.json --report report.json
 python scripts/format_cli.py verify --plan plan.json --report report.json --output verification.json
-```
 
-没有映射或问题时可省略 `--mapping`、`--resolutions`。未解决问题会返回 `needs_clarification`，此时保存的是审阅结果，不能用作执行计划。决策和显式保留项会随执行报告保存。详见 [格式档案契约](references/format-profile.md)。
-
-局部修改使用 `plan --request request.json`；只检查使用 `audit --request request.json`。请求和选择器见 [直接调用指南](references/direct-format-api.md)。内置 `thesis-standard` 仅在用户选择时应用，学校或期刊要求优先。
-
-## 按样例生成论文
-
-**样例中有什么，生成的论文就保留什么，不多也不少。** 有封面就制作对应封面；样例没有英文摘要、英文关键词、诚信承诺书、目录、致谢或附录，就不自动补加。模块的种类、数量、语言、顺序及章节层级按样例保留，题目、姓名和研究内容使用新论文的信息。
-
-AI 先核对样例档案中的 `snapshot.structure_contract` 和实际页面，再完成草稿。生成流程必须检查结构并启用严格规划：
-
-```powershell
-python scripts/format_cli.py check-structure "草稿.docx" --profile profile.json --output structure.json
-python scripts/format_cli.py plan "草稿.docx" "论文.docx" --profile profile.json --match-structure --mapping mapping.json --resolutions resolutions.json --output plan.json
-```
-
-存在额外或缺少的模块、语言/数量不一致、顺序或章节层级变化时，规划返回差异而不生成可执行计划；写入和复检也会核对。封面布局和不明确结构仍需逐页检查。详见 [论文生成流程](references/thesis-generation.md)。
-
-## 验收与保护
-
-计划绑定目标论文和格式依据的路径及 SHA-256，来源变化后必须重新规划。写入前拒绝参数和位置冲突，输出先保存临时文件，重新打开并验收后发布。只改字号会保留其他未请求属性；编号转换、目录、引用、页眉内容替换等结构操作须明确配置。
-
-独立 `verify` 检查报告是否完整覆盖计划，并重新读取输出。JSON 报告也不能覆盖输入、格式依据或目标文档。已有输出默认不覆盖。
-
-```powershell
+# 3. 渲染页面图片进行逐页视觉检查（可选）
 python scripts/render_docx.py "论文-排版后.docx" --output-dir render --method auto
 ```
 
-最终分页、字形、表格、页眉和 Word 字段需要实际渲染并逐页检查。没有完成渲染和检查时，只能报告结构通过，视觉为 `skipped` 或 `pending`。Word 与 LibreOffice 可能有分页差异；不能对任意 Word 文件承诺所有格式都能自动复制。
+---
 
-AI 完成页面检查后，可用 `verify --visual-report visual.json --render-manifest render/render-manifest.json` 绑定并复核视觉证据，拒绝过期或缺页报告。完整命令和报告格式见 [直接调用指南](references/direct-format-api.md#绑定视觉验收)。
+## 四、 常见问题
 
-## 常见问题
+- **会改写我的论文正文吗？**
+  不会。格式操作全程保留你的正文文字，只有当你明确要求进行正文润色时才会改动文字。
+- **我的文档会被上传到第三方服务器吗？**
+  本地排版脚本完全在你的电脑上离线运行，不调用外部接口。
+- **能只检查格式、不修改文档吗？**
+  可以。告诉 AI“只检查不修改”，工具会生成详细的对比报告，原文档不做任何写入。
 
-**会改写正文吗？** 普通格式操作保留正文。明确的编号、引用和目录操作按声明的结构影响执行。正文润色需要另行提出。
+---
 
-**会上传文档吗？** 本地工具不调用大模型 API。AI 会话如何处理文档上下文取决于所用 AI 工具的配置。
-
-**支持所有 Word 格式吗？** 支持 DOCX 修改和 DOCX/DOTX 样例提取。宏文档、Strict OOXML 写入、复杂文字范围及部分包级结构暂不支持；未支持项会保留并报告。
-
-**能只检查、不修改吗？** 可以。`audit` 不保存 DOCX，报告每个目标的期望值、有效值和差异；有差异退出码为 2，完整报告仍保存。
-
-## 开发验证
+## 五、 开发验证与进阶文档
 
 ```powershell
 python -m pip install -r requirements-dev.txt
@@ -118,20 +132,13 @@ python -m ruff format --check scripts/word_format scripts/apply_spec.py scripts/
 python scripts/validate_project.py
 python scripts/smoke_test.py
 python -m unittest discover -s tests -v
-git diff --check
 ```
 
-每项新格式能力必须登记参数约束、唯一写入方法、独立回读和验收。性能基准见 `python scripts/benchmark_formatting.py --profile`。
-
-## 更多文档
-
-- [Skill 工作流](SKILL.md)
+- [Skill 工作流说明](SKILL.md)
 - [格式档案、映射与冲突决策](references/format-profile.md)
 - [直接调用指南](references/direct-format-api.md)
-- [兼容格式规范](references/format-spec.md)
-- [页眉设置](references/header-requirements.md)
-- [标准与预设](references/standards-registry.md)
-- [架构](references/architecture.md) · [安全边界](SECURITY.md)
-- [改造方案与实现进度](references/direct-ai-only-roadmap.md)
+- [按样例生成论文流程](references/thesis-generation.md)
+- [兼容格式规范](references/format-spec.md) · [页眉设置](references/header-requirements.md) · [标准与预设](references/standards-registry.md)
+- [架构说明](references/architecture.md) · [安全边界](SECURITY.md)
 
-[MIT License](LICENSE)。
+[MIT License](LICENSE)
