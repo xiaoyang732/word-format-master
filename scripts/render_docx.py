@@ -134,7 +134,13 @@ def _libreoffice_to_pdf(source: Path, output_pdf: Path, executable: Path) -> Non
         conversion_dir = Path(conversion)
         environment = os.environ.copy()
         environment["HOME"] = profile
-        embedded_python = _nonempty(executable.parent / "python.exe") and executable.parent / "python.exe"
+        embedded_python = (
+            (executable.parent / "python.exe")
+            if _nonempty(executable.parent / "python.exe")
+            else (executable.parent / "python")
+            if _nonempty(executable.parent / "python")
+            else None
+        )
         uno_script = Path(__file__).resolve().with_name("libreoffice_render.py")
         if embedded_python and uno_script.is_file():
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:

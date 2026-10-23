@@ -39,7 +39,7 @@ def main():
         if (ROOT / name).exists():
             errors.append(f"Removed web entry point remains: {name}")
     skill = (ROOT / "SKILL.md").read_text(encoding="utf-8")
-    if not re.match(r"^---\nname: word-format-master\ndescription: [^\n]+\n---\n", skill):
+    if not re.match(r"^---\nname: word-format-master\ndescription: [^\n]+(?:\n[a-zA-Z0-9_-]+: [^\n]+)*\n---\n", skill):
         errors.append("Invalid skill frontmatter")
     for cap in REGISTRY.values():
         for attribute in ("handler", "validator", "reader", "verifier"):
@@ -76,6 +76,8 @@ def main():
                 errors.append(f"{preset_id}: table-of-contents preset is incomplete")
         expected = {
             "thesis-standard",
+            "journal-paper-cn",
+            "official-report-cn",
         }
         missing = expected - ids
         if missing:

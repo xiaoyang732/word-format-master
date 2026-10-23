@@ -133,10 +133,19 @@ def _find_libreoffice(runtime_root: Path) -> Path | None:
         program_files.append(Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")))
         for root in program_files:
             candidates.append(root / "LibreOffice" / "program" / "soffice.exe")
+        candidates.extend(_registry_candidates("libreoffice"))
+    elif sys.platform == "darwin":
+        candidates.extend([
+            Path("/Applications/LibreOffice.app/Contents/MacOS/soffice"),
+            Path.home() / "Applications" / "LibreOffice.app" / "Contents" / "MacOS" / "soffice",
+        ])
     else:
-        # The supported runtime is Windows; do not advertise or probe other OS layouts.
-        return None
-    candidates.extend(_registry_candidates("libreoffice"))
+        candidates.extend([
+            Path("/usr/bin/soffice"),
+            Path("/usr/bin/libreoffice"),
+            Path("/usr/local/bin/soffice"),
+            Path("/snap/bin/libreoffice"),
+        ])
     manifest_path = runtime_root / "runtime-manifest.json"
     if manifest_path.is_file():
         try:

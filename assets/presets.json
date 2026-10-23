@@ -210,6 +210,412 @@
         "目录规范：标题'目　　录'（黑体三号居中），按三级标题生成，正文小四号宋体，1.5 倍行距；目录本身不参与编号与目录项索引。",
         "参考文献：采用 GB/T 7714-2015 顺序编码制，正文五号宋体/Times New Roman（10.5pt），单倍行距，悬挂缩进 2 字符（7.4mm）。"
       ]
+    },
+    {
+      "id": "journal-paper-cn",
+      "name": "中文期刊小论文/课程论文通用规范模板",
+      "mode": "parameterized",
+      "template_required": false,
+      "authority": {
+        "level": "project-preset",
+        "sources": [
+          "GB/T 7713.2 学术论文编写规则",
+          "GB/T 7714-2015 信息与文献 参考文献著录规则",
+          "项目维护的期刊与课程论文通用排版参数；具体期刊或课程要求优先"
+        ],
+        "override_note": "本模板适用于无需独立封面与目录页的中文学术期刊投稿、课程论文及实验报告，采用项目维护的通用参数；用户锁定字段、目标期刊模板与显式要求优先。"
+      },
+      "page": {
+        "size": "A4",
+        "width_mm": 210,
+        "height_mm": 297,
+        "orientation": "portrait",
+        "margin_top_mm": 25.4,
+        "margin_right_mm": 25.0,
+        "margin_bottom_mm": 25.4,
+        "margin_left_mm": 25.0,
+        "gutter_mm": 0.0,
+        "header_distance_mm": 15.0,
+        "footer_distance_mm": 15.0
+      },
+      "body": {
+        "font_latin": "Times New Roman",
+        "font_east_asia": "宋体",
+        "font_size_pt": 10.5,
+        "alignment": "justify",
+        "line_spacing": {
+          "kind": "multiple",
+          "value": 1.25
+        },
+        "space_before_pt": 0,
+        "space_after_pt": 0,
+        "first_line_indent_chars": 2,
+        "widow_control": true
+      },
+      "title": {
+        "color": "000000"
+      },
+      "keywords": {
+        "font_latin": "Times New Roman",
+        "font_east_asia": "宋体",
+        "font_size_pt": 10.5,
+        "alignment": "left",
+        "first_line_indent_chars": 0
+      },
+      "lists": {
+        "headings": {
+          "level1": "arabic",
+          "level2": "arabic",
+          "level3": "arabic"
+        },
+        "numbered": {
+          "style": "decimal-period",
+          "start": 1,
+          "left_indent_mm": 7.4,
+          "hanging_indent_mm": 4.5
+        }
+      },
+      "headings": [
+        {
+          "level": 1,
+          "color": "000000",
+          "font_latin": "Times New Roman",
+          "font_east_asia": "黑体",
+          "font_size_pt": 14,
+          "bold": true,
+          "alignment": "left",
+          "first_line_indent_chars": 0,
+          "space_before_pt": 12,
+          "space_after_pt": 6,
+          "line_spacing": {
+            "kind": "multiple",
+            "value": 1.25
+          },
+          "keep_with_next": true
+        },
+        {
+          "level": 2,
+          "color": "000000",
+          "font_latin": "Times New Roman",
+          "font_east_asia": "黑体",
+          "font_size_pt": 12,
+          "bold": true,
+          "alignment": "left",
+          "first_line_indent_chars": 0,
+          "space_before_pt": 6,
+          "space_after_pt": 6,
+          "line_spacing": {
+            "kind": "multiple",
+            "value": 1.25
+          },
+          "keep_with_next": true
+        },
+        {
+          "level": 3,
+          "color": "000000",
+          "font_latin": "Times New Roman",
+          "font_east_asia": "宋体",
+          "font_size_pt": 10.5,
+          "bold": true,
+          "alignment": "left",
+          "first_line_indent_chars": 0,
+          "space_before_pt": 3,
+          "space_after_pt": 3,
+          "line_spacing": {
+            "kind": "multiple",
+            "value": 1.25
+          },
+          "keep_with_next": true
+        }
+      ],
+      "captions": {
+        "figure": {
+          "style_name": "Figure Caption",
+          "label": "图",
+          "position": "below",
+          "font_east_asia": "宋体",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 9,
+          "alignment": "center",
+          "space_before_pt": 6,
+          "space_after_pt": 6,
+          "numbering_mode": "seq"
+        },
+        "table": {
+          "style_name": "Table Caption",
+          "label": "表",
+          "position": "above",
+          "font_east_asia": "宋体",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 9,
+          "alignment": "center",
+          "space_before_pt": 6,
+          "space_after_pt": 6,
+          "numbering_mode": "seq"
+        }
+      },
+      "tables": {
+        "three_line_table": true,
+        "repeat_header_row": true,
+        "alignment": "center",
+        "font_size_pt": 9,
+        "font_east_asia": "宋体",
+        "font_latin": "Times New Roman"
+      },
+      "headers_footers": {
+        "preserve_existing": true,
+        "different_first_page": false,
+        "header": {
+          "enabled": false,
+          "text": "",
+          "alignment": "center",
+          "font_east_asia": "宋体",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 9
+        },
+        "footer": {
+          "enabled": false,
+          "text": "",
+          "alignment": "center"
+        }
+      },
+      "page_numbers": {
+        "enabled": true,
+        "location": "footer",
+        "alignment": "center",
+        "format": "number",
+        "start": 1,
+        "show_on_first_page": true
+      },
+      "table_of_contents": {
+        "enabled": false,
+        "title": "目　　录",
+        "max_heading_level": 3,
+        "page_break_after": false
+      },
+      "references": {
+        "citation_system": "GB/T 7714-2015",
+        "citation_mode": "numeric",
+        "numbering_mode": "word-numbering",
+        "font_east_asia": "宋体",
+        "font_latin": "Times New Roman",
+        "font_size_pt": 9,
+        "alignment": "justify",
+        "left_indent_chars": 0,
+        "hanging_indent_chars": 2,
+        "line_spacing": {
+          "kind": "single"
+        },
+        "space_after_pt": 0
+      },
+      "notes": [
+        "适用于中文期刊投稿初稿、大学课程论文、数学建模竞赛论文及实验报告。",
+        "正文采用五号（10.5pt）宋体/Times New Roman，1.25 倍行距，首行缩进 2 字符。",
+        "一至三级标题采用阿拉伯数字层级（1 / 1.1 / 1.1.1），左对齐，默认不插入独立目录页。"
+      ]
+    },
+    {
+      "id": "official-report-cn",
+      "name": "通用公文与专项工作报告规范模板",
+      "mode": "parameterized",
+      "template_required": false,
+      "authority": {
+        "level": "project-preset",
+        "sources": [
+          "GB/T 9704 党政机关公文格式（版心与字号参考）",
+          "项目维护的公文与专项汇报材料通用排版参数；单位印发规定优先"
+        ],
+        "override_note": "本模板参考通用政务汇报与公文正文版式（上37mm下35mm左28mm右26mm、三号仿宋、28磅固定行距），仅作正文与标题排版预设，不生成红头版头或签发人要素；具体单位要求优先。"
+      },
+      "page": {
+        "size": "A4",
+        "width_mm": 210,
+        "height_mm": 297,
+        "orientation": "portrait",
+        "margin_top_mm": 37.0,
+        "margin_right_mm": 26.0,
+        "margin_bottom_mm": 35.0,
+        "margin_left_mm": 28.0,
+        "gutter_mm": 0.0,
+        "header_distance_mm": 15.0,
+        "footer_distance_mm": 25.0
+      },
+      "body": {
+        "font_latin": "Times New Roman",
+        "font_east_asia": "仿宋",
+        "font_size_pt": 16,
+        "alignment": "justify",
+        "line_spacing": {
+          "kind": "exact",
+          "value": 28
+        },
+        "space_before_pt": 0,
+        "space_after_pt": 0,
+        "first_line_indent_chars": 2,
+        "widow_control": true
+      },
+      "title": {
+        "color": "000000"
+      },
+      "keywords": {
+        "font_latin": "Times New Roman",
+        "font_east_asia": "仿宋",
+        "font_size_pt": 16,
+        "alignment": "left",
+        "first_line_indent_chars": 0
+      },
+      "lists": {
+        "headings": {
+          "level1": "chinese",
+          "level2": "arabic",
+          "level3": "arabic"
+        },
+        "numbered": {
+          "style": "decimal-period",
+          "start": 1,
+          "left_indent_mm": 7.4,
+          "hanging_indent_mm": 4.5
+        }
+      },
+      "headings": [
+        {
+          "level": 1,
+          "color": "000000",
+          "font_latin": "Times New Roman",
+          "font_east_asia": "黑体",
+          "font_size_pt": 16,
+          "bold": false,
+          "alignment": "left",
+          "first_line_indent_chars": 2,
+          "space_before_pt": 0,
+          "space_after_pt": 0,
+          "line_spacing": {
+            "kind": "exact",
+            "value": 28
+          },
+          "keep_with_next": true
+        },
+        {
+          "level": 2,
+          "color": "000000",
+          "font_latin": "Times New Roman",
+          "font_east_asia": "楷体",
+          "font_size_pt": 16,
+          "bold": true,
+          "alignment": "left",
+          "first_line_indent_chars": 2,
+          "space_before_pt": 0,
+          "space_after_pt": 0,
+          "line_spacing": {
+            "kind": "exact",
+            "value": 28
+          },
+          "keep_with_next": true
+        },
+        {
+          "level": 3,
+          "color": "000000",
+          "font_latin": "Times New Roman",
+          "font_east_asia": "仿宋",
+          "font_size_pt": 16,
+          "bold": true,
+          "alignment": "left",
+          "first_line_indent_chars": 2,
+          "space_before_pt": 0,
+          "space_after_pt": 0,
+          "line_spacing": {
+            "kind": "exact",
+            "value": 28
+          },
+          "keep_with_next": true
+        }
+      ],
+      "captions": {
+        "figure": {
+          "style_name": "Figure Caption",
+          "label": "图",
+          "position": "below",
+          "font_east_asia": "仿宋",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 14,
+          "alignment": "center",
+          "space_before_pt": 6,
+          "space_after_pt": 6,
+          "numbering_mode": "seq"
+        },
+        "table": {
+          "style_name": "Table Caption",
+          "label": "表",
+          "position": "above",
+          "font_east_asia": "仿宋",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 14,
+          "alignment": "center",
+          "space_before_pt": 6,
+          "space_after_pt": 6,
+          "numbering_mode": "seq"
+        }
+      },
+      "tables": {
+        "three_line_table": false,
+        "repeat_header_row": true,
+        "alignment": "center",
+        "font_size_pt": 14,
+        "font_east_asia": "仿宋",
+        "font_latin": "Times New Roman"
+      },
+      "headers_footers": {
+        "preserve_existing": true,
+        "different_first_page": false,
+        "header": {
+          "enabled": false,
+          "text": "",
+          "alignment": "center",
+          "font_east_asia": "仿宋",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 10.5
+        },
+        "footer": {
+          "enabled": false,
+          "text": "",
+          "alignment": "center"
+        }
+      },
+      "page_numbers": {
+        "enabled": true,
+        "location": "footer",
+        "alignment": "center",
+        "format": "number",
+        "start": 1,
+        "show_on_first_page": true
+      },
+      "table_of_contents": {
+        "enabled": false,
+        "title": "目　　录",
+        "max_heading_level": 3,
+        "page_break_after": false
+      },
+      "references": {
+        "citation_system": "GB/T 7714-2015",
+        "citation_mode": "numeric",
+        "numbering_mode": "word-numbering",
+        "font_east_asia": "仿宋",
+        "font_latin": "Times New Roman",
+        "font_size_pt": 14,
+        "alignment": "justify",
+        "left_indent_chars": 0,
+        "hanging_indent_chars": 2,
+        "line_spacing": {
+          "kind": "exact",
+          "value": 24
+        },
+        "space_after_pt": 0
+      },
+      "notes": [
+        "适用于正式汇报材料、工作报告、申请书及通用公文正文排版。",
+        "页面采用上 37mm、下 35mm、左 28mm、右 26mm 边距；正文三号（16pt）仿宋，固定行距 28 磅，首行缩进 2 字符。",
+        "一级标题三号黑体、二级标题三号楷体加粗、三级标题三号仿宋加粗，均首行缩进 2 字符。"
+      ]
     }
   ],
   "template_workflows": []
