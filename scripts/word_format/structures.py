@@ -998,7 +998,9 @@ def normalize_heading_styles(
 
     re_l1 = re.compile(r"^\s*(?:第[一二三四五六七八九十0-9]+章|\d+(?:[、\.\s]|\s*))\s*[^\s\d\.]")
     re_special = re.compile(
-        r"^\s*(?:摘\s*要|中文摘要|英文摘要|ABSTRACT|abstract|目\s*录|table\s+of\s+contents|contents|绪\s*论|引\s*言|前\s*言|结论|参考文献|参考资料|致\s*谢|acknowledg(?:e)?ments?|符号说明|符号表|术语表|symbols?|glossary|附\s*录|appendix)(?:\s*[\(（].*?[\)）])?\s*$",
+        r"^\s*(?:摘\s*要|中文摘要|英文摘要|ABSTRACT|abstract|目\s*录|table\s+of\s+contents|contents|绪\s*论|引\s*言|前\s*言|结论|参考文献|参考资料|致\s*谢|acknowledg(?:e)?ments?|符号说明|符号表|术语表|symbols?|glossary|附\s*录|appendix|"
+        r"(?:(?:本科|学士|硕士|博士)?(?:学位|毕业)?(?:论文|设计)(?:[（(](?:设计|论文)[）)])?)?\s*"
+        r"(?:(?:诚信|原创性|独创性|学术诚信|郑重)\s*(?:声明|承诺书)|(?:版权使用|使用)?授权书|声明与授权|授权声明|诚信承诺|承诺书|声明))(?:\s*[\(（].*?[\)）])?\s*$",
         re.I,
     )
 

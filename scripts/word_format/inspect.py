@@ -150,15 +150,30 @@ class DocumentIndex:
                 and record["role"] == "body"
             ):
                 record["role"] = "module_body"
+        body_children = list(body)
+        boundary_elem = (
+            self.elements[self.top_ids[boundary]] if boundary is not None and boundary < len(self.top_ids) else None
+        )
+        boundary_idx = (
+            body_children.index(boundary_elem) if boundary_elem in body_children else len(body_children)
+        )
         for i, tbl in enumerate(body.iter(qn("w:tbl"))):
             pid = next((oid for oid, e in self.elements.items() if e is tbl.getparent()), None)
+            tbl_idx = body_children.index(tbl) if tbl in body_children else boundary_idx
+            tbl_module = "cover" if tbl_idx < boundary_idx else None
             self._add(
                 f"t{i}",
                 "table",
                 "word/document.xml",
                 tbl,
-                {"parent_id": pid, "top_level": tbl.getparent() is body},
+                {"parent_id": pid, "top_level": tbl.getparent() is body, "module": tbl_module},
             )
+            if tbl_module == "cover":
+                for p in tbl.iter(qn("w:p")):
+                    p_oid = next((oid for oid, e in self.elements.items() if e is p), None)
+                    if p_oid and p_oid in self.records:
+                        self.records[p_oid]["module"] = "cover"
+                        self.records[p_oid]["role"] = "cover_text"
         for i, section in enumerate(document.sections):
             from .headers import VARIANTS, effective_root
 

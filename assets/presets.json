@@ -155,7 +155,7 @@
       },
       "headers_footers": {
         "preserve_existing": true,
-        "different_first_page": false,
+        "different_first_page": true,
         "header": {
           "enabled": false,
           "text": "",
@@ -176,7 +176,7 @@
         "alignment": "center",
         "format": "number",
         "start": 1,
-        "show_on_first_page": true
+        "show_on_first_page": false
       },
       "table_of_contents": {
         "enabled": true,
@@ -364,7 +364,7 @@
       },
       "headers_footers": {
         "preserve_existing": true,
-        "different_first_page": false,
+        "different_first_page": true,
         "header": {
           "enabled": false,
           "text": "",
@@ -385,7 +385,7 @@
         "alignment": "center",
         "format": "number",
         "start": 1,
-        "show_on_first_page": true
+        "show_on_first_page": false
       },
       "table_of_contents": {
         "enabled": false,

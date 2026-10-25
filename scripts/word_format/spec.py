@@ -608,6 +608,8 @@ def spec_request(index, spec, clear_direct=False):
     tables = spec.get("tables", {})
     for oid, r in index.records.items():
         if r["kind"] == "table":
+            if r.get("module") == "cover":
+                continue
             for key, action in (
                 ("alignment", "table.alignment.set"),
                 ("repeat_header_row", "table.header_repeat.set"),
@@ -616,6 +618,8 @@ def spec_request(index, spec, clear_direct=False):
                 if key in tables:
                     add(action, [oid], {"value": tables[key]})
         if r.get("role") == "table_text":
+            if r.get("module") == "cover":
+                continue
             for action, params in token_operations({k: v for k, v in tables.items() if k in FONT}):
                 add(action, [oid], params)
     hf = spec.get("headers_footers", {})
