@@ -2,7 +2,7 @@
 name: word-format-master
 description: Word 论文与报告自动排版工具。把你的论文和学校格式要求（或排好版的样例文档）交给 AI，即可自动完成字体、段落、页边距、页眉页码、目录与参考文献等格式调整，并逐项复核验收，全程保护原稿安全。
 slug: docx-format-master
-version: 1.0.4
+version: 1.0.5
 displayName: 论文排版大师 (Word/DOCX)
 ---
 
