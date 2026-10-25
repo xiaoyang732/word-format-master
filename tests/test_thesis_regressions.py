@@ -150,6 +150,7 @@ class ThesisRegressionTests(unittest.TestCase):
             "3. 遍历候选文档集合",
             "4. 返回排序后的结果",
             "5. 构造候选结果列表",
+            "6. 对 scores 降序截取前 30 个候选切片 Candidates",
         ):
             with self.subTest(text=text):
                 self.assertIsNone(heading_level(text, "Normal"))
