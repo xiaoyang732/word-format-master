@@ -140,13 +140,16 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
     page_numbers = spec.get("page_numbers", {})
     if page_numbers.get("enabled"):
         location = str(page_numbers.get("location") or "footer")
-        containers = [getattr(section, location) for section in document.sections]
+        from word_format.structures import _find_body_section_index
+        body_idx = _find_body_section_index(document)
+        target_sections = document.sections[body_idx:] if body_idx > 0 else document.sections
+        containers = [getattr(section, location) for section in target_sections]
         if document.settings.odd_and_even_pages_header_footer:
-            containers.extend(getattr(section, f"even_page_{location}") for section in document.sections)
-        if page_numbers.get("show_on_first_page", True):
+            containers.extend(getattr(section, f"even_page_{location}") for section in target_sections)
+        if page_numbers.get("show_on_first_page", True) or body_idx > 0:
             containers.extend(
                 getattr(section, f"first_page_{location}")
-                for section in document.sections
+                for section in target_sections
                 if section.different_first_page_header_footer
             )
         page_field_counts = []

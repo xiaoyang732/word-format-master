@@ -520,6 +520,41 @@ def apply_headers_footers(document: Document, tokens: dict[str, Any]) -> list[st
     return changes
 
 
+TOC_MANAGED_STYLES = {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
+
+
+def _find_body_section_index(document: Document) -> int:
+    """Find the section index where the thesis body starts (e.g. Chapter 1 / 绪论).
+    Returns 0 if no separate body section is detected."""
+    if len(document.sections) <= 1:
+        return 0
+
+    re_body_start = re.compile(
+        r"^\s*(?:第[一1]章|第一篇|绪论|引言|前言|chapter\s+1|introduction)\b",
+        re.I,
+    )
+
+    curr_section = 0
+    for p in document.paragraphs:
+        style_name = paragraph_style_name(document, p._p)
+        if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
+            continue
+        t = p.text.strip()
+        is_h1 = (
+            style_name.lower().startswith("heading 1")
+            or style_name.lower().startswith("标题 1")
+            or style_name.lower() == "heading"
+        )
+        if re_body_start.match(t) or (is_h1 and curr_section > 0):
+            if curr_section > 0:
+                return curr_section
+        sect_pr = p._p.find("./" + qn("w:pPr") + "/" + qn("w:sectPr"))
+        if sect_pr is not None:
+            curr_section += 1
+
+    return 0
+
+
 def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     if not tokens:
         return []
@@ -532,22 +567,50 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     set_style_font(style, tokens)
     set_paragraph_format(style, tokens)
     start = int(tokens.get("start", 1))
-    if document.sections:
-        sect_pr = document.sections[0]._sectPr
+
+    body_idx = _find_body_section_index(document)
+    if body_idx > 0:
+        for i in range(body_idx):
+            sec = document.sections[i]
+            for kind in ("footer", "first_page_footer", "even_page_footer"):
+                container = getattr(sec, kind)
+                container.is_linked_to_previous = False
+                for p in list(container.paragraphs):
+                    clear_paragraph_content(p)
+            sect_pr = sec._sectPr
+            page_type = sect_pr.find(qn("w:pgNumType"))
+            if page_type is not None:
+                sect_pr.remove(page_type)
+
+        sec_body = document.sections[body_idx]
+        for kind in ("footer", "first_page_footer", "even_page_footer"):
+            getattr(sec_body, kind).is_linked_to_previous = False
+        sect_pr = sec_body._sectPr
         page_type = sect_pr.find(qn("w:pgNumType"))
         if page_type is None:
             page_type = OxmlElement("w:pgNumType")
             sect_pr.append(page_type)
         page_type.set(qn("w:start"), str(start))
-        if not tokens.get("show_on_first_page", True):
-            document.sections[0].different_first_page_header_footer = True
+        target_sections = document.sections[body_idx:]
+    else:
+        if document.sections:
+            sect_pr = document.sections[0]._sectPr
+            page_type = sect_pr.find(qn("w:pgNumType"))
+            if page_type is None:
+                page_type = OxmlElement("w:pgNumType")
+                sect_pr.append(page_type)
+            page_type.set(qn("w:start"), str(start))
+            if not tokens.get("show_on_first_page", True):
+                document.sections[0].different_first_page_header_footer = True
+        target_sections = list(document.sections)
+
     containers = []
-    for section in document.sections:
+    for section in target_sections:
         containers.append(getattr(section, location))
         if document.settings.odd_and_even_pages_header_footer:
             containers.append(getattr(section, f"even_page_{location}"))
-    if tokens.get("show_on_first_page", True):
-        for section in document.sections:
+    if tokens.get("show_on_first_page", True) or body_idx > 0:
+        for section in target_sections:
             if section.different_first_page_header_footer:
                 containers.append(getattr(section, f"first_page_{location}"))
     seen: set[int] = set()
@@ -580,9 +643,6 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
         f"Reused {reused} existing standalone page-number paragraph(s)",
         f"Inserted PAGE field(s) in {len(seen)} unique {location} part(s), starting at {start}",
     ]
-
-
-TOC_MANAGED_STYLES = {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
 
 
 def _remove_managed_toc(document: Document) -> int:
@@ -635,6 +695,9 @@ def _find_toc_insertion_anchor(document: Document):
             placeholder_toc_p = p
             break
 
+    if placeholder_toc_p is not None:
+        return placeholder_toc_p, placeholder_toc_p
+
     state = "SEEKING_ABSTRACT"
     anchor_p = None
 
@@ -686,10 +749,23 @@ def _find_toc_insertion_anchor(document: Document):
             anchor_p = p
             break
 
-    if placeholder_toc_p is not None and anchor_p is None:
-        anchor_p = placeholder_toc_p
-    elif anchor_p is None and state == "SEEKING_ABSTRACT":
+    if anchor_p is None and state == "SEEKING_ABSTRACT":
         anchor_p = paragraphs[0] if paragraphs else None
+
+    # If anchor_p was found in a subsequent section (e.g. Chapter 1 in body),
+    # check if there is an intervening section break paragraph before anchor_p.
+    # Inserting before the section break keeps TOC inside the front-matter section!
+    if anchor_p is not None:
+        prev_xml = anchor_p._p.getprevious()
+        while prev_xml is not None and prev_xml.tag == qn("w:p"):
+            sect_pr = prev_xml.find("./" + qn("w:pPr") + "/" + qn("w:sectPr"))
+            if sect_pr is not None:
+                from docx.text.paragraph import Paragraph as DocxParagraph
+                anchor_p = DocxParagraph(prev_xml, document)
+                break
+            if prev_xml.find(".//" + qn("w:t")) is not None:
+                break
+            prev_xml = prev_xml.getprevious()
 
     return anchor_p, placeholder_toc_p
 
@@ -720,71 +796,101 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
     anchor_p, placeholder_toc_p = _find_toc_insertion_anchor(document)
     anchor_xml = anchor_p._p if anchor_p is not None else None
 
-    # Check if there is preceding content before the TOC (e.g. abstract / keywords / cover)
-    # and ensure there is a page break on the last page of the abstract so TOC and abstract are on separate pages.
-    has_preceding_content = False
-    if anchor_xml is not None:
-        prev = anchor_xml.getprevious()
-        while prev is not None:
-            if prev.tag == qn("w:p"):
-                has_preceding_content = True
-                break
-            prev = prev.getprevious()
-    elif len(document.paragraphs) > 0:
-        has_preceding_content = True
-
-    if has_preceding_content:
-        prev_p = (
-            anchor_xml.getprevious()
-            if anchor_xml is not None
-            else (document.paragraphs[-1]._p if document.paragraphs else None)
+    if placeholder_toc_p is not None:
+        title_paragraph = placeholder_toc_p
+        clear_paragraph_content(title_paragraph)
+        title_paragraph.style = heading_style
+        title_paragraph.add_run(title)
+        insert_target = title_paragraph._p.getnext()
+        field_paragraph = _insert_body_paragraph_before(document, insert_target, field_style)
+        cached_entries = []
+        for paragraph in document.paragraphs:
+            style_name = paragraph_style_name(document, paragraph._p)
+            if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
+                continue
+            text = paragraph.text.strip()
+            if not text:
+                continue
+            if re.match(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", text, re.I):
+                continue
+            match = re.fullmatch(r"Heading ([1-9])", style_name, re.I)
+            if match and int(match.group(1)) <= max_level:
+                level = int(match.group(1))
+                indent = "  " * (level - 1)
+                cached_entries.append(f"{indent}{text}")
+        append_field(
+            field_paragraph,
+            f'TOC \\o "1-{max_level}" \\h \\z \\u',
+            cached_text="\n".join(cached_entries) or "目录将在 Word 中更新",
         )
-        prev_has_break = False
-        while prev_p is not None:
-            if prev_p.tag == qn("w:p"):
-                for br in prev_p.iter(qn("w:br")):
-                    if br.get(qn("w:type")) == "page":
+        if tokens.get("page_break_after", True):
+            break_paragraph = _insert_body_paragraph_before(
+                document, field_paragraph._p.getnext(), break_style
+            )
+            break_paragraph.add_run().add_break(WD_BREAK.PAGE)
+    else:
+        # Check if there is preceding content before the TOC (e.g. abstract / keywords / cover)
+        # and ensure there is a page break on the last page of the abstract so TOC and abstract are on separate pages.
+        has_preceding_content = False
+        if anchor_xml is not None:
+            prev = anchor_xml.getprevious()
+            while prev is not None:
+                if prev.tag == qn("w:p"):
+                    has_preceding_content = True
+                    break
+                prev = prev.getprevious()
+        elif len(document.paragraphs) > 0:
+            has_preceding_content = True
+
+        if has_preceding_content:
+            prev_p = (
+                anchor_xml.getprevious()
+                if anchor_xml is not None
+                else (document.paragraphs[-1]._p if document.paragraphs else None)
+            )
+            prev_has_break = False
+            while prev_p is not None:
+                if prev_p.tag == qn("w:p"):
+                    for br in prev_p.iter(qn("w:br")):
+                        if br.get(qn("w:type")) == "page":
+                            prev_has_break = True
+                            break
+                    pPr = prev_p.find(qn("w:pPr"))
+                    if pPr is not None and pPr.find(qn("w:pageBreakBefore")) is not None:
                         prev_has_break = True
-                        break
-                pPr = prev_p.find(qn("w:pPr"))
-                if pPr is not None and pPr.find(qn("w:pageBreakBefore")) is not None:
-                    prev_has_break = True
-                break
-            prev_p = prev_p.getprevious()
+                    break
+                prev_p = prev_p.getprevious()
 
-        if not prev_has_break:
-            leading_break = _insert_body_paragraph_before(document, anchor_xml, break_style)
-            leading_break.add_run().add_break(WD_BREAK.PAGE)
+            if not prev_has_break:
+                leading_break = _insert_body_paragraph_before(document, anchor_xml, break_style)
+                leading_break.add_run().add_break(WD_BREAK.PAGE)
 
-    title_paragraph = _insert_body_paragraph_before(document, anchor_xml, heading_style)
-    title_paragraph.add_run(title)
-    field_paragraph = _insert_body_paragraph_before(document, anchor_xml, field_style)
-    cached_entries = []
-    for paragraph in document.paragraphs:
-        style_name = paragraph_style_name(document, paragraph._p)
-        if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
-            continue
-        text = paragraph.text.strip()
-        if not text:
-            continue
-        if re.match(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", text, re.I):
-            continue
-        match = re.fullmatch(r"Heading ([1-9])", style_name, re.I)
-        if match and int(match.group(1)) <= max_level:
-            level = int(match.group(1))
-            indent = "  " * (level - 1)
-            cached_entries.append(f"{indent}{text}")
-    append_field(
-        field_paragraph,
-        f'TOC \\o "1-{max_level}" \\h \\z \\u',
-        cached_text="\n".join(cached_entries) or "目录将在 Word 中更新",
-    )
-    if tokens.get("page_break_after", True):
-        break_paragraph = _insert_body_paragraph_before(document, anchor_xml, break_style)
-        break_paragraph.add_run().add_break(WD_BREAK.PAGE)
-
-    if placeholder_toc_p is not None and placeholder_toc_p._p.getparent() is not None:
-        placeholder_toc_p._p.getparent().remove(placeholder_toc_p._p)
+        title_paragraph = _insert_body_paragraph_before(document, anchor_xml, heading_style)
+        title_paragraph.add_run(title)
+        field_paragraph = _insert_body_paragraph_before(document, anchor_xml, field_style)
+        cached_entries = []
+        for paragraph in document.paragraphs:
+            style_name = paragraph_style_name(document, paragraph._p)
+            if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
+                continue
+            text = paragraph.text.strip()
+            if not text:
+                continue
+            if re.match(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", text, re.I):
+                continue
+            match = re.fullmatch(r"Heading ([1-9])", style_name, re.I)
+            if match and int(match.group(1)) <= max_level:
+                level = int(match.group(1))
+                indent = "  " * (level - 1)
+                cached_entries.append(f"{indent}{text}")
+        append_field(
+            field_paragraph,
+            f'TOC \\o "1-{max_level}" \\h \\z \\u',
+            cached_text="\n".join(cached_entries) or "目录将在 Word 中更新",
+        )
+        if tokens.get("page_break_after", True):
+            break_paragraph = _insert_body_paragraph_before(document, anchor_xml, break_style)
+            break_paragraph.add_run().add_break(WD_BREAK.PAGE)
 
     mark_fields_for_update(document)
     break_note = " and page break" if tokens.get("page_break_after", True) else ""
