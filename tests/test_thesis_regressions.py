@@ -1,23 +1,25 @@
 """Regressions from the thesis generation trial (fixtures only, no user files)."""
 
-from pathlib import Path
 import copy
 import json
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt, RGBColor
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from document_structure import heading_level
-from word_format import apply_plan, build_plan, verify_plan
-from word_format.properties import read_font, read_paragraph
+from document_structure import heading_level  # noqa: E402
+from word_format import apply_plan, build_plan, verify_plan  # noqa: E402
+from word_format.properties import read_font, read_paragraph  # noqa: E402
+from word_format.spec import _has_soft_break  # noqa: E402
 
 
 class ThesisRegressionTests(unittest.TestCase):
@@ -140,6 +142,53 @@ class ThesisRegressionTests(unittest.TestCase):
         out = Document(self.output)
         self.assertEqual(out.paragraphs[2].style.name, "Heading 3")
         self.assertEqual(out.paragraphs[3].style.name, "Heading 4")
+
+    def test_numbered_algorithm_steps_are_not_inferred_as_headings(self):
+        for text in (
+            "1. scores[c] = {}",
+            "2. 初始化得分字典 scores = {}",
+            "3. 遍历候选文档集合",
+            "4. 返回排序后的结果",
+            "5. 构造候选结果列表",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(heading_level(text, "Normal"))
+        self.assertEqual(heading_level("1. 核心设计", "Normal"), 1)
+        self.assertEqual(heading_level("1.2 系统架构", "Normal"), 2)
+        # Explicit heading semantics remain authoritative over the text heuristic.
+        self.assertEqual(heading_level("1. 初始化流程", "Heading 3"), 3)
+
+    def test_justified_manual_line_break_is_left_aligned_but_page_break_is_not(self):
+        doc = Document()
+        doc.add_paragraph("第一章 绪论", style="Heading 1")
+
+        manual_break = doc.add_paragraph()
+        manual_break.add_run('data: {"type": "token",')
+        manual_break.add_run().add_break(WD_BREAK.LINE)
+        manual_break.add_run('"content": "检索"}')
+
+        page_break = doc.add_paragraph()
+        page_break.add_run("Before page break")
+        page_break.add_run().add_break(WD_BREAK.PAGE)
+        page_break.add_run("After page break")
+
+        doc.add_paragraph("普通正文段落。")
+        doc.save(self.source)
+        plan = build_plan(
+            self.source,
+            self.output,
+            {"spec": {"body": {"alignment": "justify"}}},
+        )
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["status"], "passed")
+
+        out = Document(self.output)
+        self.assertEqual(out.paragraphs[1].paragraph_format.alignment, WD_ALIGN_PARAGRAPH.LEFT)
+        self.assertFalse(_has_soft_break(out.paragraphs[2]._p))
+        self.assertFalse(_has_soft_break(out.paragraphs[3]._p))
+        self.assertIsNone(out.paragraphs[2].paragraph_format.alignment)
+        self.assertEqual(out.styles["Normal"].paragraph_format.alignment, WD_ALIGN_PARAGRAPH.JUSTIFY)
+        self.assertIsNone(out.paragraphs[3].paragraph_format.alignment)
 
     def test_batching_retains_global_rules_and_module_overrides(self):
         doc = Document()

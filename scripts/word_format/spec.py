@@ -10,6 +10,7 @@ from config import LIST_NUMBERING_STYLES
 from document_structure import validate_module_order
 
 from .contracts import FormatError, boolean, number, require_keys, text_value
+from .namespaces import qn
 
 FONT = {
     "font_east_asia": "font.east_asia.set",
@@ -44,6 +45,23 @@ PAGE = {
     "header_distance_mm": "page.header_distance.set",
     "footer_distance_mm": "page.footer_distance.set",
 }
+
+
+def _has_soft_break(element):
+    """Return whether a paragraph contains a manual line break.
+
+    A page break is a layout instruction and does not trigger Word's
+    justification behaviour, so it is intentionally excluded. The planner
+    works with indexed OOXML nodes rather than high-level ``python-docx``
+    paragraph wrappers, so this check stays at the XML level.
+    """
+    br_tag = qn("w:br")
+    cr_tag = qn("w:cr")
+    type_attr = qn("w:type")
+    return any(
+        node.tag == cr_tag or (node.tag == br_tag and node.get(type_attr) != "page")
+        for node in element.iter()
+    )
 
 
 def token_operations(tokens):
@@ -547,6 +565,15 @@ def spec_request(index, spec, clear_direct=False):
         merged.update(tokens)
     for oid, tokens in effective.items():
         for action, params in token_operations(tokens):
+            # Word/WPS stretches every non-final line when a justified
+            # paragraph contains manual line breaks. Preserve the requested
+            # body formatting while making this exceptional case render safely.
+            if (
+                action == "paragraph.alignment.set"
+                and params.get("value") == "justify"
+                and _has_soft_break(index.elements[oid])
+            ):
+                params = {"value": "left"}
             add(action, [oid], params)
     # Global named styles mirror the explicit global rules; direct target writes
     # above ensure that existing overrides cannot hide the requested format.

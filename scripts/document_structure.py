@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-
 MODULE_ORDER = (
     "cover",
     "declaration",
@@ -45,6 +44,29 @@ _CHAPTER_RE = re.compile(r"^\s*(?:第\s*[一二三四五六七八九十百零〇
 _LEVEL2_RE = re.compile(r"^\s*\d+\.\d+(?:[、.．]\s*|\s+)(.+)$")
 _LEVEL3_RE = re.compile(r"^\s*\d+\.\d+\.\d+(?:[、.．]\s*|\s+)(.+)$")
 
+# Numeric prefixes are common in both headings and ordinary numbered lists.
+# Keep the text heuristic conservative so an algorithm step such as
+# ``1. scores[c] = ...`` cannot become a chapter heading. Explicit heading
+# styles and outline levels are handled before this heuristic and remain
+# authoritative.
+_CODE_OR_ALGORITHM_RE = re.compile(
+    r"(?:[{}\[\];]|\b(?:for|while|if|else|return|import|from|def|class|const|let|var)\b|"
+    r"\b[A-Za-z_]\w*\s*(?:\+=|-=|\*=|/=|:=|==|=>|->|=))",
+    re.I,
+)
+_NUMBERED_ACTION_RE = re.compile(
+    r"^(?:初始化|遍历|构造(?:\s+|(?=[A-Za-z\u4e00-\u9fff]))|"
+    r"调用(?:\s+|(?=[A-Za-z\u4e00-\u9fff]))|返回(?:\s+|(?=[A-Za-z\u4e00-\u9fff]))|"
+    r"按.{0,40}(?:排序|排列|截取|筛选|返回)|"
+    r"依据.{0,40}(?:排序|排列|截取|筛选|返回)|"
+    r"根据.{0,40}(?:排序|排列|截取|筛选|返回))"
+)
+_MEASUREMENT_PREFIX_RE = re.compile(
+    r"^\s*\d+(?:\.\d+)?\s*(?:倍(?:行距)?|%|％|毫秒|秒|分钟|小时|"
+    r"(?:cm|mm|ms|px)(?![A-Za-z]))",
+    re.I,
+)
+
 
 def normalized_style_name(value: Any) -> str:
     return re.sub(r"\s+", "", str(value or "")).lower()
@@ -64,6 +86,8 @@ def heading_level(text: str, style_name: str = "", outline_level: int | None = N
         return int(match.group(1))
     if normalized in {"title", "subtitle"} or normalized.startswith(("toc", "wfmtoc")) or "list" in normalized or "caption" in normalized:
         return None
+    if _MEASUREMENT_PREFIX_RE.match(text):
+        return None
     # Text alone is weaker evidence than an explicit heading style. Chapter
     # summaries, sentences, decimal measurements and TOC lines are not headings.
     for level, pattern in ((3, _LEVEL3_RE), (2, _LEVEL2_RE), (1, _CHAPTER_RE)):
@@ -71,7 +95,10 @@ def heading_level(text: str, style_name: str = "", outline_level: int | None = N
         if match:
             title = match.group(1).strip()
             if (len(title) <= 80 and not title[0].isdigit() and not title.startswith((".", "．"))
-                    and not re.search(r"[:：。；;！？!?\t]|\.{2,}|…", title) and not title.endswith(".")):
+                    and not re.search(r"[:：。；;！？!?\t]|\.{2,}|…", title)
+                    and not title.endswith(".")
+                    and not _CODE_OR_ALGORITHM_RE.search(title)
+                    and not _NUMBERED_ACTION_RE.match(title)):
                 return level
             return None
     return None
