@@ -9,12 +9,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-# 定位当前项目目录与工具路径。不要依赖某台机器的 WorkBuddy 安装目录。
-SKILL_DIR = Path(__file__).resolve().parent
+# 定位当前项目目录与工具路径。
+SCRIPTS_DIR = Path(__file__).resolve().parent
+SKILL_DIR = SCRIPTS_DIR.parent
 PRESETS_PATH = SKILL_DIR / "assets" / "presets.json"
-FORMAT_CLI = SKILL_DIR / "scripts" / "format_cli.py"
-RENDER_DOCX = SKILL_DIR / "scripts" / "render_docx.py"
-THESIS_QUALITY = SKILL_DIR / "scripts" / "thesis_quality.py"
+FORMAT_CLI = SCRIPTS_DIR / "format_cli.py"
+RENDER_DOCX = SCRIPTS_DIR / "render_docx.py"
+THESIS_QUALITY = SCRIPTS_DIR / "thesis_quality.py"
 
 OUTPUT_DIR = SKILL_DIR / "output"
 

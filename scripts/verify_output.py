@@ -164,7 +164,11 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         containers = [getattr(section, location) for section in target_sections]
         if document.settings.odd_and_even_pages_header_footer:
             containers.extend(getattr(section, f"even_page_{location}") for section in target_sections)
-        if page_numbers.get("show_on_first_page", True) or body_idx > 0:
+        if body_idx > 0:
+            show_first = page_numbers.get("show_on_body_first_page", True)
+        else:
+            show_first = page_numbers.get("show_on_first_page", True)
+        if show_first:
             containers.extend(
                 getattr(section, f"first_page_{location}")
                 for section in target_sections

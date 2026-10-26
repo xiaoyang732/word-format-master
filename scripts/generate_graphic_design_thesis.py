@@ -5,7 +5,13 @@
 """
 
 import os
+import sys
 from pathlib import Path
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
 from docx import Document
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import qn, nsdecls
@@ -688,7 +694,8 @@ def build_graphic_design_thesis():
     )
 
     # 保存初稿文档
-    output_path = Path('output/生成式人工智能视域下现代平面设计的视觉语言重构与人机协同范式研究-初稿.docx')
+    root_dir = Path(__file__).resolve().parent.parent
+    output_path = root_dir / 'output' / '生成式人工智能视域下现代平面设计的视觉语言重构与人机协同范式研究-初稿.docx'
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
     print(f'Graphic design thesis draft generated successfully at: {output_path.resolve()}')

@@ -284,11 +284,12 @@ def validate_section(section, data):
                 "format",
                 "start",
                 "show_on_first_page",
+                "show_on_body_first_page",
                 "prefix",
                 "total_separator",
             },
         )
-        for key in ("enabled", "show_on_first_page"):
+        for key in ("enabled", "show_on_first_page", "show_on_body_first_page"):
             if key in data:
                 boolean(data[key], key)
         for key, choices in (
@@ -943,6 +944,7 @@ def legacy_paths():
             "keywords.label_bold": "font.bold.set on keyword label text range",
             "keywords.value_bold": "font.bold.set on keyword value text range",
             "table_of_contents.title_style": "TOC heading paragraph style",
+            "page_numbers.show_on_body_first_page": "page numbers on thesis body first page",
         }
     )
     for prefix in (

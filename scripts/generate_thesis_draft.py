@@ -5,7 +5,13 @@
 """
 
 import os
+import sys
 from pathlib import Path
+
+_SCRIPTS_DIR = Path(__file__).resolve().parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
@@ -759,7 +765,8 @@ def build_thesis():
     )
     
     # 保存文档
-    output_path = Path('output/基于检索增强生成的领域知识问答系统-初稿.docx')
+    root_dir = Path(__file__).resolve().parent.parent
+    output_path = root_dir / 'output' / '基于检索增强生成的领域知识问答系统-初稿.docx'
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
     print(f'Thesis draft generated successfully at: {output_path.resolve()}')

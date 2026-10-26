@@ -621,7 +621,11 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
         containers.append(getattr(section, location))
         if document.settings.odd_and_even_pages_header_footer:
             containers.append(getattr(section, f"even_page_{location}"))
-    if tokens.get("show_on_first_page", True) or body_idx > 0:
+    if body_idx > 0:
+        show_first = tokens.get("show_on_body_first_page", True)
+    else:
+        show_first = tokens.get("show_on_first_page", True)
+    if show_first:
         for section in target_sections:
             if section.different_first_page_header_footer:
                 containers.append(getattr(section, f"first_page_{location}"))

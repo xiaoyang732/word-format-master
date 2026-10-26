@@ -302,6 +302,38 @@ class ThesisRegressionTests(unittest.TestCase):
         self.assertIn("不启用页眉", thesis["notes"][5])
         self.assertFalse(thesis["headers_footers"]["header"]["enabled"])
 
+    def test_thesis_body_page_numbers_support_explicit_first_page_override(self):
+        doc = Document()
+        doc.add_paragraph("封面")
+        doc.add_section(WD_SECTION_START.NEW_PAGE)
+        doc.add_paragraph("摘要", style="Heading 1")
+        doc.add_section(WD_SECTION_START.NEW_PAGE)
+        sec = doc.add_section(WD_SECTION_START.NEW_PAGE)
+        sec.different_first_page_header_footer = True
+        doc.add_paragraph("第一章 绪论", style="Heading 1")
+        doc.add_paragraph("正文第一页。")
+        doc.save(self.source)
+
+        spec = {
+            "page_numbers": {
+                "enabled": True,
+                "location": "footer",
+                "start": 1,
+                "show_on_body_first_page": False,
+            }
+        }
+        plan = build_plan(self.source, self.output, {"spec": spec})
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["status"], "passed")
+        output = Document(self.output)
+        body_sec = output.sections[2]
+        first_codes = [
+            n.text or ""
+            for p in body_sec.first_page_footer.paragraphs
+            for n in p._p.iter(qn("w:instrText"))
+        ]
+        self.assertFalse(any("PAGE" in c for c in first_codes))
+
     def test_batching_retains_global_rules_and_module_overrides(self):
         doc = Document()
         doc.add_paragraph("摘要")
