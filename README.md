@@ -118,7 +118,6 @@ word-format-master/
 │   ├── verify_output.py      # 输出文档结构与格式复核工具
 │   ├── thesis_quality.py     # 正文长度、数字引用映射与人工内容核验状态报告
 │   └── word_format/          # 底层确定性排版核心库（63 项标准格式操作算子）
-├── tests/                    # 自动化单元测试集
 └── references/               # 详细接口规范与进阶参考文档
 ```
 
@@ -171,13 +170,13 @@ python scripts/render_docx.py "论文-排版后.docx" --output-dir render --meth
 
 ## 五、 开发验证与进阶文档
 
+> 本项目将自动化测试与开发配置归档于 `_dev/` 目录（配置于 `.gitignore`，不提交至生产包）：
+
 ```powershell
-python -m pip install -r requirements-dev.txt -i https://mirrors.cloud.tencent.com/pypi/simple
-python -m ruff check scripts/word_format scripts/apply_spec.py scripts/format_cli.py
-python -m ruff format --check scripts/word_format scripts/apply_spec.py scripts/format_cli.py
-python scripts/validate_project.py
-python scripts/smoke_test.py
-python -m unittest discover -s tests -v
+# 本地开发回归测试与算子校验（需在包含 _dev/ 的本地环境下执行）
+python _dev/scripts/validate_project.py
+python _dev/scripts/smoke_test.py
+python -m unittest discover -s _dev/tests -v
 ```
 
 - [Skill 工作流说明](SKILL.md)

@@ -13,3 +13,7 @@ htmlcov/
 *.log
 .DS_Store
 Thumbs.db
+output/
+
+# Development and testing assets (local only, do not commit to GitHub / SkillHub)
+_dev/
