@@ -51,7 +51,9 @@
         "font_east_asia": "宋体",
         "font_size_pt": 12,
         "alignment": "left",
-        "first_line_indent_chars": 0
+        "first_line_indent_chars": 0,
+        "label_bold": true,
+        "value_bold": false
       },
       "lists": {
         "headings": {
@@ -182,7 +184,17 @@
         "enabled": true,
         "title": "目　　录",
         "max_heading_level": 3,
-        "page_break_after": true
+        "page_break_after": true,
+        "title_style": {
+          "font_east_asia": "黑体",
+          "font_latin": "Times New Roman",
+          "font_size_pt": 16,
+          "bold": true,
+          "alignment": "center",
+          "space_before_pt": 0,
+          "space_after_pt": 8,
+          "keep_with_next": true
+        }
       },
       "references": {
         "citation_system": "GB/T 7714-2015",
@@ -205,7 +217,7 @@
         "正文排版：中文小四号宋体（12pt），西文小四号 Times New Roman，1.5 倍行距，段前段后 0 磅，首行缩进 2 字符（7.4mm），两端对齐。",
         "标题层级：一级标题（章）三号（16pt）黑体居中加粗，1.5 倍行距，段前 18 磅、段后 12 磅；二级标题（节）四号（14pt）黑体左对齐加粗，1.5 倍行距，段前 12 磅、段后 6 磅；三级标题（小节）小四号（12pt）黑体左对齐加粗，1.5 倍行距，段前 6 磅、段后 6 磅；各级标题支持独立控制首行缩进。",
         "编号规范：目录、绪论、摘要等前置模块不进行章节多级编号，多级章节编号从目录后正文第一章开始（第1章/第一章）。",
-        "页码规范：封面、摘要、目录等前置模块不编页码，正文（从目录后面第一章起）开始编页码，从第 1 页开始；页眉居中宋体小五号'毕业设计（论文）'，页脚设置阿拉伯数字页码居中。",
+        "页码规范：封面、摘要、目录等前置模块不编页码，正文（从目录后面第一章起）开始编页码，从第 1 页开始；本预设默认不启用页眉，页脚设置阿拉伯数字页码居中；如学校要求页眉，请在请求中显式设置 headers_footers.header。",
         "图表规范：图名在图下，表名在表上（标准三线表），文字五号宋体/Times New Roman（10.5pt），居中对齐，段前段后 6 磅。",
         "目录规范：标题'目　　录'（黑体三号居中），按三级标题生成，正文小四号宋体，1.5 倍行距；目录本身不参与编号与目录项索引。",
         "参考文献：采用 GB/T 7714-2015 顺序编码制，正文五号宋体/Times New Roman（10.5pt），单倍行距，悬挂缩进 2 字符（7.4mm）。"

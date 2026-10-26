@@ -33,6 +33,15 @@ PARA = {
 INDENTS = ("first_line_indent", "left_indent", "right_indent", "hanging_indent")
 META = {"style_name", "source_style_id", "numbering"}
 TOKENS = set(FONT) | set(PARA) | {f"{n}_{unit}" for n in INDENTS for unit in ("mm", "chars")}
+KEYWORD_STYLE_TOKENS = {"label_bold", "value_bold"}
+DEFAULT_TOC_TITLE_STYLE = {
+    "bold": True,
+    "font_size_pt": 14,
+    "alignment": "center",
+    "space_before_pt": 0,
+    "space_after_pt": 8,
+    "keep_with_next": True,
+}
 PAGE = {
     "width_mm": "page.width.set",
     "height_mm": "page.height.set",
@@ -138,6 +147,33 @@ def validate_tokens(tokens, extra=frozenset()):
         if key.endswith("_mm") or key.endswith("_chars"):
             number(tokens[key], -500 if key.startswith("first_line") else 0, 500, key)
     list(token_operations(tokens))
+
+
+def validate_keyword_tokens(tokens):
+    validate_tokens(tokens, KEYWORD_STYLE_TOKENS)
+    for key in KEYWORD_STYLE_TOKENS & tokens.keys():
+        if tokens[key] is not None:
+            boolean(tokens[key], f"keywords.{key}")
+    if "bold" in tokens and any(key in tokens for key in KEYWORD_STYLE_TOKENS):
+        raise FormatError(
+            "Choose whole-line keywords.bold or label/value bold controls, not both"
+        )
+
+
+def keyword_text_ranges(text):
+    """Return the label and value character ranges for a conventional keyword line."""
+    match = re.match(r"^\s*(?P<label>关键词|key\s*words?)\s*(?P<colon>[:：])?", text, re.I)
+    if not match:
+        return None
+    label_start = match.start("label")
+    label_end = match.end("colon") if match.group("colon") else match.end("label")
+    value_start = match.end()
+    while value_start < len(text) and text[value_start].isspace():
+        value_start += 1
+    return {
+        "label": (label_start, label_end),
+        "value": (value_start, len(text)),
+    }
 
 
 def validate_section(section, data):
@@ -268,7 +304,9 @@ def validate_section(section, data):
                 text_value(data[key], key, True)
     elif section == "table_of_contents":
         require_keys(
-            data, {"enabled", "title", "max_heading_level", "page_break_after"}, label=section
+            data,
+            {"enabled", "title", "max_heading_level", "page_break_after", "title_style"},
+            label=section,
         )
         for key in ("enabled", "page_break_after"):
             if key in data:
@@ -277,6 +315,8 @@ def validate_section(section, data):
             text_value(data["title"], "title")
         if "max_heading_level" in data:
             number(data["max_heading_level"], 1, 9, "max_heading_level", True)
+        if "title_style" in data:
+            validate_tokens(data["title_style"])
     elif section == "numbered":
         require_keys(data, {"style", "start", "left_indent_mm", "hanging_indent_mm"}, label=section)
         if "style" in data and data["style"] not in LIST_NUMBERING_STYLES:
@@ -377,7 +417,7 @@ def validate_spec(spec):
     if "title" in spec:
         validate_tokens(spec["title"])
     if "keywords" in spec:
-        validate_tokens(spec["keywords"])
+        validate_keyword_tokens(spec["keywords"])
     for section in (
         "page",
         "body",
@@ -454,8 +494,12 @@ def validate_spec(spec):
     if errors:
         raise FormatError("; ".join(errors))
     for module in modules:
-        for role in module.get("style_roles", {}).values():
-            validate_tokens(role.get("tokens", {}))
+        for role_name, role in module.get("style_roles", {}).items():
+            tokens = role.get("tokens", {})
+            if module.get("kind") == "keywords" and role_name == "keywords":
+                validate_keyword_tokens(tokens)
+            else:
+                validate_tokens(tokens)
 
 
 def spec_request(index, spec, clear_direct=False):
@@ -492,6 +536,10 @@ def spec_request(index, spec, clear_direct=False):
     modules = spec.get("document_structure", {}).get("ordered_modules", [])
     for oid, r in index.records.items():
         if r["kind"] != "paragraph" or r["part"] != "word/document.xml":
+            continue
+        if r.get("module") == "toc" and spec.get("table_of_contents", {}).get("enabled"):
+            # The TOC operation owns both placeholder and generated title styling.
+            # Assigning a generic Heading style first creates competing writes.
             continue
         matching = [m for m in modules if m.get("kind") == r.get("module")]
         occurrence = max(0, r.get("module_occurrence", 1) - 1)
@@ -575,6 +623,25 @@ def spec_request(index, spec, clear_direct=False):
             ):
                 params = {"value": "left"}
             add(action, [oid], params)
+    for oid, tokens in effective.items():
+        record = index.records.get(oid, {})
+        if record.get("role") != "keywords":
+            continue
+        ranges = keyword_text_ranges(record.get("text", ""))
+        if not ranges:
+            continue
+        for part in ("label", "value"):
+            option = part + "_bold"
+            span = ranges[part]
+            if option not in tokens or span[0] >= span[1]:
+                continue
+            operations.append(
+                {
+                    "action": "font.bold.set",
+                    "target": {"type": "text_range", "id": oid, "start": span[0], "end": span[1]},
+                    "params": {"value": tokens[option]},
+                }
+            )
     # Global named styles mirror the explicit global rules; direct target writes
     # above ensure that existing overrides cannot hide the requested format.
     for name, tokens in (
@@ -869,6 +936,13 @@ def legacy_paths():
             "headers_footers.footer.text": "header_footer.configure",
             "document_structure": "module role selectors expanded into registered properties",
             "clear_direct_font_formatting": "requested property overrides only",
+        }
+    )
+    paths.update(
+        {
+            "keywords.label_bold": "font.bold.set on keyword label text range",
+            "keywords.value_bold": "font.bold.set on keyword value text range",
+            "table_of_contents.title_style": "TOC heading paragraph style",
         }
     )
     for prefix in (

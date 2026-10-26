@@ -530,7 +530,8 @@ def _find_body_section_index(document: Document) -> int:
         return 0
 
     re_body_start = re.compile(
-        r"^\s*(?:第[一1]章|第一篇|绪论|引言|前言|chapter\s+1|introduction)\b",
+        r"^\s*(?:第\s*[一二三四五六七八九十百零〇0-9]+\s*章|第一篇|"
+        r"绪论|引言|前言|chapter\s+1\b|introduction\b)",
         re.I,
     )
 
@@ -540,12 +541,23 @@ def _find_body_section_index(document: Document) -> int:
         if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
             continue
         t = p.text.strip()
-        is_h1 = (
+        explicit_heading = (
             style_name.lower().startswith("heading 1")
             or style_name.lower().startswith("标题 1")
             or style_name.lower() == "heading"
         )
-        if re_body_start.match(t) or (is_h1 and curr_section > 0):
+        inferred_heading = False
+        if not explicit_heading:
+            from document_structure import heading_level
+
+            from .properties import outline_level
+
+            inferred_heading = heading_level(t, style_name, outline_level(document, p._p)) == 1
+        plain_intro_heading = t.casefold() in {"绪论", "引言", "前言", "introduction"}
+        # A semantic Heading 1 is common in abstracts and front matter too.
+        # Only a recognizable first-body marker can select the page-numbering
+        # section; arbitrary Heading 1 paragraphs must not move the boundary.
+        if re_body_start.match(t) and (explicit_heading or inferred_heading or plain_intro_heading):
             if curr_section > 0:
                 return curr_section
         sect_pr = p._p.find("./" + qn("w:pPr") + "/" + qn("w:sectPr"))
@@ -779,17 +791,17 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
 
     title = str(tokens.get("title") or "目录")
     max_level = int(tokens.get("max_heading_level", 3))
+    from .spec import DEFAULT_TOC_TITLE_STYLE
+
+    title_style_tokens = tokens.get("title_style") or DEFAULT_TOC_TITLE_STYLE
     heading_style = get_or_create_paragraph_style(document, "WFM TOC Heading")
     field_style = get_or_create_paragraph_style(document, "WFM TOC Field")
     break_style = get_or_create_paragraph_style(document, "WFM TOC Break")
     for style in (heading_style, field_style, break_style):
         if style.base_style is None:
             style.base_style = get_or_create_paragraph_style(document, "Normal")
-    set_style_font(heading_style, {"bold": True, "font_size_pt": 14})
-    set_paragraph_format(
-        heading_style,
-        {"alignment": "center", "space_before_pt": 0, "space_after_pt": 8, "keep_with_next": True},
-    )
+    set_style_font(heading_style, title_style_tokens)
+    set_paragraph_format(heading_style, title_style_tokens)
     set_paragraph_format(field_style, {"space_before_pt": 0, "space_after_pt": 8})
     set_paragraph_format(break_style, {"space_before_pt": 0, "space_after_pt": 0})
 

@@ -57,6 +57,28 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 
 `ordinal` 是过滤后非空段落的 1 起始序号。`p0` 等 ID 包含空段落和表格段落，必须来自当前 inspect，不应由 AI 猜测。未明确 ID、part、table_id 的普通段落选择只包含顶层段落。字符 start/end 为当前段落可见文字的 0 起始、左闭右开区间；重复 quote 必须给 1 起始 occurrence。存在域、绘图、制表符、换行或修订的复杂文字范围会拒绝。页面位置选择需要渲染锚点，目前不支持。
 
+旧规范可独立控制关键词标签与词条的粗体，并设置目录标题样式：
+
+```json
+{
+  "spec": {
+    "keywords": {"label_bold": true, "value_bold": false},
+    "table_of_contents": {
+      "enabled": true,
+      "title": "目录",
+      "title_style": {
+        "font_east_asia": "黑体",
+        "font_size_pt": 16,
+        "bold": true,
+        "alignment": "center"
+      }
+    }
+  }
+}
+```
+
+`label_bold` 仅作用于段首的 `关键词：` / `Key words:` 标签，`value_bold` 作用于标签后的词条。省略两个字段时不改变现有粗体；不要同时使用整段 `keywords.bold` 与局部粗体字段。`table_of_contents.title_style` 的字号、字体和段落属性会在 DOCX 回读时检查。
+
 ## 能力与代码对应
 
 `capabilities` 返回每项操作的 action、handler、validator、reader、verifier、参数、允许范围和测试文件。注册表位于 `registry.py`，入口只能执行已登记 action。

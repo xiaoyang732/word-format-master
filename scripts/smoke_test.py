@@ -43,6 +43,10 @@ def main() -> int:
     assert thesis_std["captions"]["figure"]["position"] == "below"
     assert thesis_std["captions"]["table"]["position"] == "above"
     assert thesis_std["table_of_contents"]["max_heading_level"] == 3
+    assert thesis_std["table_of_contents"]["title_style"]["font_size_pt"] == 16
+    assert thesis_std["keywords"]["label_bold"] is True
+    assert thesis_std["keywords"]["value_bold"] is False
+    assert "不启用页眉" in thesis_std["notes"][5]
     assert thesis_std["references"]["citation_system"] == "GB/T 7714-2015"
     assert "GB/T 7713.1" in thesis_std["authority"]["override_note"]
     base = thesis_std

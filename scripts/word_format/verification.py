@@ -104,6 +104,8 @@ def read_complex_state(index, name):
             "codes": field_codes(doc),
         }
     if name == "table_of_contents":
+        from .properties import read_font, read_paragraph
+
         managed = [
             p for p in doc.paragraphs if paragraph_style_name(doc, p._p).startswith("WFM TOC")
         ]
@@ -117,9 +119,38 @@ def read_complex_state(index, name):
                 for n in p._p.getprevious().iter()
             )
         ]
+        title_paragraphs = [
+            p for p in managed if paragraph_style_name(doc, p._p) == "WFM TOC Heading"
+        ]
+        font_keys = ("font_east_asia", "font_latin", "font_size_pt", "bold", "italic", "color")
+        paragraph_keys = (
+            "alignment",
+            "space_before_pt",
+            "space_after_pt",
+            "line_spacing",
+            "keep_with_next",
+            "keep_together",
+            "page_break_before",
+            "widow_control",
+            "first_line_indent",
+            "left_indent",
+            "right_indent",
+            "hanging_indent",
+        )
         return {
-            "titles": [
-                p.text for p in managed if paragraph_style_name(doc, p._p) == "WFM TOC Heading"
+            "titles": [p.text for p in title_paragraphs],
+            "title_formats": [
+                {
+                    "font": [
+                        {key: read_font(doc, p._p, run._r, key) for key in font_keys}
+                        for run in p.runs
+                        if run.text
+                    ],
+                    "paragraph": {
+                        key: read_paragraph(doc, p._p, key) for key in paragraph_keys
+                    },
+                }
+                for p in title_paragraphs
             ],
             "codes": [n.text or "" for p in managed for n in p._p.iter(qn("w:instrText"))],
             "trailing_break": bool(trailing),
@@ -128,6 +159,7 @@ def read_complex_state(index, name):
                 for p in doc.paragraphs
             ),
         }
+
     if name in {"heading_numbering", "numbered", "reference_numbering"}:
         from .structures import _get_numbering_element
 
@@ -209,6 +241,53 @@ def read_complex_state(index, name):
             if not paragraph_style_name(doc, p._p).startswith("WFM TOC")
         ]
     raise FormatError(f"Missing structural reader for {name}")
+
+
+def _verify_toc_title_format(title_formats, title_style):
+    from .spec import token_operations
+
+    font_properties = {
+        "east_asia": "font_east_asia",
+        "latin": "font_latin",
+        "size": "font_size_pt",
+        "bold": "bold",
+        "italic": "italic",
+        "color": "color",
+    }
+    indent_properties = {"first_line_indent", "left_indent", "right_indent", "hanging_indent"}
+    if not title_formats:
+        return False
+    for title_format in title_formats:
+        for action, expected_params in token_operations(title_style):
+            if action.startswith("font."):
+                key = font_properties[action.split(".")[1]]
+                expected = expected_params["value"]
+                if key == "color" and expected != "auto":
+                    expected = expected.upper()
+                values = [run.get(key) for run in title_format["font"]]
+                if not values or any(value != expected for value in values):
+                    return False
+                continue
+
+            key = action.split(".")[1]
+            key = {"spacing_before": "space_before_pt", "spacing_after": "space_after_pt"}.get(
+                key, key
+            )
+            expected = (
+                expected_params
+                if key == "line_spacing" or key in indent_properties
+                else expected_params["value"]
+            )
+            actual = title_format["paragraph"].get(key)
+            if isinstance(expected, dict) and isinstance(actual, dict):
+                if any(actual.get(field) != value for field, value in expected.items()):
+                    return False
+            elif isinstance(expected, (int, float)) and isinstance(actual, (int, float)):
+                if abs(float(actual) - float(expected)) > 0.01:
+                    return False
+            elif actual != expected:
+                return False
+    return True
 
 
 def verify_complex_state(actual, params, name):
@@ -295,12 +374,20 @@ def verify_complex_state(actual, params, name):
     if name == "table_of_contents":
         if not params.get("enabled"):
             return not actual["titles"] and not actual["codes"]
-        return (
+        structure_matches = (
             actual["heading_count"] > 0
             and params.get("title", "目录") in actual["titles"]
-            and any(f'\\o "1-{params.get("max_heading_level", 3)}"' in c for c in actual["codes"])
+            and any(
+                f'\\o "1-{params.get("max_heading_level", 3)}"' in code
+                for code in actual["codes"]
+            )
             and actual["trailing_break"] == params.get("page_break_after", True)
         )
+        title_style = params.get("title_style")
+        return structure_matches and (
+            not title_style or _verify_toc_title_format(actual["title_formats"], title_style)
+        )
+
     if name == "heading_numbering":
         for level in (1, 2, 3):
             mode = params.get(f"level{level}", "keep")

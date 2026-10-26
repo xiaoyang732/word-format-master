@@ -116,6 +116,7 @@ word-format-master/
 │   ├── format_cli.py         # 核心命令行入口（提取、检查、规划、执行、验收）
 │   ├── render_docx.py        # 页面视觉渲染工具（调用 Word / WPS / LibreOffice 导出页面图）
 │   ├── verify_output.py      # 输出文档结构与格式复核工具
+│   ├── thesis_quality.py     # 正文长度、数字引用映射与人工内容核验状态报告
 │   └── word_format/          # 底层确定性排版核心库（63 项标准格式操作算子）
 ├── tests/                    # 自动化单元测试集
 └── references/               # 详细接口规范与进阶参考文档
@@ -134,9 +135,14 @@ python scripts/format_cli.py plan "论文.docx" "论文-排版后.docx" --profil
 python scripts/format_cli.py apply --plan plan.json --report report.json
 python scripts/format_cli.py verify --plan plan.json --report report.json --output verification.json
 
-# 3. 渲染页面图片进行逐页视觉检查（可选）
+# 3. 可选：核对论文正文汉字数及数字引用编号映射（篇幅目标由作者明确给出）
+python scripts/thesis_quality.py "论文.docx" --min-chinese-characters 12000 --max-chinese-characters 15000 --output content-quality.json
+
+# 4. 渲染页面图片进行逐页视觉检查（可选）
 python scripts/render_docx.py "论文-排版后.docx" --output-dir render --method auto
 ```
+
+`thesis_quality.py` 仅检查明确给出的篇幅范围与数字引用编号映射，并把书目和学术事实标记为待人工核验；格式/结构通过不代表内容审校通过。
 
 ---
 

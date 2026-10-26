@@ -110,7 +110,7 @@ do not impose the legacy conventional stage ordering.
 
 ### Tables
 
-- `three_line_table`: boolean (applies standard academic three-line table: 1.5pt top/bottom borders, 0.75pt header bottom border, no vertical borders)
+- `three_line_table`: boolean (applies standard academic three-line table: 1.5pt top/bottom borders, 0.75pt header bottom border, no vertical borders). Tables classified as cover content are excluded so form grids and cover metadata remain intact.
 - `repeat_header_row`: boolean (sets `w:tblHeader` and `w:cantSplit` on row 0)
 - `alignment`: `left`, `center`, or `right`
 - `font_size_pt`, `font_east_asia`, `font_latin`: table cell typography
@@ -167,10 +167,15 @@ For citation placement, export body paragraphs and existing bibliography entries
 `title` applies only explicit tokens to Title/Subtitle and the first non-empty
 cover paragraph. A color-only title rule does not authorize a new size or font.
 Unnumbered module headings use explicit level-1 tokens through `WFM Module Heading`
-without becoming numbered chapters. `keywords` supplies explicit keyword typography;
-template `document_structure.ordered_modules[].style_roles.keywords.tokens` remains
-available for separate Chinese and English rules. Inspection reports every registered
-paragraph/font property, including effective outline levels and spacing units.
+without becoming numbered chapters. `keywords` supplies explicit keyword typography.
+Use `label_bold` and `value_bold` to format the leading `关键词：` / `Key words:`
+label and the following keyword values independently; omit both to preserve the
+existing bold settings. These range controls cannot be combined with paragraph-wide
+`bold`. Template `document_structure.ordered_modules[].style_roles.keywords.tokens`
+remains available for separate Chinese and English rules. `table_of_contents.title_style`
+accepts font and paragraph tokens for its managed title and is checked on readback.
+Inspection reports every registered paragraph/font property, including effective
+outline levels and spacing units.
 
 ### Figure and Table Captions
 

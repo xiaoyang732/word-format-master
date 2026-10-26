@@ -8,6 +8,7 @@ import unittest
 from pathlib import Path
 
 from docx import Document
+from docx.enum.section import WD_SECTION_START
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement
@@ -19,7 +20,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from document_structure import heading_level  # noqa: E402
 from word_format import apply_plan, build_plan, verify_plan  # noqa: E402
 from word_format.properties import read_font, read_paragraph  # noqa: E402
-from word_format.spec import _has_soft_break  # noqa: E402
+from word_format.spec import _has_soft_break, keyword_text_ranges  # noqa: E402
+from word_format.structures import _find_body_section_index  # noqa: E402
 
 
 class ThesisRegressionTests(unittest.TestCase):
@@ -36,6 +38,10 @@ class ThesisRegressionTests(unittest.TestCase):
         doc.add_paragraph("Test subtitle", style="Subtitle")
         doc.add_paragraph("摘要")
         doc.add_paragraph("摘要正文。")
+        doc.add_paragraph("关键词：格式检查；段落样式")
+        doc.add_paragraph("Abstract", style="Heading 1")
+        doc.add_paragraph("English abstract")
+        doc.add_paragraph("Key words: format; verification")
         for level, text in ((1, "第一章 绪论"), (2, "1.1 技术基础"), (3, "1.1.1 研究范围")):
             p = doc.add_paragraph(text, style=f"Heading {level}")
             node = OxmlElement("w:color")
@@ -67,6 +73,9 @@ class ThesisRegressionTests(unittest.TestCase):
                         node = r._r.find("./" + qn("w:rPr") + "/" + qn("w:color"))
                         if node is not None:
                             self.assertEqual(dict(node.attrib), {qn("w:val"): "000000"})
+            if p.text.startswith(("关键词：", "Key words:")):
+                self.assertTrue(p.runs[0].bold)
+                self.assertTrue(all(not run.bold for run in p.runs[1:]))
 
     def test_explicit_title_color_and_partial_specs_preserve_authority(self):
         doc = Document()
@@ -190,6 +199,108 @@ class ThesisRegressionTests(unittest.TestCase):
         self.assertIsNone(out.paragraphs[2].paragraph_format.alignment)
         self.assertEqual(out.styles["Normal"].paragraph_format.alignment, WD_ALIGN_PARAGRAPH.JUSTIFY)
         self.assertIsNone(out.paragraphs[3].paragraph_format.alignment)
+
+    def test_keyword_label_and_values_have_independent_bold_readback(self):
+        doc = Document()
+        doc.add_paragraph("摘要", style="Heading 1")
+        doc.add_paragraph("摘要正文")
+        doc.add_paragraph("关键词：检索增强生成；大语言模型")
+        doc.add_paragraph("Abstract", style="Heading 1")
+        doc.add_paragraph("English abstract")
+        doc.add_paragraph("Key words: RAG; LLM")
+        doc.add_paragraph("第一章 绪论", style="Heading 1")
+        doc.add_paragraph("正文。")
+        doc.save(self.source)
+        spec = {
+            "keywords": {
+                "font_size_pt": 12,
+                "label_bold": True,
+                "value_bold": False,
+            }
+        }
+        plan = build_plan(self.source, self.output, {"spec": spec})
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["status"], "passed")
+
+        output = Document(self.output)
+        for paragraph in (output.paragraphs[2], output.paragraphs[5]):
+            self.assertGreaterEqual(len(paragraph.runs), 2)
+            self.assertTrue(paragraph.runs[0].bold)
+            self.assertTrue(all(not run.bold for run in paragraph.runs[1:]))
+
+        ranges = keyword_text_ranges(" Key words: terms")
+        self.assertEqual(ranges["label"], (1, 11))
+        self.assertEqual(ranges["value"], (12, 17))
+        self.assertIsNone(keyword_text_ranges("ordinary paragraph"))
+
+    def test_keyword_legacy_spec_rejects_conflicting_whole_line_and_range_bold(self):
+        doc = Document()
+        doc.add_paragraph("关键词：样例")
+        doc.save(self.source)
+        with self.assertRaisesRegex(ValueError, "not both"):
+            build_plan(
+                self.source,
+                self.output,
+                {"spec": {"keywords": {"bold": True, "label_bold": True}}},
+            )
+
+    def test_toc_placeholder_and_style_are_applied_in_one_plan(self):
+        doc = Document()
+        doc.add_paragraph("摘要")
+        doc.add_paragraph("摘要内容")
+        doc.add_paragraph("目录", style="Heading 1")
+        doc.add_paragraph("第一章 绪论", style="Heading 1")
+        doc.add_paragraph("正文")
+        doc.save(self.source)
+        spec = {
+            "table_of_contents": {
+                "enabled": True,
+                "title": "目录",
+                "max_heading_level": 3,
+                "page_break_after": True,
+                "title_style": {
+                    "font_east_asia": "黑体",
+                    "font_latin": "Times New Roman",
+                    "font_size_pt": 16,
+                    "bold": True,
+                    "alignment": "center",
+                    "space_before_pt": 0,
+                    "space_after_pt": 8,
+                    "keep_with_next": True,
+                },
+            }
+        }
+        plan = build_plan(self.source, self.output, {"spec": spec})
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["status"], "passed")
+        output = Document(self.output)
+        toc = next(paragraph for paragraph in output.paragraphs if paragraph.style.name == "WFM TOC Heading")
+        self.assertEqual(read_font(output, toc._p, toc.runs[0]._r, "font_size_pt"), 16)
+        self.assertTrue(read_font(output, toc._p, toc.runs[0]._r, "bold"))
+        self.assertEqual(read_paragraph(output, toc._p, "alignment"), "center")
+        self.assertNotIn("paragraph.style.assign", [item["action"] for item in plan["operations"]])
+
+    def test_front_matter_heading_one_styles_do_not_steal_body_page_number_section(self):
+        for body_heading in ("第一章 绪论", "第1章 绪论", "绪论", "Chapter 1 Introduction"):
+            with self.subTest(body_heading=body_heading):
+                doc = Document()
+                doc.add_paragraph("封面")
+                doc.add_section(WD_SECTION_START.NEW_PAGE)
+                doc.add_paragraph("摘要", style="Heading 1")
+                doc.add_section(WD_SECTION_START.NEW_PAGE)
+                doc.add_paragraph("Abstract", style="Heading 1")
+                doc.add_section(WD_SECTION_START.NEW_PAGE)
+                doc.add_paragraph("目录", style="Heading 1")
+                doc.add_section(WD_SECTION_START.NEW_PAGE)
+                doc.add_paragraph(body_heading, style="Heading 1")
+                self.assertEqual(_find_body_section_index(doc), 4)
+
+    def test_preset_toc_heading_size_matches_documented_three_number_size(self):
+        preset_data = json.loads((ROOT / "assets/presets.json").read_text(encoding="utf-8"))
+        thesis = next(item for item in preset_data["presets"] if item["id"] == "thesis-standard")
+        self.assertEqual(thesis["table_of_contents"]["title_style"]["font_size_pt"], 16)
+        self.assertIn("不启用页眉", thesis["notes"][5])
+        self.assertFalse(thesis["headers_footers"]["header"]["enabled"])
 
     def test_batching_retains_global_rules_and_module_overrides(self):
         doc = Document()

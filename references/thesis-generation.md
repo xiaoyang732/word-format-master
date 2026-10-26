@@ -15,6 +15,10 @@ illustrative numbers, identify them as simulated in the draft and table captions
 Do not present invented experiments, hardware runs, identities, supervisors or
 unverified bibliography entries as real. When evidence is missing, use explicit
 placeholders or a proposed experimental design rather than claims of completion.
+Do not repair citations by editing fixed line numbers in a generated script. Use
+`scripts/analyze_citations.py` to export paragraph fingerprints and stable reference
+IDs, review placements, then let the citation workflow reject stale anchors or
+unknown reference IDs before inserting markers.
 
 ## Sample-based structure: nothing added or omitted
 

@@ -192,6 +192,7 @@ word-format-master/
 ```
 
 - **按样例生成论文结构校验**：对基于样例起草的论文，排版前必须运行 `check-structure DRAFT.docx --profile profile.json --output structure.json`，并在 `plan` 时加上 `--match-structure`。
+- **论文篇幅与引用映射检查**：用 `python scripts/thesis_quality.py DRAFT.docx --min-chinese-characters 12000 --max-chinese-characters 15000 --output content-quality.json` 按统一口径统计正文汉字数，并对照数字引用编号与文末编号。只在用户明确给出目标时传入目标范围；工具不会替用户决定篇幅。
 - **局部直接修改**：构造 schema 2.0 请求 JSON，使用 `plan INPUT.docx OUTPUT.docx --request request.json --output plan.json`。
 - **仅检查不修改（Audit）**：
   ```powershell
@@ -204,9 +205,11 @@ word-format-master/
   ```
   分页、页眉、表格断页和域刷新详见 [references/header-requirements.md](references/header-requirements.md) 与 [references/architecture.md](references/architecture.md)。
 
+- **内容与书目核验边界**：格式/结构/视觉验收不得表述为论文整体通过。单独报告字数目标、引用编号映射、文献元数据和论断来源状态；自动工具仅提供计数与编号一致性检查，作者、版本、出版社、年份、页码及学术事实仍须依据权威来源人工核验。生成论文的端到端工作流见 [references/thesis-generation.md](references/thesis-generation.md)。
+
 ### 4. 向用户交付的 Markdown 验收/体检报告标准格式
 任务执行完毕后，AI 应将 `verification.json` 或 `audit.json` 的结果整理为清晰易读的中文总结表反馈给用户：
-1. **输出文件信息**：新文件路径、原稿保护确认（原稿未修改）、总体验收状态（格式/结构/视觉）。
+1. **输出文件信息**：新文件路径、原稿保护确认（原稿未修改）、格式/结构/视觉状态；内容审校另列，不与排版状态合并。
 2. **格式调整与复核明细表**：
 
 | 模块/对象 | 格式属性 | 原稿状态 | 目标要求 / 修改结果 | 复核状态 |

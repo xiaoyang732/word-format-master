@@ -9,11 +9,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from docx import Document
-from docx.oxml.ns import qn
-
 from config import LIST_NUMBERING_STYLES
 from document_structure import detect_module_spans, validate_module_order
+from docx import Document
+from docx.oxml.ns import qn
 from word_format.properties import outline_level, paragraph_style_name
 
 EXPECTED_LIST_MARKERS = LIST_NUMBERING_STYLES
@@ -21,6 +20,20 @@ EXPECTED_LIST_MARKERS = LIST_NUMBERING_STYLES
 
 def _check(checks: list[dict[str, Any]], name: str, passed: bool, detail: str) -> None:
     checks.append({"name": name, "status": "passed" if passed else "failed", "detail": detail})
+
+
+def content_review_scope() -> dict[str, Any]:
+    """State the content checks that formatting verification does not perform."""
+    return {
+        "status": "not_assessed",
+        "word_count": "not_assessed",
+        "academic_claims": "not_assessed",
+        "bibliography_metadata_and_sources": "not_assessed",
+        "note": (
+            "Format, structure, and rendered-page checks do not establish a word-count target, "
+            "the truth of academic claims, or the accuracy of bibliography metadata."
+        ),
+    }
 
 
 def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bool = True) -> dict[str, Any]:
@@ -31,7 +44,12 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         _check(checks, "docx-readable", True, "python-docx reopened the generated package")
     except Exception as exc:  # pragma: no cover - defensive boundary for corrupted packages
         _check(checks, "docx-readable", False, str(exc))
-        return {"status": "failed", "checks": checks, "errors": [str(exc)]}
+        return {
+            "status": "failed",
+            "checks": checks,
+            "errors": [str(exc)],
+            "content_review": content_review_scope(),
+        }
 
     requested_structure = spec.get("document_structure")
     if isinstance(requested_structure, dict) and requested_structure.get("match") == "exact":
@@ -255,23 +273,30 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
     if check_format:
         try:
             from word_format.inspect import DocumentIndex
-            from word_format.spec import spec_request
             from word_format.registry import REGISTRY
             from word_format.selectors import resolve_targets
-            index=DocumentIndex(document)
-            for operation in spec_request(index,spec)["operations"]:
-                cap=REGISTRY[operation["action"]]
-                if cap.structural: continue
-                for ref in resolve_targets(index,operation["target"],cap.targets):
-                    actual=cap.reader(index,ref,cap)
-                    passed=cap.verifier(actual,operation["params"],cap)
-                    detail=f"target={ref['id']}, expected={operation['params']!r}, actual={actual!r}"
-                    _check(checks,"format:"+cap.action,passed,detail)
-                    if not passed: errors.append(detail)
-        except (ValueError,TypeError,KeyError) as exc:
-            errors.append("Format verification failed: "+str(exc))
+            from word_format.spec import spec_request
+            index = DocumentIndex(document)
+            for operation in spec_request(index, spec)["operations"]:
+                cap = REGISTRY[operation["action"]]
+                if cap.structural:
+                    continue
+                for ref in resolve_targets(index, operation["target"], cap.targets):
+                    actual = cap.reader(index, ref, cap)
+                    passed = cap.verifier(actual, operation["params"], cap)
+                    detail = f"target={ref['id']}, expected={operation['params']!r}, actual={actual!r}"
+                    _check(checks, "format:" + cap.action, passed, detail)
+                    if not passed:
+                        errors.append(detail)
+        except (ValueError, TypeError, KeyError) as exc:
+            errors.append("Format verification failed: " + str(exc))
     status = "passed" if not errors else "failed"
-    return {"status": status, "checks": checks, "errors": errors}
+    return {
+        "status": status,
+        "checks": checks,
+        "errors": errors,
+        "content_review": content_review_scope(),
+    }
 
 
 def validate_visual_report(report: dict[str, Any], page_count: int | None = None) -> dict[str, Any]:
