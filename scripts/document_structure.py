@@ -11,7 +11,6 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-
 MODULE_ORDER = (
     "cover",
     "declaration",
@@ -27,7 +26,9 @@ MODULE_ORDER = (
 
 MODULE_MARKERS = {
     "declaration": re.compile(
-        r"^\s*(?:(?:诚信|原创性|独创性|学术诚信|郑重)\s*声明|(?:学位论文)?(?:版权使用|使用)?授权书|声明与授权|授权声明)\s*$",
+        r"^\s*(?:(?:本科|学士|硕士|博士)?(?:学位|毕业)?(?:论文|设计)(?:[（(](?:设计|论文)[）)])?)?\s*"
+        r"(?:(?:诚信|原创性|独创性|学术诚信|郑重)\s*(?:声明|承诺书)|"
+        r"(?:版权使用|使用)?授权书|声明与授权|授权声明|诚信承诺|承诺书|声明)\s*$",
         re.I,
     ),
     "abstract": re.compile(r"^\s*(?:摘\s*要|中文摘要|英文摘要|abstracts?)(?:\s*[:：].*)?$", re.I),
@@ -35,13 +36,36 @@ MODULE_MARKERS = {
     "toc": re.compile(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", re.I),
     "references": re.compile(r"^\s*(?:参考文献|参考资料|references|bibliography|works\s+cited)\s*$", re.I),
     "acknowledgements": re.compile(r"^\s*(?:致\s*谢|acknowledg(?:e)?ments?)\s*$", re.I),
-    "appendix": re.compile(r"^\s*(?:附\s*录|appendix)(?:\s+[A-Z0-9一二三四五六七八九十]+)?\s*$", re.I),
+    "appendix": re.compile(r"^\s*(?:附\s*录|appendix)(?:\s*[A-Z0-9一二三四五六七八九十]+(?:[\s:：、].*)?)?\s*$", re.I),
     "symbols": re.compile(r"^\s*(?:符号说明|符号表|术语表|symbols?|glossary)\s*$", re.I),
 }
 
-_CHAPTER_RE = re.compile(r"^\s*(?:第\s*[一二三四五六七八九十0-9]+\s*章|\d+[、.\s])")
-_LEVEL2_RE = re.compile(r"^\s*\d+\.\d+(?:[、.\s])")
-_LEVEL3_RE = re.compile(r"^\s*\d+\.\d+\.\d+(?:[、.\s])")
+_CHAPTER_RE = re.compile(r"^\s*(?:第\s*[一二三四五六七八九十百零〇0-9]+\s*章\s*|\d+(?:[、.．]\s*|\s+))(.+)$")
+_LEVEL2_RE = re.compile(r"^\s*\d+\.\d+(?:[、.．]\s*|\s+)(.+)$")
+_LEVEL3_RE = re.compile(r"^\s*\d+\.\d+\.\d+(?:[、.．]\s*|\s+)(.+)$")
+
+# Numeric prefixes are common in both headings and ordinary numbered lists.
+# Keep the text heuristic conservative so an algorithm step such as
+# ``1. scores[c] = ...`` cannot become a chapter heading. Explicit heading
+# styles and outline levels are handled before this heuristic and remain
+# authoritative.
+_CODE_OR_ALGORITHM_RE = re.compile(
+    r"(?:[{}\[\];]|\b(?:for|while|if|else|return|import|from|def|class|const|let|var)\b|"
+    r"\b[A-Za-z_]\w*\s*(?:\+=|-=|\*=|/=|:=|==|=>|->|=))",
+    re.I,
+)
+_NUMBERED_ACTION_RE = re.compile(
+    r"^(?:初始化|遍历|构造(?:\s+|(?=[A-Za-z\u4e00-\u9fff]))|"
+    r"调用(?:\s+|(?=[A-Za-z\u4e00-\u9fff]))|返回(?:\s+|(?=[A-Za-z\u4e00-\u9fff]))|"
+    r"(?:按|对).{0,40}(?:排序|排列|截取|筛选|返回)|"
+    r"依据.{0,40}(?:排序|排列|截取|筛选|返回)|"
+    r"根据.{0,40}(?:排序|排列|截取|筛选|返回))"
+)
+_MEASUREMENT_PREFIX_RE = re.compile(
+    r"^\s*\d+(?:\.\d+)?\s*(?:倍(?:行距)?|%|％|毫秒|秒|分钟|小时|"
+    r"(?:cm|mm|ms|px)(?![A-Za-z]))",
+    re.I,
+)
 
 
 def normalized_style_name(value: Any) -> str:
@@ -51,19 +75,32 @@ def normalized_style_name(value: Any) -> str:
 def heading_level(text: str, style_name: str = "", outline_level: int | None = None) -> int | None:
     if outline_level is not None:
         try:
-            return int(outline_level) + 1
+            level = int(outline_level)
+            if 0 <= level <= 8:
+                return level + 1
         except (TypeError, ValueError):
             pass
     normalized = normalized_style_name(style_name)
     match = re.search(r"(?:heading|标题)([1-9])$", normalized)
     if match:
         return int(match.group(1))
-    if _LEVEL3_RE.match(text):
-        return 3
-    if _LEVEL2_RE.match(text):
-        return 2
-    if _CHAPTER_RE.match(text):
-        return 1
+    if normalized in {"title", "subtitle"} or normalized.startswith(("toc", "wfmtoc")) or "list" in normalized or "caption" in normalized:
+        return None
+    if _MEASUREMENT_PREFIX_RE.match(text):
+        return None
+    # Text alone is weaker evidence than an explicit heading style. Chapter
+    # summaries, sentences, decimal measurements and TOC lines are not headings.
+    for level, pattern in ((3, _LEVEL3_RE), (2, _LEVEL2_RE), (1, _CHAPTER_RE)):
+        match = pattern.match(text)
+        if match:
+            title = match.group(1).strip()
+            if (len(title) <= 80 and not title[0].isdigit() and not title.startswith((".", "．"))
+                    and not re.search(r"[:：。；;！？!?\t]|\.{2,}|…", title)
+                    and not title.endswith(".")
+                    and not _CODE_OR_ALGORITHM_RE.search(title)
+                    and not _NUMBERED_ACTION_RE.match(title)):
+                return level
+            return None
     return None
 
 
@@ -73,8 +110,10 @@ def classify_module(text: str, style_name: str = "", outline_level: int | None =
         return None
     if normalized in {"wfmtocheading"}:
         return "toc"
+    if normalized.startswith(("toc", "wfmtoc")):
+        return None
     for kind, pattern in MODULE_MARKERS.items():
-        if pattern.match(text):
+        if pattern.match(text) or pattern.match(re.sub(r"\s+", "", text)):
             return kind
     if heading_level(text, style_name, outline_level) == 1:
         return "chapters"
@@ -94,10 +133,10 @@ def classify_role(text: str, style_name: str = "", *, first: bool = False) -> st
     normalized = normalized_style_name(style_name)
     if normalized in {"title", "subtitle"}:
         return "title"
-    if first:
-        return "heading"
     if "keyword" in normalized or "关键词" in normalized or re.search(r"^\s*(?:关\s*键\s*词|key\s*words?)\s*[:：]", text, re.I):
         return "keywords"
+    if first:
+        return "heading"
     if normalized.startswith("heading") or normalized.startswith("标题") or is_heading_candidate(text, style_name):
         return "heading"
     return "body"

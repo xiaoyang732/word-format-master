@@ -9,17 +9,31 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from docx import Document
-from docx.oxml.ns import qn
-
 from config import LIST_NUMBERING_STYLES
 from document_structure import detect_module_spans, validate_module_order
+from docx import Document
+from docx.oxml.ns import qn
+from word_format.properties import outline_level, paragraph_style_name
 
 EXPECTED_LIST_MARKERS = LIST_NUMBERING_STYLES
 
 
 def _check(checks: list[dict[str, Any]], name: str, passed: bool, detail: str) -> None:
     checks.append({"name": name, "status": "passed" if passed else "failed", "detail": detail})
+
+
+def content_review_scope() -> dict[str, Any]:
+    """State the content checks that formatting verification does not perform."""
+    return {
+        "status": "not_assessed",
+        "word_count": "not_assessed",
+        "academic_claims": "not_assessed",
+        "bibliography_metadata_and_sources": "not_assessed",
+        "note": (
+            "Format, structure, and rendered-page checks do not establish a word-count target, "
+            "the truth of academic claims, or the accuracy of bibliography metadata."
+        ),
+    }
 
 
 def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bool = True) -> dict[str, Any]:
@@ -30,27 +44,40 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         _check(checks, "docx-readable", True, "python-docx reopened the generated package")
     except Exception as exc:  # pragma: no cover - defensive boundary for corrupted packages
         _check(checks, "docx-readable", False, str(exc))
-        return {"status": "failed", "checks": checks, "errors": [str(exc)]}
+        return {
+            "status": "failed",
+            "checks": checks,
+            "errors": [str(exc)],
+            "content_review": content_review_scope(),
+        }
 
     requested_structure = spec.get("document_structure")
-    if isinstance(requested_structure, dict) and requested_structure.get("ordered_modules"):
+    if isinstance(requested_structure, dict) and requested_structure.get("match") == "exact":
+        from word_format.template_structure import compare_template_structure
+
+        comparison = compare_template_structure(document, requested_structure)
+        _check(checks, "document-module-structure", comparison["status"] == "passed",
+               "Exact sample parts, languages, counts, order and chapter hierarchy checked")
+        checks[-1]["comparison"] = comparison
+        errors.extend(comparison["errors"])
+    elif isinstance(requested_structure, dict) and requested_structure.get("ordered_modules"):
         paragraphs = [paragraph for paragraph in document.paragraphs if paragraph.text.strip()]
         target_items = [
             {
                 "index": index,
                 "text": paragraph.text.strip(),
-                "style_name": paragraph.style.name if paragraph.style else "",
+                "style_name": paragraph_style_name(document, paragraph._p),
+                "outline_level": outline_level(document, paragraph._p),
             }
             for index, paragraph in enumerate(paragraphs)
         ]
         actual_modules = detect_module_spans(target_items)
         expected_kinds = [str(item.get("kind") or item.get("id") or "") for item in requested_structure.get("ordered_modules", [])]
         actual_kinds = [str(item.get("kind") or item.get("id") or "") for item in actual_modules]
-        OPTIONAL_STANDARD_MODULES = {"declaration", "symbols", "acknowledgements", "appendix"}
-        required = [kind for kind in expected_kinds if kind != "chapters"]
+        required = expected_kinds
         missing = [kind for kind in required if kind not in actual_kinds]
-        unexpected = [kind for kind in actual_kinds if kind not in expected_kinds and kind not in OPTIONAL_STANDARD_MODULES]
-        order_errors = validate_module_order(actual_modules)
+        unexpected = [kind for kind in actual_kinds if kind not in expected_kinds]
+        order_errors = validate_module_order(actual_modules, strict=requested_structure.get("strict_order", True))
         passed = not missing and not unexpected and not order_errors
         detail = f"expected={expected_kinds}, actual={actual_kinds}, missing={missing}, unexpected={unexpected}, order_errors={order_errors}"
         _check(checks, "document-module-structure", passed, detail)
@@ -61,6 +88,14 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         errors.extend(order_errors)
 
     page = spec.get("page", {})
+    if page.get("orientation"):
+        landscape = page["orientation"] == "landscape"
+        passed = all((int(s.orientation) == 1) == landscape and
+                     ((s.page_width > s.page_height) == landscape or s.page_width == s.page_height)
+                     for s in document.sections)
+        _check(checks, "page-orientation", passed, "orientation marker and dimensions checked in every section")
+        if not passed:
+            errors.append("page orientation disagrees with requested direction or actual dimensions")
     expected_size = {"A4": (210.0, 297.0), "Letter": (215.9, 279.4)}.get(str(page.get("size")))
     if expected_size and document.sections:
         section = document.sections[0]
@@ -76,7 +111,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         list_paragraphs = 0
         num_ids: set[str] = set()
         for paragraph in document.paragraphs:
-            style_name = paragraph.style.name.lower() if paragraph.style else ""
+            style_name = paragraph_style_name(document, paragraph._p).lower()
             if (
                 style_name.startswith("heading")
                 or style_name.startswith("标题")
@@ -123,11 +158,20 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
     page_numbers = spec.get("page_numbers", {})
     if page_numbers.get("enabled"):
         location = str(page_numbers.get("location") or "footer")
-        containers = [getattr(section, location) for section in document.sections]
-        if page_numbers.get("show_on_first_page", True):
+        from word_format.structures import _find_body_section_index
+        body_idx = _find_body_section_index(document)
+        target_sections = document.sections[body_idx:] if body_idx > 0 else document.sections
+        containers = [getattr(section, location) for section in target_sections]
+        if document.settings.odd_and_even_pages_header_footer:
+            containers.extend(getattr(section, f"even_page_{location}") for section in target_sections)
+        if body_idx > 0:
+            show_first = page_numbers.get("show_on_body_first_page", True)
+        else:
+            show_first = page_numbers.get("show_on_first_page", True)
+        if show_first:
             containers.extend(
                 getattr(section, f"first_page_{location}")
-                for section in document.sections
+                for section in target_sections
                 if section.different_first_page_header_footer
             )
         page_field_counts = []
@@ -137,12 +181,9 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
             if identity in seen_parts:
                 continue
             seen_parts.add(identity)
-            page_field_counts.append(sum(
-                1
-                for paragraph in container.paragraphs
-                for node in paragraph._p.iter(qn("w:instrText"))
-                if node.text and re.search(r"\bPAGE\b", node.text, re.I)
-            ))
+            codes = [node.text or "" for node in container._element.iter(qn("w:instrText"))]
+            codes.extend(node.get(qn("w:instr"), "") for node in container._element.iter(qn("w:fldSimple")))
+            page_field_counts.append(sum(bool(re.search(r"\bPAGE\b", code, re.I)) for code in codes))
         passed = bool(page_field_counts) and all(count == 1 for count in page_field_counts)
         _check(checks, "page-numbers", passed, f"PAGE fields per target {location} part={page_field_counts}")
         if not passed:
@@ -152,7 +193,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
     if placements:
         paragraphs = [
             paragraph for paragraph in document.paragraphs
-            if not paragraph.style or paragraph.style.name not in {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
+            if paragraph_style_name(document, paragraph._p) not in {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
         ]
         citation_failures = []
         for placement in placements:
@@ -168,9 +209,9 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
     toc = spec.get("table_of_contents", {})
     if toc:
         managed = {
-            paragraph.style.name
+            paragraph_style_name(document, paragraph._p)
             for paragraph in document.paragraphs
-            if paragraph.style and paragraph.style.name in {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
+            if paragraph_style_name(document, paragraph._p) in {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
         }
         all_toc_codes = [
             " ".join(node.text.split())
@@ -181,7 +222,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         toc_codes = [
             " ".join(node.text.split())
             for paragraph in document.paragraphs
-            if paragraph.style and paragraph.style.name == "WFM TOC Field"
+            if paragraph_style_name(document, paragraph._p) == "WFM TOC Field"
             for node in paragraph._p.iter(qn("w:instrText"))
             if node.text and re.search(r"\bTOC\b", node.text, re.I)
         ]
@@ -195,17 +236,16 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
                 paragraph
                 for paragraph in document.paragraphs
                 if paragraph.text.strip()
-                and paragraph.style
-                and re.fullmatch(r"Heading ([1-9])", paragraph.style.name, re.I)
-                and int(re.fullmatch(r"Heading ([1-9])", paragraph.style.name, re.I).group(1)) <= expected_level
+                and re.fullmatch(r"Heading ([1-9])", paragraph_style_name(document, paragraph._p), re.I)
+                and int(re.fullmatch(r"Heading ([1-9])", paragraph_style_name(document, paragraph._p), re.I).group(1)) <= expected_level
             ]
             title = str(toc.get("title") or "目录")
             title_matches = any(
-                paragraph.style and paragraph.style.name == "WFM TOC Heading" and paragraph.text == title
+                paragraph_style_name(document, paragraph._p) == "WFM TOC Heading" and paragraph.text == title
                 for paragraph in document.paragraphs
             )
             break_matches = any(
-                paragraph.style and paragraph.style.name == "WFM TOC Break"
+                paragraph_style_name(document, paragraph._p) == "WFM TOC Break"
                 and any(node.get(qn("w:type")) == "page" for node in paragraph._p.iter(qn("w:br")))
                 and paragraph._p.getprevious() is not None
                 and any(n.text and "TOC " in n.text for n in paragraph._p.getprevious().iter(qn("w:instrText")))
@@ -237,23 +277,30 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
     if check_format:
         try:
             from word_format.inspect import DocumentIndex
-            from word_format.spec import spec_request
             from word_format.registry import REGISTRY
             from word_format.selectors import resolve_targets
-            index=DocumentIndex(document)
-            for operation in spec_request(index,spec)["operations"]:
-                cap=REGISTRY[operation["action"]]
-                if cap.structural: continue
-                for ref in resolve_targets(index,operation["target"],cap.targets):
-                    actual=cap.reader(index,ref,cap)
-                    passed=cap.verifier(actual,operation["params"],cap)
-                    detail=f"target={ref['id']}, expected={operation['params']!r}, actual={actual!r}"
-                    _check(checks,"format:"+cap.action,passed,detail)
-                    if not passed: errors.append(detail)
-        except (ValueError,TypeError,KeyError) as exc:
-            errors.append("Format verification failed: "+str(exc))
+            from word_format.spec import spec_request
+            index = DocumentIndex(document)
+            for operation in spec_request(index, spec)["operations"]:
+                cap = REGISTRY[operation["action"]]
+                if cap.structural:
+                    continue
+                for ref in resolve_targets(index, operation["target"], cap.targets):
+                    actual = cap.reader(index, ref, cap)
+                    passed = cap.verifier(actual, operation["params"], cap)
+                    detail = f"target={ref['id']}, expected={operation['params']!r}, actual={actual!r}"
+                    _check(checks, "format:" + cap.action, passed, detail)
+                    if not passed:
+                        errors.append(detail)
+        except (ValueError, TypeError, KeyError) as exc:
+            errors.append("Format verification failed: " + str(exc))
     status = "passed" if not errors else "failed"
-    return {"status": status, "checks": checks, "errors": errors}
+    return {
+        "status": status,
+        "checks": checks,
+        "errors": errors,
+        "content_review": content_review_scope(),
+    }
 
 
 def validate_visual_report(report: dict[str, Any], page_count: int | None = None) -> dict[str, Any]:
@@ -279,16 +326,17 @@ def validate_visual_report(report: dict[str, Any], page_count: int | None = None
             return {"status": "failed", "errors": ["渲染页数必须是大于 0 的整数"]}
         if not isinstance(pages, list):
             return {"status": "failed", "errors": ["视觉验收报告必须列出已检查页面"]}
-        try:
-            reviewed_pages = sorted({int(item) for item in pages})
-        except (TypeError, ValueError):
+        if any(isinstance(item, bool) or not isinstance(item, int) for item in pages):
             return {"status": "failed", "errors": ["已检查页面必须是页码整数"]}
+        reviewed_pages = sorted(pages)
         if reviewed_pages != list(range(1, page_count + 1)):
             return {"status": "failed", "errors": ["视觉验收报告必须覆盖每个渲染页面"]}
     return {"status": status, "model": model, "reviewed_pages": pages or [], "findings": report.get("findings", [])}
 
 
 def main() -> int:
+    from cli_output import configure_cli_output
+    configure_cli_output()
     if len(sys.argv) != 3:
         print("usage: verify_output.py OUTPUT.docx SPEC.json", file=sys.stderr)
         return 2

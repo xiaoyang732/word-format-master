@@ -18,6 +18,10 @@ def main() -> int:
     parser.add_argument("input", help="Source DOCX")
     parser.add_argument("--output", required=True, help="Task JSON output")
     args = parser.parse_args()
+    from cli_output import configure_cli_output
+    from json_output import ensure_protected_paths, write_json
+    configure_cli_output()
+    ensure_protected_paths(args.output, args.input)
     source = Path(args.input).resolve()
     task = build_citation_task(
         Document(str(source)),
@@ -25,8 +29,7 @@ def main() -> int:
         source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
     )
     destination = Path(args.output).resolve()
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(task, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    write_json(destination, task, source)
     print(f"Exported {len(task['paragraphs'])} body anchors and {len(task['references'])} references to {destination}")
     return 0
 

@@ -2,9 +2,9 @@
 
 ## Contract
 
-Use JSON as the single source of truth shared by template analysis, requirement parsing, the dashboard, and DOCX application. Store measurements as millimeters or points at the boundary and convert to Word units only inside the application engine.
+Use JSON as the single source of truth shared by direct requests, preset expansion and DOCX application. Store measurements as millimeters or points at the boundary and convert to Word units only inside the application engine.
 
-Every recognized field may carry provenance:
+Format Spec values are plain typed tokens. Evidence belongs to [Format Profile](format-profile.md), where a rule can carry provenance such as:
 
 ```json
 {
@@ -16,7 +16,7 @@ Every recognized field may carry provenance:
 }
 ```
 
-The MVP dashboard edits plain values and keeps provenance in its analysis panel. Future versions may store provenance inline for every token.
+Do not replace scalar spec values with provenance objects. New requirement/sample workflows use Profile 1.0 and compile into the same operation registry.
 
 ## Top-Level Shape
 
@@ -29,6 +29,7 @@ The MVP dashboard edits plain values and keeps provenance in its analysis panel.
   "template_required": false,
   "page": {},
   "body": {},
+  "title": {},
   "lists": {},
   "headings": [],
   "captions": {},
@@ -54,6 +55,15 @@ An analyzed publisher template may produce an inferred format specification for 
 An official workflow may expose local copies supplied by the user under `local_templates`. Record the exact SHA-256 and treat them as local personal assets; the current publisher instructions still decide which variant is valid. Prefer an explicit path relative to `assets/templates`; filename-only entries are accepted only when exactly one file matches.
 
 ## Supported MVP Tokens
+
+`title` optionally applies the same font/paragraph tokens as `body` to paragraphs
+with Title/Subtitle styles and their named styles. Absent tokens preserve existing
+values. `thesis-standard` explicitly sets `title.color` and H1–H3 `color` to
+`000000`; other templates and partial requests do not inherit that default.
+Non-numbered module headings without an explicit Heading level receive only the
+requested H1 color. Explicit module-role overrides remain usable when no global
+color is requested. The color writer removes `themeColor`, `themeTint` and
+`themeShade`; the reader resolves the active theme rather than trusting cached RGB.
 
 ### Document Structure
 
@@ -91,15 +101,21 @@ The shared module detector recognizes cover, declaration, abstract, keywords, TO
 chapters, references, acknowledgements, and appendix. During application, the
 module's `style_roles` are assigned through named Word styles. Structural
 verification fails when a required module is missing or appears out of order.
+Unspecified declarations, acknowledgements and appendices are not exempt from
+the template's module contract. New sample-based drafts use the stronger
+`match: "exact"` structure contract described in
+[format-profile.md](format-profile.md): language, occurrence count, actual sample
+order and chapter hierarchy must agree, including absent parts. Exact contracts
+do not impose the legacy conventional stage ordering.
 
 ### Tables
 
-- `three_line_table`: boolean (applies standard academic three-line table: 1.5pt top/bottom borders, 0.75pt header bottom border, no vertical borders)
+- `three_line_table`: boolean (applies standard academic three-line table: 1.5pt top/bottom borders, 0.75pt header bottom border, no vertical borders). Tables classified as cover content are excluded so form grids and cover metadata remain intact.
 - `repeat_header_row`: boolean (sets `w:tblHeader` and `w:cantSplit` on row 0)
 - `alignment`: `left`, `center`, or `right`
 - `font_size_pt`, `font_east_asia`, `font_latin`: table cell typography
 
-### Table of Contents
+### Page
 
 - `size`: `A4`, `Letter`, or `Custom`
 - `width_mm`, `height_mm`
@@ -142,9 +158,24 @@ Create a real `w:abstractNum`/`w:num` definition and attach `w:numPr` to existin
 - `citation_mode`: `numeric`, `author-date`, or `author-page`
 - `numbering_mode`: `word-numbering` or `none`
 
-Treat `citation_system`, `citation_mode`, and `numbering_mode` as provenance and workflow metadata unless a dedicated citation converter is present. The dashboard displays the citation system read-only; it does not claim to rewrite bibliographic content. The application engine updates the `Bibliography` style and assigns it to paragraphs inside an identifiable References/参考文献 section.
+Treat `citation_system`, `citation_mode`, and `numbering_mode` as provenance and workflow metadata unless a dedicated citation converter is present. A citation-system identifier alone does not authorize rewriting bibliographic content. The application engine updates the `Bibliography` style and assigns it to paragraphs inside an identifiable References/参考文献 section.
 
 For citation placement, export body paragraphs and existing bibliography entries with `scripts/analyze_citations.py`. Let AI return only `citations.placements`, including `paragraph_index`, `paragraph_sha256`, `reference_ids`, `citation_text`, `insert`, `spacing`, `confidence`, and `reason`. `spacing` is one of `none`, `space-before`, `space-after`, or `spaces-around`. Accept only existing reference IDs. Recompute every paragraph fingerprint immediately before insertion and reject the whole batch on mismatch. AI chooses placement; deterministic code performs the DOCX edit.
+
+### Titles and module typography
+
+`title` applies only explicit tokens to Title/Subtitle and the first non-empty
+cover paragraph. A color-only title rule does not authorize a new size or font.
+Unnumbered module headings use explicit level-1 tokens through `WFM Module Heading`
+without becoming numbered chapters. `keywords` supplies explicit keyword typography.
+Use `label_bold` and `value_bold` to format the leading `关键词：` / `Key words:`
+label and the following keyword values independently; omit both to preserve the
+existing bold settings. These range controls cannot be combined with paragraph-wide
+`bold`. Template `document_structure.ordered_modules[].style_roles.keywords.tokens`
+remains available for separate Chinese and English rules. `table_of_contents.title_style`
+accepts font and paragraph tokens for its managed title and is checked on readback.
+Inspection reports every registered paragraph/font property, including effective
+outline levels and spacing units.
 
 ### Figure and Table Captions
 
@@ -159,11 +190,13 @@ Applying a specification updates named caption styles and reassigns existing top
 
 ### Headers and Footers
 
+See [header-requirements.md](header-requirements.md) for the optional article-backed rules and exact action/handler/readback mapping. Header spec fields expand to independent `header.*` operations. `section_number` restricts the header target; `sections` carries per-section overrides. `even_header` and `first_header` carry separate variants. `mode: chapter_title`, `style_name` and optional `prefix` generate a STYLEREF field; `mode: text` is literal text.
+
 - `preserve_existing`
 - `different_first_page`, `different_odd_even`
 - `header` and `footer`: `enabled`, `text`, `alignment`, and typography tokens
 
-Managed text uses dedicated `WFM Header` and `WFM Footer` styles. When `preserve_existing` is `true`, disabling managed text clears only paragraphs created with those styles. A distilled uploaded template sets `preserve_existing` to `false`; application then clears the target document's existing header/footer content before rebuilding only what the uploaded template explicitly contains.
+Managed footer text uses `WFM Footer`; header content has an explicit managed marker and legacy `WFM Header` remains recognized. When `preserve_existing` is `true`, disabling global managed text clears only tool-managed paragraphs. Explicit content replacement or selected-section clearing replaces that variant. `preserve_existing: false` explicitly clears existing headers/footers before rebuilding template content; it is forbidden with a selected header section. Template extraction preserves separate sections and variants where present.
 
 ### Page Numbers
 
@@ -186,11 +219,11 @@ Generate a real `TOC \\o "1-N" \\h \\z \\u` Word field rather than a static list
 
 Treat an enabled TOC with zero non-empty Heading paragraphs in the selected level range as a structural verification failure. Assign the intended sections to real Heading styles and apply the specification again; do not accept an empty directory page.
 
-## Dashboard Application Contract
+## Direct Application Contract
 
-Every editable Dashboard setting maps through the legacy adapter to executable operations in `scripts/word_format/registry.py`. `SUPPORTED_APPLICATION_PATHS` is generated by that adapter. `/api/capabilities` exposes legacy settings and `format_core.operations`, including handlers, validators and independent readers/verifiers. Keep citation-system identifiers and other non-applicable metadata read-only.
+Every applicable spec setting expands through `word_format/spec.py` to executable operations in `scripts/word_format/registry.py`. `SUPPORTED_APPLICATION_PATHS` is generated by that adapter. `format_cli.py capabilities` exposes operations, handlers, validators and independent readers/verifiers. Keep citation-system identifiers and other non-applicable fields as metadata.
 
-Direct AI requests use schema 2.0 and need no Dashboard or Handoff; see [direct-format-api.md](direct-format-api.md). The legacy spec remains 1.0 and expands into the same planner/executor. Supply one authoritative indent unit (chars or mm); inconsistent duplicates fail. Explicit zero and false remain meaningful. Font cleanup affects requested properties only. Numbering, citations and TOC changes require explicit structural operations.
+Direct AI requests use schema 2.0; see [direct-format-api.md](direct-format-api.md). The legacy spec remains 1.0 and expands into the same planner/executor. Supply one authoritative indent unit (chars or mm); inconsistent duplicates fail. Explicit zero and false remain meaningful. Font cleanup affects requested properties only. Numbering, citations and TOC changes require explicit structural operations.
 
 ## Merge Rules
 
