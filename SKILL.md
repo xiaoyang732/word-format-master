@@ -169,6 +169,13 @@ word-format-master/
 | 结构验收通过，但页面渲染或逐页检查未完成 | 只报告结构/格式状态；视觉状态写 `skipped` 或 `pending`，不可称为视觉验收通过。 |
 
 ### 2. 提取格式依据与文档结构
+生成或排版前必须逐项核对封面大标题、各元数据字段与日期、中英文摘要的题目/标签/正文、
+关键词标签/词条和各级正文标题的有效格式，保留“区域—属性—来源锚点—采用值”清单。
+不得用一个通用封面/摘要样式覆盖这些区域；“加黑”是粗体，不是黑体字体。
+空占位段和独立材料（例如优秀论文简介）的规则需核实适用范围。
+起草脚本直接保存的文件只能作为草稿，最终文件必须有对应的 plan/apply/verify 证据；
+inspect 和页面渲染不能代替逐项格式验收。目录须核对实际条目，空目录或错误提示不得交付。
+
 详见 [references/format-profile.md](references/format-profile.md) 与 [references/direct-format-api.md](references/direct-format-api.md)。
 
 ```powershell

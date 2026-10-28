@@ -33,6 +33,9 @@ def resolve_targets(index, target, allowed):
             "name",
             "part",
             "module",
+            "semantic_role",
+            "language",
+            "segment",
             "number",
         },
         {"type"},
@@ -42,6 +45,37 @@ def resolve_targets(index, target, allowed):
     if kind == "text_range":
         if kind not in allowed:
             raise FormatError("Operation does not support text ranges", "unsupported")
+        if "segment" in target:
+            from .spec import keyword_text_ranges
+
+            segment = text_value(target["segment"], "keyword segment")
+            if segment not in {"label", "value"}:
+                raise FormatError("Keyword segment must be label or value")
+            if any(k in target for k in ("start", "end", "quote", "occurrence")):
+                raise FormatError("Choose a semantic segment or explicit text range")
+            base = {k: v for k, v in target.items() if k != "segment"}
+            base["type"] = "paragraph"
+            refs = resolve_targets(index, base, {"paragraph"})
+            result = []
+            for ref in refs:
+                text = index.records[ref["id"]]["text"]
+                ranges = keyword_text_ranges(text)
+                if not ranges:
+                    raise FormatError("Keyword label was not found", "needs_clarification")
+                start, end = ranges[target["segment"]]
+                if start == end:
+                    raise FormatError("Keyword segment is empty", "needs_clarification")
+                simple_range(index.elements[ref["id"]], start, end)
+                result.append(
+                    {
+                        **ref,
+                        "kind": "text_range",
+                        "start": start,
+                        "end": end,
+                        "quote": text[start:end],
+                    }
+                )
+            return result
         if "quote" in target and any(k in target for k in ("start", "end")):
             raise FormatError("Choose quote or offsets for a text range")
         base = {k: v for k, v in target.items() if k not in {"start", "end", "quote", "occurrence"}}
@@ -100,6 +134,8 @@ def resolve_targets(index, target, allowed):
     allowed_fields = {
         "paragraph": {
             "role",
+            "semantic_role",
+            "language",
             "level",
             "chapter_id",
             "chapter_text",
@@ -136,7 +172,7 @@ def resolve_targets(index, target, allowed):
             )
     if "id" in target:
         candidates = [r for r in candidates if r["id"] == target["id"]]
-    for field in ("role", "module", "part"):
+    for field in ("role", "module", "part", "semantic_role", "language"):
         if field in target:
             candidates = [r for r in candidates if r.get(field) == target[field]]
     if "level" in target:

@@ -84,6 +84,20 @@ def indent(params):
     return dict(params)
 
 
+def paragraph_spacing(params):
+    """Keep Word's line-based paragraph spacing without guessing a point size."""
+    require_keys(params, {"value", "unit"}, {"value"}, "paragraph spacing")
+    if isinstance(params.get("value"), dict):
+        require_keys(params, {"value"}, {"value"}, "paragraph spacing")
+        value = params["value"]
+        require_keys(value, {"value", "unit"}, {"value", "unit"}, "line-based spacing")
+        if value["unit"] != "lines":
+            raise FormatError("Nested paragraph spacing requires unit lines")
+        number(value["value"], 0, 100)
+        return {"value": dict(value)}
+    return scalar("number", 0, 500, "pt")(params)
+
+
 def line_spacing(params):
     require_keys(params, {"kind", "value", "unit"}, {"kind", "value"}, "line spacing")
     kind = params["kind"]
@@ -263,15 +277,15 @@ for action, prop, handler, validator, params in (
         "paragraph.spacing_before.set",
         "space_before_pt",
         op.set_spacing_before,
-        scalar("number", 0, 500, "pt"),
-        {"value": "0..500", "unit": "pt"},
+        paragraph_spacing,
+        {"value": "0..500 pt, or {value: 0..100, unit: lines}", "unit": "pt (numeric only)"},
     ),
     (
         "paragraph.spacing_after.set",
         "space_after_pt",
         op.set_spacing_after,
-        scalar("number", 0, 500, "pt"),
-        {"value": "0..500", "unit": "pt"},
+        paragraph_spacing,
+        {"value": "0..500 pt, or {value: 0..100, unit: lines}", "unit": "pt (numeric only)"},
     ),
     (
         "paragraph.line_spacing.set",
@@ -461,7 +475,7 @@ for action, prop, handler, section, effects in (
         "table_of_contents",
         op.configure_toc,
         "table_of_contents",
-        ("managed TOC paragraphs", "field update setting"),
+        ("managed TOC paragraphs", "standalone imported TOC fields", "field update setting", "confirmed heading outline levels"),
     ),
     (
         "heading.numbering.configure",

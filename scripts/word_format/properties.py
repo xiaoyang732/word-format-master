@@ -400,7 +400,11 @@ def write_paragraph(pr, name, value):
         spacing = element(pr, "spacing")
         for key in (attr + "Lines", attr + "Autospacing"):
             spacing.attrib.pop(qn("w:" + key), None)
-        spacing.set(qn("w:" + attr), str(int(round(value * 20))))
+        if isinstance(value, dict):
+            spacing.attrib.pop(qn("w:" + attr), None)
+            spacing.set(qn("w:" + attr + "Lines"), str(int(round(value["value"] * 100))))
+        else:
+            spacing.set(qn("w:" + attr), str(int(round(value * 20))))
         # Explicitly disable automatic spacing inherited from a style.
         spacing.set(qn("w:" + attr + "Autospacing"), "0")
     elif name == "line_spacing":

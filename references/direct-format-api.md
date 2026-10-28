@@ -50,6 +50,9 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 | 某章所有正文 | `{"type":"paragraph","chapter_text":"第三章 实验","role":"body","all":true}` |
 | 某章第 2 个正文段落 | `{"type":"paragraph","chapter_id":"p10","role":"body","ordinal":2}` |
 | 整篇正文 | `{"type":"paragraph","role":"body","all":true}` |
+| 封面大标题 | `{"type":"paragraph","semantic_role":"cover_title","all":true}` |
+| 中文摘要标题 | `{"type":"paragraph","semantic_role":"abstract_heading","language":"zh","all":true}` |
+| 英文关键词标签 | `{"type":"text_range","semantic_role":"keywords","language":"en","segment":"label","all":true}` |
 | 所有顶层段落 | `{"type":"paragraph","all":true}` |
 | 表格第 1 行第 2 格文字 | `{"type":"paragraph","table_id":"t0","row":1,"cell":2,"all":true}` |
 | 第 1 节页面 | `{"type":"section","number":1}` |

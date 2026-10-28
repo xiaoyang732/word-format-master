@@ -125,3 +125,37 @@ python scripts/format_cli.py verify --plan plan.json --report report.json --outp
 计划和执行报告的 `profile_context` 保存来源、档案摘要、提取覆盖计数、逐规则目标/证据、原问题与决策、保留规则和保留段落。格式依据或目标原稿变化后执行拒绝；输出也不能覆盖格式依据。
 
 `verify` 复核每项计划的写入结果和结构。完整符合性还需 AI 对照原文检查覆盖范围，再通过 Word/LibreOffice 渲染逐页检查。未支持项、忽略项及视觉未完成必须列明，不能用结构通过替代所有格式符合。
+
+## 模板格式必须按实际区域取证
+
+`inspect` 为可确认的区域补充 `semantic_role`，不替换原有 `role/module`：
+`cover_title`、`cover_subject`、`cover_student`、`cover_college`、`cover_major`、
+`cover_advisor`、`cover_student_id`、`cover_date`、`abstract_title`、
+`abstract_heading`、`abstract_body`、`keywords`、`reference_heading`。
+摘要与关键词使用 `language: zh/en` 区分。无法可靠识别的区域保留原角色，需明确映射。
+
+模板规则按这些区域分组；关键词字体以 `text_range` 的 `segment: label/value`
+分别提取和对应，段落属性仍作用于整段。空词条不提供内容字体依据。空摘要占位段的
+现有格式保存在快照中并产生待核实项，不能把紧邻标题遗留的格式当作摘要正文要求。
+
+书面要求按显式目标分句，段落之间不沿用上段目标。“加黑”表示粗体，“黑体”表示
+字体家族。独立材料（例如优秀论文简介）的条款保留适用范围问题，未决前不并入主论文。
+未解析语义仍需逐条处理，不能靠降低问题数量或批量忽略来接受结果。
+
+模板、书面规范与用户要求并存时，先建立“区域—属性—来源锚点—最终采用值”清单，
+按用户明确指定 > 模板 > 书面要求处理；模板缺失或仅有空占位时回查规范。
+单一 profile 不会自动合并多个来源。合并需记录有依据的 resolution/mapping，
+或形成逐项可追溯的注册操作请求，且保留全部来源档案。
+`profile_context.coverage.target_properties` 列出每个目标实际检查的属性；
+一个段落有任意规则命中不代表全部格式已经覆盖。
+
+段前/段后若使用行单位，以 `{"value": {"value": 0.5, "unit": "lines"}}`
+写入对应 spacing 操作；保留 `beforeLines/afterLines`，不按固定字号换算成磅。
+点单位仍用数值 `value`。模板中超过可用页宽的首行缩进会产生问题项，
+需核对实际页面后决定，不能当作普通规则无条件迁移。
+
+目录写入会为已确认的标题补充实际大纲级别，保留其字体、样式和编号。
+完整且独立的旧 TOC 域可替换；跨段域、混有正文或携带分节符的旧目录拒绝自动删除。
+验收须有目录范围内的真实标题，并逐项匹配缓存结果，空缓存、占位提示及
+“未找到目录项”等错误不能通过。缓存只含标题文字，真实页码仍需 Word/WPS/LibreOffice
+更新域并经渲染核对。

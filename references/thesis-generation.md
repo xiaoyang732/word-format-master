@@ -100,6 +100,16 @@ title cannot be inferred, assign its Heading style explicitly before formatting.
 ## Formatting and verification
 
 Apply the selected template/preset through `format_cli.py plan/apply/verify`.
+An authoring script's `doc.save()` creates a draft, never an accepted final
+document. Inspecting or rendering that draft does not replace the plan, apply
+report and independent verification bound to the delivered output's hash.
+Before applying, record effective font channels, size, bold and paragraph
+properties separately for the cover title, each metadata field/date, each
+abstract title/label/body and keyword label/value in each language. Read style
+inheritance; do not guess a heading font from its name or translate “加黑” to
+the 黑体 font family. Empty placeholders require interpretation against the
+written requirements, and separate-document specifications need a scope decision.
+See [format-profile.md](format-profile.md) for semantic selectors and coverage.
 Do not repair draft formatting with an independent editing script or patch an
 installed skill mid-run. Fix the repository implementation, validate it, then
 sync the changed skill files without replacing unrelated local modifications.

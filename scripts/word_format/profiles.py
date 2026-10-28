@@ -112,6 +112,11 @@ def _template_document(path):
 
 
 def _selector(record):
+    if record.get("semantic_role"):
+        target = {"type": "paragraph", "semantic_role": record["semantic_role"], "all": True}
+        if record.get("language"):
+            target["language"] = record["language"]
+        return target
     target = {"type": "paragraph", "role": record["role"], "all": True}
     if record.get("module"):
         target["module"] = record["module"]
@@ -162,6 +167,9 @@ def template_profile(path):
     # Use the same effective readers as inspect, rather than inferred_spec's
     # representative paragraph or first-section heuristics.
     records = index.public()
+    usable_width_mm = min(
+        s.page_width.mm - s.left_margin.mm - s.right_margin.mm for s in document.sections
+    )
     groups = defaultdict(list)
     snapshot = []
     unknown = set()
@@ -211,13 +219,59 @@ def template_profile(path):
                 "rPr",
             }
             unknown.update(n.tag.split("}")[-1] for n in pr if n.tag.split("}")[-1] not in known)
-        if record.get("unsupported_container") or not record.get("text", "").strip():
+        if record.get("unsupported_container"):
+            continue
+        if not record.get("text", "").strip():
+            # Empty abstract placeholders often retain the preceding title's
+            # formatting. Record it, but require a decision before treating it
+            # as evidence for actual abstract prose.
+            if record.get("semantic_role") != "abstract_body":
+                continue
+            _issue(
+                profile,
+                "Empty abstract placeholder requires body-format interpretation",
+                target=_selector(record),
+                anchor=record["id"],
+                observed=values,
+            )
             continue
         selected = _selector(record)
         groups[json_hash(selected)].append((selected, record, values))
+        if record.get("semantic_role") == "keywords":
+            from .spec import keyword_text_ranges
+
+            ranges = keyword_text_ranges(record["text"])
+            if ranges:
+                # Character formats of the label and content have independent
+                # evidence. In particular a bold English label says nothing
+                # about Chinese labels or keyword values.
+                for segment, (start, end) in ranges.items():
+                    if start == end:
+                        _issue(
+                            profile,
+                            "Empty keyword segment has no sample font evidence",
+                            target={**selected, "type": "text_range", "segment": segment},
+                        )
+                        continue
+                    segment_target = {**selected, "type": "text_range", "segment": segment}
+                    segment_values = {
+                        name: index.font_values(record["id"], name, start, end)
+                        for name in FONT_TAGS
+                    }
+                    groups[json_hash(segment_target)].append(
+                        (segment_target, record, segment_values)
+                    )
     for group in groups.values():
         target = group[0][0]
         for name in list(FONT_TAGS) + list(PARAGRAPH_TAGS):
+            if target["type"] == "text_range" and name not in FONT_TAGS:
+                continue
+            if (
+                target.get("semantic_role") == "keywords"
+                and target["type"] == "paragraph"
+                and name in FONT_TAGS
+            ):
+                continue
             # first-line is the signed offset; the opposite zero is redundant.
             if name == "hanging_indent":
                 continue
@@ -237,6 +291,19 @@ def template_profile(path):
                 )
             choices = []
             unrepresentable = []
+            overflow = False
+            if name == "first_line_indent":
+                for _, _, values in group:
+                    indent = values[name]
+                    if indent and indent.get("value", 0) > 0:
+                        if indent.get("unit") == "mm":
+                            extent = indent["value"]
+                        else:
+                            sizes = [
+                                v for v in values["font_size_pt"] if isinstance(v, (int, float))
+                            ]
+                            extent = indent["value"] * max(sizes, default=0) * 25.4 / 72
+                        overflow = overflow or extent >= usable_width_mm
             for key, evidence in variants.items():
                 value = raw[key]
                 if value is None:
@@ -250,7 +317,16 @@ def template_profile(path):
                     choices.append(candidate)
                 except (FormatError, TypeError, KeyError):
                     unrepresentable.append({"value": value, "evidence": evidence})
-            if len(choices) == 1 and not unrepresentable:
+            if overflow:
+                _issue(
+                    profile,
+                    "Sample indent exceeds usable page width; review before migration",
+                    target=target,
+                    property=name,
+                    candidates=choices,
+                    observed=unrepresentable,
+                )
+            elif len(choices) == 1 and not unrepresentable:
                 _rule(profile, choices[0])
             else:
                 _issue(
@@ -693,6 +769,18 @@ def profile_plan(
         "decisions": decisions,
         "preserved_rules": preserved_rules,
         "preserved_targets": preserve,
+    }
+    # Object coverage alone is not proof that every font/paragraph property was
+    # specified. Expose exactly which actions the plan will check per object.
+    property_coverage = defaultdict(set)
+    for operation, match in zip(operations, matched):
+        for oid in match["target_ids"]:
+            segment = operation["target"].get("segment", "paragraph")
+            property_coverage[oid].add(segment + ":" + operation["action"])
+    context["coverage"] = {
+        **context["coverage"],
+        "target_properties": {oid: sorted(actions) for oid, actions in property_coverage.items()},
+        "target_property_policy": "Only listed properties are verified; unresolved evidence requires decisions",
     }
     if structure_contract is not None:
         context["structure_contract"] = structure_contract

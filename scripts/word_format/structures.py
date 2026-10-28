@@ -795,6 +795,26 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
 
     title = str(tokens.get("title") or "目录")
     max_level = int(tokens.get("max_heading_level", 3))
+    from .contracts import FormatError
+    from .properties import outline_level
+    from .toc import headings, imported_fields
+
+    for node in imported_fields(document):
+        node.getparent().remove(node)
+        removed += 1
+    entries = headings(document, max_level)
+    if not entries:
+        raise FormatError("Table of contents has no confirmed headings", "needs_clarification")
+    # Preserve the template's font, numbering and paragraph style. A real
+    # outline level makes conservative text-inferred headings searchable by
+    # Word's TOC \\u switch without imposing built-in Heading formatting.
+    for paragraph, level in entries:
+        if outline_level(document, paragraph._p) is None:
+            pr = paragraph._p.get_or_add_pPr()
+            node = OxmlElement("w:outlineLvl")
+            node.set(qn("w:val"), str(level - 1))
+            pr.append(node)
+    cached_entries = ["  " * (level - 1) + p.text.strip() for p, level in entries]
     from .spec import DEFAULT_TOC_TITLE_STYLE
 
     title_style_tokens = tokens.get("title_style") or DEFAULT_TOC_TITLE_STYLE
@@ -819,21 +839,6 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
         title_paragraph.add_run(title)
         insert_target = title_paragraph._p.getnext()
         field_paragraph = _insert_body_paragraph_before(document, insert_target, field_style)
-        cached_entries = []
-        for paragraph in document.paragraphs:
-            style_name = paragraph_style_name(document, paragraph._p)
-            if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
-                continue
-            text = paragraph.text.strip()
-            if not text:
-                continue
-            if re.match(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", text, re.I):
-                continue
-            match = re.fullmatch(r"Heading ([1-9])", style_name, re.I)
-            if match and int(match.group(1)) <= max_level:
-                level = int(match.group(1))
-                indent = "  " * (level - 1)
-                cached_entries.append(f"{indent}{text}")
         append_field(
             field_paragraph,
             f'TOC \\o "1-{max_level}" \\h \\z \\u',
@@ -884,21 +889,6 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
         title_paragraph = _insert_body_paragraph_before(document, anchor_xml, heading_style)
         title_paragraph.add_run(title)
         field_paragraph = _insert_body_paragraph_before(document, anchor_xml, field_style)
-        cached_entries = []
-        for paragraph in document.paragraphs:
-            style_name = paragraph_style_name(document, paragraph._p)
-            if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
-                continue
-            text = paragraph.text.strip()
-            if not text:
-                continue
-            if re.match(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", text, re.I):
-                continue
-            match = re.fullmatch(r"Heading ([1-9])", style_name, re.I)
-            if match and int(match.group(1)) <= max_level:
-                level = int(match.group(1))
-                indent = "  " * (level - 1)
-                cached_entries.append(f"{indent}{text}")
         append_field(
             field_paragraph,
             f'TOC \\o "1-{max_level}" \\h \\z \\u',

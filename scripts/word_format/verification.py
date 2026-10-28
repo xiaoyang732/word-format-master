@@ -105,6 +105,7 @@ def read_complex_state(index, name):
         }
     if name == "table_of_contents":
         from .properties import read_font, read_paragraph
+        from .toc import headings, result_status
 
         managed = [
             p for p in doc.paragraphs if paragraph_style_name(doc, p._p).startswith("WFM TOC")
@@ -154,10 +155,8 @@ def read_complex_state(index, name):
             ],
             "codes": [n.text or "" for p in managed for n in p._p.iter(qn("w:instrText"))],
             "trailing_break": bool(trailing),
-            "heading_count": sum(
-                paragraph_style_name(doc, p._p).startswith("Heading ") and bool(p.text.strip())
-                for p in doc.paragraphs
-            ),
+            "heading_count": len(headings(doc)),
+            "results_by_level": {str(level): result_status(doc, level) for level in range(1, 10)},
         }
 
     if name in {"heading_numbering", "numbered", "reference_numbering"}:
@@ -375,7 +374,7 @@ def verify_complex_state(actual, params, name):
         if not params.get("enabled"):
             return not actual["titles"] and not actual["codes"]
         structure_matches = (
-            actual["heading_count"] > 0
+            actual["results_by_level"][str(params.get("max_heading_level", 3))]["valid"]
             and params.get("title", "目录") in actual["titles"]
             and any(
                 f'\\o "1-{params.get("max_heading_level", 3)}"' in code
@@ -673,17 +672,38 @@ def structural_snapshot(index, cap, params, refs):
     from .inspect import paragraph_text
 
     reference_nodes = index.reference_nodes() if cap.property == "reference_numbering" else set()
+    toc_nodes = {}
+    imported_toc_nodes = set()
+    if cap.property == "table_of_contents" and params.get("enabled"):
+        from .toc import imported_fields
+
+        toc_nodes = {
+            index.elements[oid]: index.records[oid]["heading_level"]
+            for oid in index.top_ids
+            if index.records[oid].get("outline_level") is None
+            and index.records[oid].get("heading_level")
+            and index.records[oid]["heading_level"] <= params.get("max_heading_level", 3)
+        }
+        imported_toc_nodes = set(imported_fields(index.document))
     paragraphs = []
     for p in index.document.element.body.iter(qn("w:p")):
         ps = p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle"))
         style = ps.get(qn("w:val"), "") if ps is not None else ""
         text = paragraph_text(p)
         if cap.property == "table_of_contents" and (
-            style.startswith("WFMTOC")
+            p in imported_toc_nodes or style.startswith("WFMTOC")
             or re.fullmatch(r"\s*(?:目\s*录|table\s+of\s+contents|contents)\s*", text, re.I)
         ):
             continue
         clone = copy.deepcopy(p)
+        if p in toc_nodes:
+            pr = clone.find(qn("w:pPr"))
+            if pr is not None:
+                for child in list(pr):
+                    if child.tag == qn("w:outlineLvl") and child.get(qn("w:val")) == str(toc_nodes[p] - 1):
+                        pr.remove(child)
+                if not len(pr) and not pr.attrib:
+                    clone.remove(pr)
         if cap.property in {"headers_footers", "page_numbers"}:
             for sect in clone.iter(qn("w:sectPr")):
                 for child in list(sect):

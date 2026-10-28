@@ -6,9 +6,17 @@ from parse_requirements import CN_SIZE_PT, FONT_NAMES, measure_to_mm
 
 MEASURE = r"(\d+(?:\.\d+)?)\s*(厘米|毫米|英寸|磅|cm|mm|inches|inch|in|pt)"
 ROLES = [
+    (r"摘要正文|abstract\s+body", "abstract"),
+    (r"(?:设计[（(]论文[）)]|论文|中文|英文)题目", "abstract_title"),
+    (
+        r"[“\"]?摘要[”\"]?字样|[“\"]摘要[”\"]|^\s*摘要(?=\s*[（(])|\bAbstract\b(?!\s+body)",
+        "abstract_heading",
+    ),
+    (r"页眉(?!距)|header(?!\s+distance)", "header"),
+    (r"页脚(?!距)|footer(?!\s+distance)", "footer"),
     (r"([一二三四五六七八九1-9])级标题|heading\s*([1-9])", "heading"),
-    (r"正文|body(?:\s+text)?", "body"),
-    (r"摘要正文|abstract(?:\s+body)?", "abstract"),
+    (r"正文|body(?:\s+text)?|(?<=[，,])\s*内容(?=采用|用)|^\s*内容(?=采用|用)", "body"),
+    (r"章节题目|章节标题|标题(?=\s*(?:加黑|加粗))", "chapter_heading"),
     (r"参考文献|references|bibliography", "reference"),
     (r"关键词|keywords", "keywords"),
     (r"图题|图注|figure\s+caption", "figure"),
@@ -16,15 +24,58 @@ ROLES = [
 ]
 
 
+def _scopes(clause):
+    """Prefer complete labels (摘要正文) over substrings (正文)."""
+    found, occupied = [], []
+    for pattern, role in ROLES:
+        for match in re.finditer(pattern, clause, re.I):
+            if any(match.start() < end and match.end() > start for start, end in occupied):
+                continue
+            occupied.append(match.span())
+            found.append((match, role))
+    return sorted(found, key=lambda pair: pair[0].start())
+
+
+def _clauses(text):
+    for clause in re.split(r"[\n。；;]+", text):
+        # A comma introducing a new explicit scope starts a new instruction.
+        # Other commas (宋体，小四，居中) keep the same instruction together.
+        starts = [0]
+        for match, _ in _scopes(clause):
+            prefix = clause[: match.start()]
+            comma = max(prefix.rfind("，"), prefix.rfind(","))
+            if comma >= starts[-1] and not prefix[comma + 1 :].strip():
+                starts.append(comma + 1)
+        for start, end in zip(starts, starts[1:] + [len(clause)]):
+            yield clause[start:end]
+
+
 def parse_blocks(blocks):
     candidates, unresolved = [], []
     context = None
     scope = None
+    applicability = None
     for block in blocks:
         if block.get("scope") != scope:
             context = None
+            applicability = None
             scope = block.get("scope")
-        for clause in re.split(r"[\n。；;]+", block["text"]):
+        # A paragraph in a prose specification is not a continuation of the
+        # last formatting target. Tables already carry their label in the row.
+        context = None
+        if re.search(r"优秀.*(?:论文|设计).*简介.*(?:规格|要求)", block["text"]):
+            applicability = block["text"]
+        if applicability:
+            unresolved.append(
+                {
+                    "anchor": block["anchor"],
+                    "quote": block["text"],
+                    "applicability": applicability,
+                    "reason": "Separate document specification requires applicability resolution",
+                }
+            )
+            continue
+        for clause in _clauses(block["text"]):
             if not clause.strip():
                 continue
             remaining = list(clause)
@@ -47,23 +98,29 @@ def parse_blocks(blocks):
                 consume(match)
 
             found_roles = []
-            for pattern, role in ROLES:
-                for match in re.finditer(pattern, clause, re.I):
-                    selected = {"type": "paragraph", "role": role, "all": True}
-                    if role == "heading":
-                        raw = match.group(1) or match.group(2)
-                        selected["level"] = (
-                            int(raw) if raw.isdigit() else "一二三四五六七八九".index(raw) + 1
-                        )
-                    elif role == "abstract":
-                        selected.update(role="module_body", module="abstract")
-                    elif role in {"figure", "table"}:
-                        selected.update(role="caption", contains="图" if role == "figure" else "表")
-                    found_roles.append(selected)
-                    consume(match)
-            # Avoid body inside 摘要正文 being treated as two independent scopes.
-            if "摘要正文" in clause:
-                found_roles = [s for s in found_roles if s.get("module") == "abstract"]
+            for match, role in _scopes(clause):
+                selected = {"type": "paragraph", "role": role, "all": True}
+                if role == "heading":
+                    raw = match.group(1) or match.group(2)
+                    selected["level"] = (
+                        int(raw) if raw.isdigit() else "一二三四五六七八九".index(raw) + 1
+                    )
+                elif role == "abstract":
+                    selected = {"type": "paragraph", "semantic_role": "abstract_body", "all": True}
+                elif role in {"abstract_title", "abstract_heading"}:
+                    selected = {
+                        "type": "paragraph",
+                        "semantic_role": role,
+                        "all": True,
+                        "language": "en" if re.search(r"英文|\bAbstract\b", clause, re.I) else "zh",
+                    }
+                elif role == "chapter_heading":
+                    selected.update(role="heading", module="chapters")
+                elif role in {"figure", "table"}:
+                    selected.update(role="caption", contains="图" if role == "figure" else "表")
+                found_roles.append(selected)
+                consume(match)
+            found_roles = [dict(items) for items in {tuple(s.items()) for s in found_roles}]
             if len(found_roles) > 1:
                 unresolved.append(
                     {
@@ -75,6 +132,11 @@ def parse_blocks(blocks):
                 continue
             if found_roles:
                 target = context = found_roles[0]
+
+            # A bibliography example or other narrative is evidence to review,
+            # never an implicit instruction to set a font named after a city.
+            if re.match(r"\s*[［\[]\d+[］\]]", clause):
+                target = context = None
 
             page = {"type": "section", "all": True}
             for match in re.finditer(r"\bA4\b|\bLetter\b", clause, re.I):
@@ -110,8 +172,8 @@ def parse_blocks(blocks):
                 ("左|left", "margin_left"),
                 ("右|right", "margin_right"),
                 ("装订线|gutter", "gutter"),
-                ("页眉距|header distance", "header_distance"),
-                ("页脚距|footer distance", "footer_distance"),
+                ("页眉距?|header distance", "header_distance"),
+                ("页脚距?|footer distance", "footer_distance"),
             ]:
                 for match in re.finditer(
                     rf"(?:{label})(?:页?边距|\s+margin)?\s*(?:为|:|：)?\s*{MEASURE}", clause, re.I
@@ -134,6 +196,22 @@ def parse_blocks(blocks):
                             {"value": font},
                             match,
                         )
+                        if (
+                            target.get("role") == "body"
+                            and "一律" in clause
+                            and re.search(r"[\u4e00-\u9fff]", font)
+                        ):
+                            emit(
+                                "font.east_asia.set",
+                                {"value": font},
+                                match,
+                                {
+                                    "type": "paragraph",
+                                    "role": "heading",
+                                    "module": "chapters",
+                                    "all": True,
+                                },
+                            )
                 for label, size in sorted(
                     CN_SIZE_PT.items(), key=lambda pair: len(pair[0]), reverse=True
                 ):
@@ -151,7 +229,7 @@ def parse_blocks(blocks):
                         lambda m: {"kind": "multiple", "value": float(m[1])},
                     ),
                     (
-                        r"(?:行距\s*)?(?:固定值|exact(?:ly)?)\s*(\d+(?:\.\d+)?)\s*(?:磅|pt)",
+                        r"(?:行距\s*)?(?:固定值?|exact(?:ly)?)\s*(\d+(?:\.\d+)?)\s*(?:磅|pt)",
                         "paragraph.line_spacing.set",
                         lambda m: {"kind": "exact", "value": float(m[1])},
                     ),
@@ -212,7 +290,7 @@ def parse_blocks(blocks):
                     for match in re.finditer(pattern, "".join(remaining), re.I):
                         emit("paragraph.alignment.set", {"value": value}, match)
                 for action, pattern in [
-                    ("font.bold.set", r"(?:不加粗|非粗体|not bold|加粗|粗体|bold)"),
+                    ("font.bold.set", r"(?:不加粗|不加黑|非粗体|not bold|加粗|加黑|粗体|bold)"),
                     ("font.italic.set", r"(?:不倾斜|非斜体|not italic|斜体|italic)"),
                 ]:
                     for match in re.finditer(pattern, "".join(remaining), re.I):

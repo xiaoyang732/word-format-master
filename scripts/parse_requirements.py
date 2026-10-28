@@ -10,7 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-
 CN_SIZE_PT = {
     "初号": 42,
     "小初号": 36,
@@ -36,6 +35,12 @@ CN_SIZE_PT = {
     "七号": 5.5,
     "八号": 5,
 }
+# Schools also write 小4号/5号. Keep the same point sizes for these explicit
+# size labels; bare numbers remain measurements rather than Chinese sizes.
+CN_SIZE_PT.update({
+    label.translate(str.maketrans("一二三四五六七八", "12345678")): points
+    for label, points in list(CN_SIZE_PT.items()) if "号" in label
+})
 
 FONT_NAMES = [
     "Times New Roman",
@@ -79,6 +84,11 @@ def _number(value: str) -> float:
 
 
 def _size_from_text(text: str) -> float | None:
+    # A fixed line height is a paragraph measurement, not a font size.
+    text = re.sub(
+        r"(?:行距\s*)?(?:固定值?|exact(?:ly)?)\s*[，,:\s]?\s*\d+(?:[.,]\d+)?\s*(?:pt|磅)",
+        "", text, flags=re.I,
+    )
     for label, points in sorted(CN_SIZE_PT.items(), key=lambda x: len(x[0]), reverse=True):
         if label in text:
             return points
@@ -204,7 +214,7 @@ def parse_requirements(text: str) -> dict[str, Any]:
     elif re.search(r"单倍行距|single[- ]?spaced?|single\s+spacing", body_context, re.I):
         record("body.line_spacing", {"kind": "multiple", "value": 1.0}, "单倍行距 / single spacing", 0.99)
     else:
-        exact = re.search(r"(?:固定值|exact(?:ly)?)\s*[，,:\s]?\s*(\d+(?:[.,]\d+)?)\s*(?:pt|磅)", body_context, re.I)
+        exact = re.search(r"(?:固定值?|exact(?:ly)?)\s*[，,:\s]?\s*(\d+(?:[.,]\d+)?)\s*(?:pt|磅)", body_context, re.I)
         if exact:
             record("body.line_spacing", {"kind": "exact", "value_pt": _number(exact.group(1))}, exact.group(0), 0.98)
 
@@ -267,8 +277,9 @@ def parse_requirements(text: str) -> dict[str, Any]:
         for font in FONT_NAMES:
             if re.search(re.escape(font), line, re.I):
                 heading["font_east_asia" if re.search(r"[\u4e00-\u9fff]", font) else "font_latin"] = font
-        if re.search(r"加粗|粗体|bold", line, re.I):
-            heading["bold"] = True
+        bold = re.search(r"不加粗|不加黑|非粗体|not bold|加粗|加黑|粗体|bold", line, re.I)
+        if bold:
+            heading["bold"] = not bool(re.match(r"不|非|not", bold.group(), re.I))
         if re.search(r"居中|center", line, re.I):
             heading["alignment"] = "center"
         elif re.search(r"左对齐|居左|left", line, re.I):
@@ -336,8 +347,10 @@ def parse_requirements(text: str) -> dict[str, Any]:
                 continue
             key=kind
             if kind=="header":
-                if re.search(r"偶数?页|even[- ]page",segment,re.I): key="even_header"
-                elif re.search(r"首页|first[- ]page",segment,re.I): key="first_header"
+                if re.search(r"偶数?页|even[- ]page",segment,re.I):
+                    key="even_header"
+                elif re.search(r"首页|first[- ]page",segment,re.I):
+                    key="first_header"
             path=f"headers_footers.{key}"
             distance = re.search(rf"(?:{pattern})(?:距|距离)?\s*(?:页面)?(?:顶端|底端|边界)?\s*(?:为|:|：)?\s*{unit_pattern}", segment, re.I)
             if distance:
@@ -349,7 +362,8 @@ def parse_requirements(text: str) -> dict[str, Any]:
                 record(path+".enabled",True,segment,0.96)
                 record(path+".mode","chapter_title",segment,0.96)
                 style_match=re.search(r'STYLEREF\s+"([^"\\]+)"',segment,re.I)
-                if style_match: record(path+".style_name",style_match[1],segment,0.99)
+                if style_match:
+                    record(path+".style_name",style_match[1],segment,0.99)
             elif text_match and text_match.group(1).strip():
                 record(path+".enabled", True, segment, 0.96)
                 record(path+".text", text_match.group(1).strip(), segment, 0.91)
@@ -357,7 +371,8 @@ def parse_requirements(text: str) -> dict[str, Any]:
                 if font.lower() in segment.lower():
                     record(path+(".font_east_asia" if re.search(r"[\u4e00-\u9fff]",font) else ".font_latin"),font,segment,0.95)
             size=_size_from_text(segment)
-            if size is not None: record(path+".font_size_pt",size,segment,0.95)
+            if size is not None:
+                record(path+".font_size_pt",size,segment,0.95)
             for alignment, alignment_pattern in alignments:
                 if re.search(alignment_pattern, segment, re.I):
                     record(path+".alignment", alignment, segment, 0.94)

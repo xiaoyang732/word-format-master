@@ -229,16 +229,13 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         update = document.settings.element.find(qn("w:updateFields"))
         update_enabled = update is not None and update.get(qn("w:val")) in {"true", "1"}
         if toc.get("enabled"):
+            from word_format.toc import headings, result_status
+
             expected_level = int(toc.get("max_heading_level", 3))
             expected_switch = f'\\o "1-{expected_level}"'
             field_matches = any(expected_switch in code for code in toc_codes)
-            heading_matches = [
-                paragraph
-                for paragraph in document.paragraphs
-                if paragraph.text.strip()
-                and re.fullmatch(r"Heading ([1-9])", paragraph_style_name(document, paragraph._p), re.I)
-                and int(re.fullmatch(r"Heading ([1-9])", paragraph_style_name(document, paragraph._p), re.I).group(1)) <= expected_level
-            ]
+            heading_matches = headings(document, expected_level)
+            toc_result = result_status(document, expected_level)
             title = str(toc.get("title") or "目录")
             title_matches = any(
                 paragraph_style_name(document, paragraph._p) == "WFM TOC Heading" and paragraph.text == title
@@ -252,13 +249,13 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
                 for paragraph in document.paragraphs
             )
             break_ok = break_matches if toc.get("page_break_after", True) else not break_matches
-            passed = bool(toc_codes) and field_matches and bool(heading_matches) and title_matches and break_ok and update_enabled
+            passed = bool(toc_codes) and field_matches and toc_result["valid"] and title_matches and break_ok and update_enabled
             _check(
                 checks,
                 "table-of-contents",
                 passed,
                 f"TOC fields={len(toc_codes)}, level_switch={field_matches}, headings={len(heading_matches)}, title={title_matches}, "
-                f"page_break={break_matches}, updateFields={update_enabled}",
+                f"page_break={break_matches}, updateFields={update_enabled}, result_valid={toc_result['valid']}",
             )
             if not passed:
                 if not heading_matches:

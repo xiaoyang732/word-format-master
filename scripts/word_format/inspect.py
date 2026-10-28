@@ -174,6 +174,9 @@ class DocumentIndex:
                     if p_oid and p_oid in self.records:
                         self.records[p_oid]["module"] = "cover"
                         self.records[p_oid]["role"] = "cover_text"
+        from .semantics import annotate
+
+        annotate(self)
         for i, section in enumerate(document.sections):
             from .headers import VARIANTS, effective_root
 
