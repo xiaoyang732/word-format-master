@@ -38,6 +38,17 @@ def run_pipeline(
     run(*args)
     run("apply", "--plan", plan, "--report", report, *(["--overwrite"] if overwrite else []))
     run("verify", "--plan", plan, "--report", report, "--output", verification)
+    # A format-only pass cannot certify a generated document's numbering.
+    subprocess.run(
+        [
+            sys.executable,
+            str(SKILL_DIR / "scripts/check_numbering.py"),
+            str(output),
+            "--output",
+            str(reports / "numbering.json"),
+        ],
+        check=True,
+    )
     if render:
         subprocess.run(
             [

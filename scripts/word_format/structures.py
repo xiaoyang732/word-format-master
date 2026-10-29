@@ -1243,6 +1243,16 @@ def normalize_heading_styles(
         ):
             _set_paragraph_numbering(paragraph, num_id, ilvl=2)
 
+        # Explicit semantic level wins over a stale typed prefix (for example
+        # a Heading 3 paragraph still carrying "1.2"). Never leave both labels.
+        if actual_level in {1, 2, 3} and num_id is not None and not re_special.match(text):
+            from .numbering import heading_prefix
+
+            prefix = heading_prefix(paragraph.text)
+            if prefix and paragraph.text.strip() == text:
+                strip_text_prefix(paragraph._p, prefix.end())
+            _set_paragraph_numbering(paragraph, num_id, actual_level - 1)
+
     if adjusted:
         changes.append(
             f"Normalized {adjusted} heading paragraph style(s) according to chapter/section numbering"

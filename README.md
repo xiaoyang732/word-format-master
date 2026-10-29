@@ -2,6 +2,8 @@
 
 **把论文和格式要求交给 AI，自动完成 Word 排版与格式检查，原稿安全不破坏。**
 
+生成文件中的章节、小节、列表、参考文献使用 Word 自动编号；题注、公式、页码和交叉引用使用动态域，禁止键入结构编号。交付前必须执行 `python scripts/check_numbering.py OUTPUT.docx --output numbering.json`；统一流水线自动拦截检查失败的结果。详见 [生成规范](references/thesis-generation.md)。
+
 [![CI](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 

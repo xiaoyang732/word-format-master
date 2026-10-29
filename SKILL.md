@@ -199,6 +199,10 @@ inspect 和页面渲染不能代替逐项格式验收。目录须核对实际条
 
 ### 3. 规划、执行与验收
 
+- **所有生成文件的编号必须动态生成，禁止键入编号**：章节及各级小节、有序列表、参考文献条目使用 Word 原生编号（`w:numPr` + `numbering.xml`）；图、表、公式使用 `SEQ` 域，按章编号时组合 `STYLEREF`；页码使用 `PAGE`/`NUMPAGES`；文内引用和交叉引用使用书签与 `REF`/`PAGEREF` 等动态域。禁止把“第一章”“1.1”“（1）”“图1-1”“[1]”作为普通文字拼入对应编号位置，也禁止同时保留自动编号和手打前缀。正文的数据、年份、型号不属于结构编号。
+- 起草标题时只写标题正文并设置 Heading 样式，再执行 `heading.scheme.configure` 或模板的章节编号规则；有序列表必须绑定真实编号定义，题注和引用必须插入真实域。样例中的手打编号只能用于提取显示格式，不能照抄为最终编号；样例未能确定编号格式时明确解决规则，不得退回手打。
+- 生成交付前必须运行 `python scripts/check_numbering.py OUTPUT.docx --output numbering.json`，检查失败不得作为合格成品交付。统一流水线自动运行该检查。检查涵盖正文、表格与页眉页脚中的常见手打编号，并排除真实域的显示缓存；公式、自定义编号、跨段引用等仍需逐项核对 XML 和 Word/WPS 中的更新行为，不能只凭外观或检查通过认定所有编号正确。
+
 ```powershell
 # 基于要求或样例档案进行规划、应用与复核
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" plan INPUT.docx OUTPUT.docx --profile profile.json --mapping mapping.json --resolutions resolutions.json --output plan.json

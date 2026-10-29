@@ -13,4 +13,3 @@ __all__ = [
     "add_standard_thesis_cover",
     "apply_east_asia_font",
 ]
-

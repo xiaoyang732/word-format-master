@@ -11,6 +11,18 @@ from .namespaces import qn
 from .properties import element, ppr_sources, strip_text_prefix
 
 
+def heading_prefix(text):
+    """Recognize structural prefixes, including compact titles such as 1.1研究背景."""
+    return re.match(
+        r"^\s*(?:第\s*[一二三四五六七八九十百千零〇0-9]+\s*[章节]\s*[、.．]?\s*"
+        r"|\d+(?:[.．]\d+){1,8}(?![\d.．])\s*[、.．]?\s*"
+        r"|\d+(?:[、.．]\s*|\s+)(?!\d)"
+        r"|[一二三四五六七八九十百千零〇]+[、．]\s*"
+        r"|[（(][一二三四五六七八九十百千零〇0-9]+[）)]\s*)",
+        text,
+    )
+
+
 def validate_scheme(params):
     require_keys(params, {"levels"}, {"levels"}, "numbering scheme")
     if not isinstance(params["levels"], list) or not 1 <= len(params["levels"]) <= 9:
@@ -207,10 +219,7 @@ def apply_heading_scheme(index, ref, params):
         paragraph = index.paragraph(record["id"])
         paragraph.style = index.document.styles[f"Heading {level}"]
         # Strip only an established heading prefix. Bare digits are content.
-        prefix = re.match(
-            r"^\s*(?:第[一二三四五六七八九十百千零〇0-9]+章\s*|\d+(?:\.\d+){0,8}[、.．]?\s+)",
-            paragraph.text,
-        )
+        prefix = heading_prefix(paragraph.text)
         if prefix:
             strip_text_prefix(paragraph._p, prefix.end())
         _set_paragraph_numbering(paragraph, nid, level - 1)
@@ -237,6 +246,7 @@ def read_heading_scheme(index, ref, cap):
                 "config": config,
                 "ilvl": found[1] if found else None,
                 "outline": r.get("outline_level"),
+                "manual_prefix": bool(heading_prefix(r.get("text", ""))),
             }
         )
     return result
@@ -249,5 +259,6 @@ def verify_heading_scheme(actual, params, cap):
         and r["ilvl"] == r["level"] - 1
         and r["outline"] == r["level"] - 1
         and r["config"] == params["levels"][r["level"] - 1]
+        and not r["manual_prefix"]
         for r in actual
     )

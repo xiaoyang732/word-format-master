@@ -77,6 +77,33 @@ the sample's structure; retain those instructions and the resulting outline.
 
 ## Semantic authoring
 
+### Mandatory dynamic numbering
+
+Never type structural numbers into generated content. Write only heading titles
+and bind chapter/section styles to native multilevel Word numbering. Ordered lists
+and bibliography entries require native numbering definitions; captions and
+equation labels require SEQ fields (with STYLEREF for chapter prefixes), page
+numbers require PAGE/NUMPAGES, and citations/cross-references require bookmarks
+and REF/PAGEREF fields. Preserve visible formats through numbering definitions
+and field formatting, never literal prefixes or duplicate typed labels. Ordinary
+data, years, measurements and identifiers remain content.
+
+This requirement also applies when the sample uses typed numbers: infer its
+display scheme and implement it dynamically. Resolve an unknown scheme before
+delivery rather than falling back to typed numbers. Do not treat the caption
+`numbering_mode: seq` configuration alone as proof that a SEQ field was inserted;
+the current caption operation only controls position/formatting. Author the
+actual fields in the draft and inspect them after formatting.
+
+Run `python scripts/check_numbering.py OUTPUT.docx --output numbering.json`
+after plan/apply/verify; a failure blocks delivery. The shared pipeline runs this
+guard automatically. It checks common typed labels in body/table/header/footer
+paragraphs and excludes real field results. Also review equations, custom
+enumerations, appendix labels and cross-references explicitly: the conservative
+detector cannot establish all numbering intent from arbitrary prose. Confirm
+that inserting/removing an item and updating fields renumbers dependent labels
+in Word/WPS. Report structural and visual validation separately.
+
 Build a new draft with semantic styles: Title for a cover title when present, Heading 1–3
 for actual chapters/sections, Normal for prose, and separate caption/reference
 styles. Use paragraph/page/section break properties deliberately. Blank cover

@@ -174,6 +174,11 @@ def read_complex_state(index, name):
         numbering = _get_numbering_element(doc)
         records = []
         reference_nodes = index.reference_nodes() if name == "reference_numbering" else set()
+        chapter_nodes = {
+            index.elements[oid]
+            for oid in index.top_ids
+            if index.records[oid].get("semantic_role") == "chapter_heading"
+        }
         for p in doc.paragraphs:
             np = p._p.find("./" + qn("w:pPr") + "/" + qn("w:numPr"))
             ni = np.find(qn("w:numId")) if np is not None else None
@@ -221,6 +226,7 @@ def read_complex_state(index, name):
                     "marker": marker,
                     "start": start,
                     "reference_entry": p._p in reference_nodes,
+                    "chapter_heading": p._p in chapter_nodes,
                 }
             )
         return records
@@ -398,18 +404,20 @@ def verify_complex_state(actual, params, name):
         return True
 
     if name == "heading_numbering":
+        from .numbering import heading_prefix
+
         for level in (1, 2, 3):
             mode = params.get(f"level{level}", "keep")
             if mode == "keep":
                 continue
             candidates = [
-                r
-                for r in actual
-                if r["style"] == f"Heading {level}" and r["num_id"] not in {None, "0"}
+                r for r in actual if r["chapter_heading"] and r["style"] == f"Heading {level}"
             ]
             # No headings of this level is a no-op, not permission to invent one.
             if any(
-                r["marker"]
+                r["num_id"] in {None, "0"}
+                or heading_prefix(r["text"])
+                or r["marker"]
                 != (
                     {
                         1: {"chinese": "第%1章", "arabic": "%1、", "arabic-space": "%1"}[mode]
@@ -806,6 +814,12 @@ def verify_structural_preservation(index, cap, params, refs, before):
             or (cap.property == "reference_numbering" and node in index.reference_nodes())
         ) and text.endswith(new_text):
             removed = text[: len(text) - len(new_text)] if new_text else text
+            if cap.property == "heading_numbering":
+                from .numbering import heading_prefix
+
+                prefix = heading_prefix(text)
+                if prefix and prefix.end() == len(removed):
+                    continue
             if re.fullmatch(
                 r"\s*(?:第[一二三四五六七八九十百千零〇0-9]+章|\d+(?:\.\d+){0,2}[、.．]?|\[\d+\]|［\d+］)\s*",
                 removed,
