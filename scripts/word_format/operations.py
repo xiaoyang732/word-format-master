@@ -130,6 +130,14 @@ def assign_style(index, ref, params):
     node.set(qn("w:val"), style.style_id)
 
 
+def set_outline_level(index, ref, params):
+    set_paragraph_property(index, ref, params, "outline_level")
+
+
+def suppress_numbering(index, ref, params):
+    set_paragraph_property(index, ref, params, "numbering_suppressed")
+
+
 def set_page_property(index, ref, params, attr):
     node = index.elements[ref["id"]]
     tag = "pgSz" if attr in {"w", "h", "orient"} else "pgMar"

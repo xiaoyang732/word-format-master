@@ -8,6 +8,8 @@ import re
 
 from document_structure import MODULE_MARKERS
 
+from .namespaces import qn
+
 
 def language(text):
     return "zh" if re.search(r"[\u4e00-\u9fff]", text) else "en"
@@ -72,3 +74,35 @@ def annotate(index):
                 following["language"] = lang
             elif following.get("module") != "abstract":
                 break
+
+    for oid, record in index.records.items():
+        if record["kind"] != "paragraph":
+            continue
+        role, module = record["role"], record.get("module")
+        semantic = {
+            "body": "body_text",
+            "reference": "reference_entry",
+            "caption": "caption",
+            "title": "document_title",
+            "table_text": "table_text",
+        }.get(role, role)
+        if role == "heading":
+            semantic = "chapter_heading" if module == "chapters" else f"{module}_heading"
+        elif role == "module_body":
+            semantic = f"{module}_body"
+        record.setdefault("semantic_role", semantic)
+        record.setdefault("language", None)
+        kind = object_kind(index.elements[oid], record.get("text", ""))
+        record["object_kind"] = kind
+        if kind != "text":
+            record["role"] = kind
+            record["semantic_role"] = kind
+
+
+def object_kind(node, text):
+    tags = {n.tag for n in node.iter()}
+    if qn("w:drawing") in tags or qn("w:pict") in tags:
+        return "mixed_content" if text.strip() else "image"
+    if any(tag.endswith("}oMath") or tag.endswith("}oMathPara") for tag in tags):
+        return "mixed_content" if text.strip() else "equation"
+    return "text"

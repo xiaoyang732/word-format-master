@@ -52,14 +52,17 @@ class DocumentIndex:
                 else "body"
             )
             normalized = style_name.lower().replace(" ", "")
-            if normalized in {"title", "subtitle"}:
+            if re.fullmatch(r"(?:toc|目录)[1-9]|wfmtocfield|wfmtocbreak", normalized):
+                # Cached TOC text may look exactly like a chapter/caption.
+                role, level, special = "toc", None, None
+            elif normalized in {"title", "subtitle"}:
                 role = "title"
             elif "caption" in normalized or re.match(
                 r"^\s*(?:图|表|Figure|Fig\.|Table)\s*\d+", text, re.I
             ):
                 role = "caption"
             elif normalized.startswith("toc") or normalized.startswith("wfmtoc"):
-                role = "toc"
+                role = "heading" if special == "toc" else "toc"
             elif (
                 "list" in normalized or p.find("./" + qn("w:pPr") + "/" + qn("w:numPr")) is not None
             ):
@@ -152,10 +155,14 @@ class DocumentIndex:
                 record["role"] = "module_body"
         body_children = list(body)
         boundary_elem = (
-            self.elements[self.top_ids[boundary]] if boundary is not None and boundary < len(self.top_ids) else None
+            self.elements[self.top_ids[boundary]]
+            if boundary is not None and boundary < len(self.top_ids)
+            else None
         )
         boundary_idx = (
-            body_children.index(boundary_elem) if boundary_elem in body_children else len(body_children)
+            body_children.index(boundary_elem)
+            if boundary_elem in body_children
+            else len(body_children)
         )
         for i, tbl in enumerate(body.iter(qn("w:tbl"))):
             pid = next((oid for oid, e in self.elements.items() if e is tbl.getparent()), None)
@@ -260,7 +267,7 @@ class DocumentIndex:
             for oid in self.top_ids
             if (
                 self.records[oid].get("module") == "references"
-                and self.records[oid].get("role") != "heading"
+                and self.records[oid].get("role") in {"reference", "list"}
             )
             or (
                 self.records[oid].get("module") is None

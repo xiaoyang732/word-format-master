@@ -21,6 +21,8 @@ FONT_TAGS = {
     "color": ("color",),
 }
 PARAGRAPH_TAGS = {
+    "outline_level": ("outlineLvl",),
+    "numbering_suppressed": ("numPr",),
     "alignment": ("jc",),
     "space_before_pt": ("spacing",),
     "space_after_pt": ("spacing",),
@@ -311,6 +313,14 @@ def write_font(pr, name, value):
 
 def read_paragraph(document, paragraph, name):
     sources = list(ppr_sources(document, paragraph))
+    if name == "outline_level":
+        return int(_attr(sources, "outlineLvl") or 9)
+    if name == "numbering_suppressed":
+        for pr in sources:
+            node = pr.find("./" + qn("w:numPr") + "/" + qn("w:numId")) if pr is not None else None
+            if node is not None:
+                return node.get(qn("w:val")) == "0"
+        return False
     if name == "alignment":
         value = _attr(sources, "jc") or "left"
         return "justify" if value == "both" else value
@@ -393,7 +403,18 @@ def read_paragraph(document, paragraph, name):
 
 
 def write_paragraph(pr, name, value):
-    if name == "alignment":
+    if name == "outline_level":
+        element(pr, "outlineLvl").set(qn("w:val"), str(int(value)))
+    elif name == "numbering_suppressed":
+        node = pr.find(qn("w:numPr"))
+        if value:
+            node = element(pr, "numPr")
+            for child in list(node):
+                node.remove(child)
+            element(node, "numId").set(qn("w:val"), "0")
+        elif node is not None:
+            pr.remove(node)
+    elif name == "alignment":
         element(pr, "jc").set(qn("w:val"), "both" if value == "justify" else value)
     elif name in {"space_before_pt", "space_after_pt"}:
         attr = "before" if name == "space_before_pt" else "after"

@@ -15,5 +15,16 @@ htmlcov/
 Thumbs.db
 output/
 
-# Development and testing assets (local only, do not commit to GitHub / SkillHub)
-_dev/
+# Track reproducible regression tests and checks; keep other development assets local.
+_dev/*
+!_dev/tests/
+_dev/tests/*
+!_dev/tests/test_*.py
+!_dev/scripts/
+_dev/scripts/*
+!_dev/scripts/validate_project.py
+!_dev/scripts/smoke_test.py
+!_dev/ci/
+_dev/ci/*
+!_dev/ci/pyproject.toml
+!_dev/ci/requirements-dev.txt

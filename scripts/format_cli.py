@@ -24,6 +24,7 @@ from word_format.profiles import (
     requirements_profile,
     template_profile,
 )
+from word_format.templates import compile_template, list_templates, load_template, template_plan
 
 
 def read_json(path):
@@ -48,6 +49,7 @@ def main():
         "profile", help="Extract evidence; unresolved issues are not silently applied"
     )
     p.add_argument("kind", choices=["requirements", "template"])
+    p.add_argument("--document-kind", choices=["thesis", "summary", "all"], default="thesis")
     p.add_argument("input")
     p.add_argument("--output")
     p = commands.add_parser(
@@ -58,7 +60,19 @@ def main():
     p.add_argument("--output")
     p = commands.add_parser("audit")
     p.add_argument("input")
-    p.add_argument("--request", required=True, help="JSON request file")
+    authority = p.add_mutually_exclusive_group(required=True)
+    authority.add_argument("--request", help="JSON request file")
+    authority.add_argument("--template", help="Builtin ID or compiled template JSON")
+    p.add_argument("--mapping")
+    p.add_argument("--output")
+    p = commands.add_parser("template", help="Compile reusable templates without preset fallback")
+    p.add_argument("kind", choices=["list", "compile", "validate"])
+    p.add_argument("input", nargs="?")
+    p.add_argument(
+        "--profile", action="append", help="Evidence profile; repeat for multiple sources"
+    )
+    p.add_argument("--resolutions")
+    p.add_argument("--id", default="user-template")
     p.add_argument("--output")
     p = commands.add_parser("plan")
     p.add_argument("input")
@@ -66,6 +80,7 @@ def main():
     authority = p.add_mutually_exclusive_group(required=True)
     authority.add_argument("--request", help="JSON request file (not raw prose)")
     authority.add_argument("--profile", help="Extracted format profile JSON")
+    authority.add_argument("--template", help="Builtin ID or compiled format template JSON")
     p.add_argument("--resolutions", help="JSON decisions for profile issues")
     p.add_argument("--mapping", help="JSON section and rule target mappings")
     p.add_argument("--request-text", default="", help="Human instruction retained in plan")
@@ -109,8 +124,27 @@ def main():
                     "render_manifest",
                 )
             )
-            if v
+            if v and not isinstance(v, list)
         ]
+        if args.command == "template" and args.profile:
+            protected.extend(args.profile)
+            protected.extend(read_json(p)["source"]["path"] for p in args.profile)
+        if args.command in {"plan", "audit"} and args.template:
+            template, template_source = load_template(args.template)
+            protected.extend([template_source["path"], *[s["path"] for s in template["sources"]]])
+        if args.command == "template" and args.kind == "validate":
+            if not args.input:
+                raise FormatError("template validate requires a template ID or file")
+            template, template_source = load_template(args.input)
+            protected.extend([template_source["path"], *[s["path"] for s in template["sources"]]])
+        if args.command in {"apply", "verify"}:
+            # Protect the selected template and every evidence source as well.
+            preview = read_json(args.plan)
+            context = preview.get("request", {}).get("template_context")
+            if context:
+                protected.extend(s["path"] for s in context["definition"]["sources"])
+                if context["source"]:
+                    protected.append(context["source"]["path"])
         if args.command in {"apply", "verify"}:
             plan = read_json(args.plan)
             protected.extend([plan["source"]["path"], plan["output_path"]])
@@ -137,16 +171,61 @@ def main():
             result = capabilities()
         elif args.command == "inspect":
             result = inspect_document(args.input)
+        elif args.command == "template":
+            if args.kind == "list":
+                result = {"kind": "word-format-templates", "templates": list_templates()}
+            elif args.kind == "validate":
+                value = template
+                result = {
+                    "status": "needs_clarification" if value["issues"] else "passed",
+                    "template_id": value["id"],
+                    "issues": value["issues"],
+                }
+            else:
+                result = compile_template(
+                    [read_json(p) for p in args.profile or []],
+                    identifier=args.id,
+                    resolutions=read_json(args.resolutions) if args.resolutions else None,
+                )
         elif args.command == "profile":
-            result = (requirements_profile if args.kind == "requirements" else template_profile)(
-                args.input
+            result = (
+                requirements_profile(args.input, document_kind=args.document_kind)
+                if args.kind == "requirements"
+                else template_profile(args.input)
             )
         elif args.command == "check-structure":
             result = check_template_structure(args.input, profile)
         elif args.command == "audit":
-            result = audit_document(args.input, request)
+            if args.template:
+                draft = Path(args.input).resolve()
+                bound = template_plan(
+                    draft,
+                    draft.with_name(f".{draft.stem}.audit-only.docx"),
+                    template,
+                    mapping=read_json(args.mapping) if args.mapping else None,
+                    template_source=template_source,
+                )
+                result = (
+                    bound
+                    if bound.get("status") == "needs_clarification"
+                    else audit_document(args.input, bound["request"])
+                )
+            else:
+                result = audit_document(args.input, request)
         elif args.command == "plan":
-            if args.profile:
+            if args.template:
+                if args.resolutions or args.match_structure:
+                    raise FormatError(
+                        "Compile template decisions first; --match-structure belongs to profile mode"
+                    )
+                result = template_plan(
+                    args.input,
+                    args.destination,
+                    template,
+                    mapping=read_json(args.mapping) if args.mapping else None,
+                    template_source=template_source,
+                )
+            elif args.profile:
                 result = profile_plan(
                     args.input,
                     args.destination,

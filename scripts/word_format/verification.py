@@ -67,6 +67,8 @@ def read_complex_state(index, name):
                             )
         return state
     if name == "page_numbers":
+        from .structures import _find_body_section_index
+
         parts = {}
         for kind in ("header", "footer"):
             for i, s in enumerate(doc.sections):
@@ -97,6 +99,7 @@ def read_complex_state(index, name):
         )
         return {
             "parts": parts,
+            "body_index": _find_body_section_index(doc),
             "first_page": [s.different_first_page_header_footer for s in doc.sections],
             "odd_even": doc.settings.odd_and_even_pages_header_footer,
             "managed": managed,
@@ -138,21 +141,27 @@ def read_complex_state(index, name):
             "right_indent",
             "hanging_indent",
         )
-        return {
-            "titles": [p.text for p in title_paragraphs],
-            "title_formats": [
+
+        def formats(paragraphs):
+            return [
                 {
                     "font": [
-                        {key: read_font(doc, p._p, run._r, key) for key in font_keys}
-                        for run in p.runs
-                        if run.text
+                        {
+                            key: read_font(doc, p._p, run._r if run else None, key)
+                            for key in font_keys
+                        }
+                        for run in p.runs or [None]
                     ],
-                    "paragraph": {
-                        key: read_paragraph(doc, p._p, key) for key in paragraph_keys
-                    },
+                    "paragraph": {key: read_paragraph(doc, p._p, key) for key in paragraph_keys},
                 }
-                for p in title_paragraphs
-            ],
+                for p in paragraphs
+            ]
+
+        return {
+            "titles": [p.text for p in title_paragraphs],
+            "title_formats": formats(title_paragraphs),
+            "field_formats": formats([p for p in managed if p.style.name == "WFM TOC Field"]),
+            "break_formats": formats(trailing),
             "codes": [n.text or "" for p in managed for n in p._p.iter(qn("w:instrText"))],
             "trailing_break": bool(trailing),
             "heading_count": len(headings(doc)),
@@ -323,52 +332,47 @@ def verify_complex_state(actual, params, name):
             return actual["managed"] == 0
         kind = params.get("location", "footer")
         start_val = str(params.get("start", 1))
-
         # 1. Standard check: all sections have page numbers and section 0 has start
         keys = [f"{i}:{kind}" for i in range(len(actual["starts"]))]
-        if params.get("show_on_first_page", True):
-            keys.extend(
-                f"{i}:first_page_{kind}"
-                for i, enabled in enumerate(actual["first_page"])
-                if enabled
-            )
+        for i, enabled in enumerate(actual["first_page"]):
+            show_first = params.get("show_on_first_page", True)
+            if i >= actual["body_index"] and "show_on_body_first_page" in params:
+                show_first = params["show_on_body_first_page"]
+            first_key = f"{i}:first_page_{kind}"
+            if not show_first:
+                if not enabled or actual["parts"].get(first_key, 0):
+                    return False
+            elif enabled:
+                keys.append(first_key)
         if actual["odd_even"]:
             keys.extend(f"{i}:even_page_{kind}" for i in range(len(actual["starts"])))
         counts = [actual["parts"].get(k, 0) for k in keys]
-        if (
-            bool(counts)
-            and all(c == 1 for c in counts)
-            and actual["starts"][0] == start_val
-        ):
-            return (
-                params.get("format") != "page-x-of-y"
-                or any("NUMPAGES" in c for c in actual["codes"])
+        if bool(counts) and all(c == 1 for c in counts) and actual["starts"][0] == start_val:
+            return params.get("format") != "page-x-of-y" or any(
+                "NUMPAGES" in c for c in actual["codes"]
             )
-
         # 2. Multi-section thesis check: page numbers start at body section, front matter sections have none
         body_sections = [i for i, s in enumerate(actual["starts"]) if s == start_val]
         if body_sections:
             b_idx = body_sections[0]
             body_keys = [f"{i}:{kind}" for i in range(b_idx, len(actual["starts"]))]
             if actual["odd_even"]:
-                body_keys.extend(f"{i}:even_page_{kind}" for i in range(b_idx, len(actual["starts"])))
+                body_keys.extend(
+                    f"{i}:even_page_{kind}" for i in range(b_idx, len(actual["starts"]))
+                )
             body_counts = [actual["parts"].get(k, 0) for k in body_keys]
-
             front_keys = [f"{i}:{kind}" for i in range(0, b_idx)]
             if actual["odd_even"]:
                 front_keys.extend(f"{i}:even_page_{kind}" for i in range(0, b_idx))
             front_counts = [actual["parts"].get(k, 0) for k in front_keys]
-
             if (
                 bool(body_counts)
                 and all(c == 1 for c in body_counts)
                 and all(c == 0 for c in front_counts)
             ):
-                return (
-                    params.get("format") != "page-x-of-y"
-                    or any("NUMPAGES" in c for c in actual["codes"])
+                return params.get("format") != "page-x-of-y" or any(
+                    "NUMPAGES" in c for c in actual["codes"]
                 )
-
         return False
     if name == "table_of_contents":
         if not params.get("enabled"):
@@ -377,15 +381,21 @@ def verify_complex_state(actual, params, name):
             actual["results_by_level"][str(params.get("max_heading_level", 3))]["valid"]
             and params.get("title", "目录") in actual["titles"]
             and any(
-                f'\\o "1-{params.get("max_heading_level", 3)}"' in code
-                for code in actual["codes"]
+                f'\\o "1-{params.get("max_heading_level", 3)}"' in code for code in actual["codes"]
             )
             and actual["trailing_break"] == params.get("page_break_after", True)
         )
-        title_style = params.get("title_style")
-        return structure_matches and (
-            not title_style or _verify_toc_title_format(actual["title_formats"], title_style)
-        )
+        if not structure_matches:
+            return False
+        for name in ("title", "field", "break"):
+            requested = params.get(
+                name + "_format", params.get("title_style") if name == "title" else None
+            )
+            if name == "break" and not params.get("page_break_after", True):
+                continue
+            if requested and not _verify_toc_title_format(actual[name + "_formats"], requested):
+                return False
+        return True
 
     if name == "heading_numbering":
         for level in (1, 2, 3):
@@ -452,7 +462,6 @@ def verify_complex_state(actual, params, name):
 
 def atomic_projection(document, index, refs, cap):
     """Compare all package parts, masking only the requested properties/range.
-
     Text runs are flattened to character tokens so harmless splitting does not
     conceal bookmark/hyperlink/object changes or adjacent-character formatting.
     """
@@ -460,10 +469,10 @@ def atomic_projection(document, index, refs, cap):
         index.elements.get(r["id"]): r for r in refs if index.elements.get(r["id"]) is not None
     }
     new_style_names = {
-        r["id"][6:] for r in refs if r["kind"] == "style" and r.get("xml_sha256") is None
+        r["id"][6:].casefold() for r in refs if r["kind"] == "style" and r.get("xml_sha256") is None
     }
     if cap.property == "style":
-        new_style_names = {r["new_style_name"] for r in refs if "new_style_name" in r}
+        new_style_names = {r["new_style_name"].casefold() for r in refs if "new_style_name" in r}
     ancestors = {a for node in targets for a in node.iterancestors()}
     if new_style_names:
         ancestors.add(document.styles.element)
@@ -538,7 +547,7 @@ def atomic_projection(document, index, refs, cap):
 
     def tree(node):
         if node.tag == qn("w:style") and node.find(qn("w:name")) is not None:
-            if node.find(qn("w:name")).get(qn("w:val")) in new_style_names:
+            if node.find(qn("w:name")).get(qn("w:val"), "").casefold() in new_style_names:
                 return None
         ref = targets.get(node)
         if ref is not None:
@@ -586,7 +595,7 @@ def atomic_projection(document, index, refs, cap):
         # Newly created styles from assigning a name are not unrelated changes.
         if node.tag == qn("w:style") and node.find(qn("w:name")) is not None:
             name = node.find(qn("w:name")).get(qn("w:val"))
-            if name in new_style_names:
+            if name.casefold() in new_style_names:
                 return None
         if node not in ancestors:
             # C-level serialization covers every untouched subtree on both sides.
@@ -691,7 +700,8 @@ def structural_snapshot(index, cap, params, refs):
         style = ps.get(qn("w:val"), "") if ps is not None else ""
         text = paragraph_text(p)
         if cap.property == "table_of_contents" and (
-            p in imported_toc_nodes or style.startswith("WFMTOC")
+            p in imported_toc_nodes
+            or style.startswith("WFMTOC")
             or re.fullmatch(r"\s*(?:目\s*录|table\s+of\s+contents|contents)\s*", text, re.I)
         ):
             continue
@@ -700,7 +710,9 @@ def structural_snapshot(index, cap, params, refs):
             pr = clone.find(qn("w:pPr"))
             if pr is not None:
                 for child in list(pr):
-                    if child.tag == qn("w:outlineLvl") and child.get(qn("w:val")) == str(toc_nodes[p] - 1):
+                    if child.tag == qn("w:outlineLvl") and child.get(qn("w:val")) == str(
+                        toc_nodes[p] - 1
+                    ):
                         pr.remove(child)
                 if not len(pr) and not pr.attrib:
                     clone.remove(pr)

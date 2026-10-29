@@ -61,10 +61,27 @@ def _rule(profile, candidate):
     profile["rules"].append(candidate)
 
 
-def requirements_profile(path):
+def requirements_profile(path, *, document_kind="thesis"):
     extracted = extract_requirements(path)
+    if document_kind not in {"thesis", "summary", "all"}:
+        raise FormatError("Requirement document_kind must be thesis, summary or all")
+    # Retain all evidence, but never combine a paper with its separately specified synopsis.
+    active_kind = "thesis"
+    active_scope = None
+    selected, excluded = [], []
+    for block in extracted["blocks"]:
+        scope = block.get("scope")
+        if scope != active_scope:
+            active_kind, active_scope = "thesis", scope
+        text = block["text"]
+        if len(text) < 150 and "简介" in text and any(w in text for w in ("规格", "撰写要求")):
+            active_kind = "summary"
+        block["document_kind"] = active_kind
+        (selected if document_kind == "all" or active_kind == document_kind else excluded).append(
+            block
+        )
     profile = _profile(extracted["source"])
-    candidates, unresolved = parse_blocks(extracted["blocks"])
+    candidates, unresolved = parse_blocks(selected)
     grouped = defaultdict(list)
     for candidate in candidates:
         grouped[(json_hash(candidate["target"]), candidate["action"])].append(candidate)
@@ -82,10 +99,25 @@ def requirements_profile(path):
     for item in extracted["issues"] + unresolved:
         reason = item.pop("reason")
         _issue(profile, reason, **item)
-    profile["snapshot"] = {"blocks": extracted["blocks"]}
+    for block in excluded:
+        _issue(
+            profile,
+            "Separate document specification excluded from the selected document kind",
+            anchor=block["anchor"],
+            quote=block["text"],
+            applicability=block["document_kind"],
+            document_kind=document_kind,
+        )
+    profile["snapshot"] = {
+        "blocks": extracted["blocks"],
+        "document_kind": document_kind,
+        "excluded_blocks": excluded,
+    }
     profile["coverage"] = {
         "represented_rules": len(profile["rules"]),
         "read_blocks": len(extracted["blocks"]),
+        "applicable_blocks": len(selected),
+        "excluded_blocks": len(excluded),
         "unresolved": len(profile["issues"]),
         "policy": "No preset defaults; every unparsed phrase requires an explicit resolution",
     }
@@ -112,7 +144,21 @@ def _template_document(path):
 
 
 def _selector(record):
-    if record.get("semantic_role"):
+    if record.get("semantic_role") in {
+        "cover_title",
+        "cover_subject",
+        "cover_student",
+        "cover_college",
+        "cover_major",
+        "cover_advisor",
+        "cover_student_id",
+        "cover_date",
+        "abstract_title",
+        "abstract_heading",
+        "abstract_body",
+        "keywords",
+        "reference_heading",
+    }:
         target = {"type": "paragraph", "semantic_role": record["semantic_role"], "all": True}
         if record.get("language"):
             target["language"] = record["language"]
@@ -122,6 +168,9 @@ def _selector(record):
         target["module"] = record["module"]
     if record.get("heading_level"):
         target["level"] = record["heading_level"]
+    for field in ("semantic_role", "language"):
+        if record.get(field):
+            target[field] = record[field]
     if record["role"] == "table_text":
         target["part"] = "word/document.xml"
     if record["role"] == "caption":
@@ -264,6 +313,11 @@ def template_profile(path):
     for group in groups.values():
         target = group[0][0]
         for name in list(FONT_TAGS) + list(PARAGRAPH_TAGS):
+            # Absence of numId=0 is not an instruction to delete target numbering.
+            if name == "numbering_suppressed":
+                continue
+            if name == "outline_level" and target.get("role") == "heading":
+                continue
             if target["type"] == "text_range" and name not in FONT_TAGS:
                 continue
             if (
@@ -477,11 +531,38 @@ def template_profile(path):
         index.elements[r["id"]].find("./" + qn("w:pPr") + "/" + qn("w:numPr")) is not None
         for r in snapshot
     ):
-        _issue(
-            profile,
-            "Used Word numbering requires semantic mapping to target headings or lists",
-            numbering=analysis["document"]["numbering"],
-        )
+        from .numbering import effective_numbering, extract_heading_scheme
+
+        for record in snapshot:
+            if record.get("role") == "heading" and record.get("module") != "chapters":
+                if effective_numbering(document, index.elements[record["id"]]) is not None:
+                    _issue(
+                        profile,
+                        "Numbered module heading requires an explicit numbering rule or preservation decision",
+                        target_id=record["id"],
+                        text=record.get("text", ""),
+                    )
+
+        try:
+            scheme = extract_heading_scheme(index)
+            if scheme:
+                _rule(
+                    profile,
+                    {
+                        "target": {"type": "document"},
+                        "action": "heading.scheme.configure",
+                        "params": scheme,
+                        "evidence": [{"anchor": "word/numbering.xml", "confidence": 1.0}],
+                    },
+                )
+            # Other lists and level geometry are recorded, never presumed migrated.
+            _issue(
+                profile,
+                "Review non-heading numbering and level indentation/font properties",
+                numbering=analysis["document"]["numbering"],
+            )
+        except FormatError as exc:
+            _issue(profile, str(exc), numbering=analysis["document"]["numbering"])
     profile["snapshot"] = {
         "paragraphs": snapshot,
         "styles": analysis["styles"],

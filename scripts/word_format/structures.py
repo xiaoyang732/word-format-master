@@ -8,7 +8,7 @@ import json
 import re
 from typing import Any, Iterable
 
-from config import LIST_NUMBERING_STYLES
+from config import LIST_NUMBERING_STYLES, SKILL_DIR
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
@@ -580,55 +580,40 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     set_paragraph_format(style, tokens)
     start = int(tokens.get("start", 1))
 
-    body_idx = _find_body_section_index(document)
-    if body_idx > 0:
-        for i in range(body_idx):
-            sec = document.sections[i]
-            for kind in ("footer", "first_page_footer", "even_page_footer"):
-                container = getattr(sec, kind)
-                container.is_linked_to_previous = False
-                for p in list(container.paragraphs):
-                    clear_paragraph_content(p)
-            sect_pr = sec._sectPr
-            page_type = sect_pr.find(qn("w:pgNumType"))
-            if page_type is not None:
-                sect_pr.remove(page_type)
-
-        sec_body = document.sections[body_idx]
-        for kind in ("footer", "first_page_footer", "even_page_footer"):
-            getattr(sec_body, kind).is_linked_to_previous = False
-        sect_pr = sec_body._sectPr
-        page_type = sect_pr.find(qn("w:pgNumType"))
+    # Section/page-number scope must be explicit; do not erase front-matter footers.
+    body_idx = _find_body_section_index(document) if "show_on_body_first_page" in tokens else 0
+    if document.sections:
+        page_type = document.sections[0]._sectPr.find(qn("w:pgNumType"))
         if page_type is None:
             page_type = OxmlElement("w:pgNumType")
-            sect_pr.append(page_type)
+            document.sections[0]._sectPr.append(page_type)
         page_type.set(qn("w:start"), str(start))
-        target_sections = document.sections[body_idx:]
-    else:
-        if document.sections:
-            sect_pr = document.sections[0]._sectPr
-            page_type = sect_pr.find(qn("w:pgNumType"))
-            if page_type is None:
-                page_type = OxmlElement("w:pgNumType")
-                sect_pr.append(page_type)
-            page_type.set(qn("w:start"), str(start))
-            if not tokens.get("show_on_first_page", True):
-                document.sections[0].different_first_page_header_footer = True
-        target_sections = list(document.sections)
+        if not tokens.get("show_on_first_page", True):
+            document.sections[0].different_first_page_header_footer = True
+    target_sections = list(document.sections)
 
     containers = []
     for section in target_sections:
         containers.append(getattr(section, location))
         if document.settings.odd_and_even_pages_header_footer:
             containers.append(getattr(section, f"even_page_{location}"))
-    if body_idx > 0:
-        show_first = tokens.get("show_on_body_first_page", True)
-    else:
+    for i, section in enumerate(target_sections):
         show_first = tokens.get("show_on_first_page", True)
-    if show_first:
-        for section in target_sections:
-            if section.different_first_page_header_footer:
-                containers.append(getattr(section, f"first_page_{location}"))
+        if i >= body_idx and "show_on_body_first_page" in tokens:
+            show_first = tokens["show_on_body_first_page"]
+        if not show_first:
+            from .fields import page_number_paragraphs
+            from .headers import detach
+
+            section.different_first_page_header_footer = True
+            container = getattr(section, f"first_page_{location}")
+            # Freeze the inherited content before other variants receive PAGE
+            # fields; retain images, relationships and unrelated footer text.
+            detach(container)
+            for paragraph in page_number_paragraphs(container._element):
+                paragraph.getparent().remove(paragraph)
+        elif section.different_first_page_header_footer:
+            containers.append(getattr(section, f"first_page_{location}"))
     seen: set[int] = set()
     reused = 0
     for container in containers:
@@ -777,6 +762,7 @@ def _find_toc_insertion_anchor(document: Document):
             sect_pr = prev_xml.find("./" + qn("w:pPr") + "/" + qn("w:sectPr"))
             if sect_pr is not None:
                 from docx.text.paragraph import Paragraph as DocxParagraph
+
                 anchor_p = DocxParagraph(prev_xml, document)
                 break
             if prev_xml.find(".//" + qn("w:t")) is not None:
@@ -804,7 +790,9 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
         removed += 1
     entries = headings(document, max_level)
     if not entries:
-        raise FormatError("Table of contents has no confirmed headings", "needs_clarification")
+        raise FormatError(
+            "Table of contents (TOC) has no confirmed headings", "needs_clarification"
+        )
     # Preserve the template's font, numbering and paragraph style. A real
     # outline level makes conservative text-inferred headings searchable by
     # Word's TOC \\u switch without imposing built-in Heading formatting.
@@ -815,19 +803,24 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
             node.set(qn("w:val"), str(level - 1))
             pr.append(node)
     cached_entries = ["  " * (level - 1) + p.text.strip() for p, level in entries]
-    from .spec import DEFAULT_TOC_TITLE_STYLE
-
-    title_style_tokens = tokens.get("title_style") or DEFAULT_TOC_TITLE_STYLE
     heading_style = get_or_create_paragraph_style(document, "WFM TOC Heading")
     field_style = get_or_create_paragraph_style(document, "WFM TOC Field")
     break_style = get_or_create_paragraph_style(document, "WFM TOC Break")
     for style in (heading_style, field_style, break_style):
         if style.base_style is None:
             style.base_style = get_or_create_paragraph_style(document, "Normal")
-    set_style_font(heading_style, title_style_tokens)
-    set_paragraph_format(heading_style, title_style_tokens)
-    set_paragraph_format(field_style, {"space_before_pt": 0, "space_after_pt": 8})
-    set_paragraph_format(break_style, {"space_before_pt": 0, "space_after_pt": 0})
+    for style, key in (
+        (heading_style, "title_format"),
+        (field_style, "field_format"),
+        (break_style, "break_format"),
+    ):
+        appearance = tokens.get(key, tokens.get("title_style", {}) if key == "title_format" else {})
+        set_style_font(style, appearance)
+        set_paragraph_format(style, appearance)
+    # The TOC title must never index itself, regardless of its visual appearance.
+    from .properties import element
+
+    element(element(heading_style.element, "pPr"), "outlineLvl").set(qn("w:val"), "9")
 
     anchor_p, placeholder_toc_p = _find_toc_insertion_anchor(document)
     anchor_xml = anchor_p._p if anchor_p is not None else None
@@ -959,7 +952,7 @@ def _bind_style_numbering(document: Document, style_name: str, num_id: int, ilvl
 
 def _ensure_heading_multilevel_numbering(
     document: Document,
-    level1_format: str = "chinese",
+    level1_format: str,
     level2_format: str = "arabic",
     level3_format: str = "arabic",
     headings_spec: list[dict[str, Any]] | None = None,
@@ -979,24 +972,19 @@ def _ensure_heading_multilevel_numbering(
         document.styles["Heading 3"].style_id if "Heading 3" in document.styles else "Heading3"
     )
 
-    if level1_format == "chinese":
-        l1_fmt = "chineseCountingThousand"
-        l1_txt = "第%1章"
-    elif level1_format == "arabic":
-        l1_fmt = "decimal"
-        l1_txt = "%1、"
-    elif level1_format == "arabic-space":
-        l1_fmt = "decimal"
-        l1_txt = "%1"
-    else:
-        l1_fmt = "chineseCountingThousand"
-        l1_txt = "第%1章"
+    # Frozen adapter for legacy enum requests. New templates carry complete levels.
+    modes = json.loads(
+        (SKILL_DIR / "templates/compatibility/heading-numbering.json").read_text(encoding="utf-8")
+    )
+    if level1_format not in modes:
+        raise ValueError("Explicit heading numbering format is required")
+    l1_fmt, l1_txt = modes[level1_format]["format"], modes[level1_format]["text"]
 
-    def _lvl_ind_xml(lvl_idx: int, default_size: float) -> str:
+    def _lvl_ind_xml(lvl_idx: int) -> str:
         h = next(
             (item for item in (headings_spec or []) if int(item.get("level", 0)) == lvl_idx + 1), {}
         )
-        f_sz = float(h.get("font_size_pt") or default_size)
+        f_sz = float(h["font_size_pt"]) if h.get("font_size_pt") else None
         fl_c = h.get("first_line_indent_chars")
         fl_m = h.get("first_line_indent_mm")
         l_c = h.get("left_indent_chars")
@@ -1006,32 +994,24 @@ def _ensure_heading_multilevel_numbering(
         if fl_c is not None:
             fl_val = float(fl_c)
             attrs.append(f'w:firstLineChars="{int(round(fl_val * 100))}"')
-            attrs.append(f'w:firstLine="{int(round(fl_val * f_sz * 20))}"')
+            if f_sz:
+                attrs.append(f'w:firstLine="{int(round(fl_val * f_sz * 20))}"')
         elif fl_m is not None and float(fl_m) > 0:
-            chars = round(float(fl_m) / (f_sz * 25.4 / 72), 2)
-            attrs.append(f'w:firstLineChars="{int(round(chars * 100))}"')
             attrs.append(f'w:firstLine="{int(round(float(fl_m) * 56.6929))}"')
-        else:
-            attrs.append('w:firstLine="0"')
-            attrs.append('w:firstLineChars="0"')
 
         if l_c is not None:
             l_val = float(l_c)
             attrs.append(f'w:leftChars="{int(round(l_val * 100))}"')
-            attrs.append(f'w:left="{int(round(l_val * f_sz * 20))}"')
+            if f_sz:
+                attrs.append(f'w:left="{int(round(l_val * f_sz * 20))}"')
         elif l_m is not None and float(l_m) > 0:
-            chars = round(float(l_m) / (f_sz * 25.4 / 72), 2)
-            attrs.append(f'w:leftChars="{int(round(chars * 100))}"')
             attrs.append(f'w:left="{int(round(float(l_m) * 56.6929))}"')
-        else:
-            attrs.append('w:left="0"')
-            attrs.append('w:leftChars="0"')
 
-        return f"<w:pPr><w:ind {' '.join(attrs)}/></w:pPr>"
+        return f"<w:pPr><w:ind {' '.join(attrs)}/></w:pPr>" if attrs else ""
 
-    ind_l1 = _lvl_ind_xml(0, 16.0)
-    ind_l2 = _lvl_ind_xml(1, 14.0)
-    ind_l3 = _lvl_ind_xml(2, 12.0)
+    ind_l1 = _lvl_ind_xml(0)
+    ind_l2 = _lvl_ind_xml(1)
+    ind_l3 = _lvl_ind_xml(2)
 
     abstract_xml = f'''
     <w:abstractNum {nsdecls("w")} w:abstractNumId="{abstract_id}">
@@ -1309,7 +1289,8 @@ def apply_reference_style(
         num_fmt, level_text = LIST_NUMBERING_STYLES[style_key]
         numbering = _get_numbering_element(document, create=True)
         abstract_id = _numbering_max_id(numbering, "abstractNum", "abstractNumId") + 1
-        num_id = _numbering_max_id(numbering, "num", "numId") + 1
+        # numId=0 means "suppress numbering", even in an otherwise empty part.
+        num_id = max(0, _numbering_max_id(numbering, "num", "numId")) + 1
 
         abstract = OxmlElement("w:abstractNum")
         abstract.set(qn("w:abstractNumId"), str(abstract_id))
@@ -1334,28 +1315,14 @@ def apply_reference_style(
         justification.set(qn("w:val"), "left")
         lvl.append(justification)
 
-        pPr_lvl = OxmlElement("w:pPr")
-        ind_lvl = OxmlElement("w:ind")
-        ind_lvl.set(qn("w:left"), "0")
-        ind_lvl.set(qn("w:leftChars"), "0")
-        ind_lvl.set(qn("w:hanging"), "420")
-        ind_lvl.set(qn("w:hangingChars"), "200")
-        pPr_lvl.append(ind_lvl)
-        lvl.append(pPr_lvl)
+        # Marker typography and indentation inherit unless explicitly supplied.
+        # The chosen template already applies reference paragraph properties.
+        from .properties import element, write_font
+        from .spec import FONT
 
-        rPr_lvl = OxmlElement("w:rPr")
-        rFonts_lvl = OxmlElement("w:rFonts")
-        latin = reference_tokens.get("font_latin") or "Times New Roman"
-        east_asia = reference_tokens.get("font_east_asia") or "宋体"
-        rFonts_lvl.set(qn("w:ascii"), latin)
-        rFonts_lvl.set(qn("w:hAnsi"), latin)
-        rFonts_lvl.set(qn("w:eastAsia"), east_asia)
-        rPr_lvl.append(rFonts_lvl)
-        size_pt = float(reference_tokens.get("font_size_pt") or 10.5)
-        sz_lvl = OxmlElement("w:sz")
-        sz_lvl.set(qn("w:val"), str(int(round(size_pt * 2))))
-        rPr_lvl.append(sz_lvl)
-        lvl.append(rPr_lvl)
+        for property_name in FONT:
+            if property_name in reference_tokens:
+                write_font(element(lvl, "rPr"), property_name, reference_tokens[property_name])
 
         abstract.append(lvl)
         numbering.append(abstract)

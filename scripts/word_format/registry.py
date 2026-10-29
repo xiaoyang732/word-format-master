@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from . import headers, section_breaks
+from . import numbering as template_numbering
 from . import operations as op
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .inspect import _style_paragraph
@@ -125,6 +126,8 @@ def read_atomic(index, ref, cap):
     if ref["kind"] == "style":
         p = _style_paragraph(ref["id"][6:], index.document)
     if cap.property in {
+        "outline_level",
+        "numbering_suppressed",
         "alignment",
         "space_before_pt",
         "space_after_pt",
@@ -389,6 +392,30 @@ def style_params(params):
     return {"name": text_value(params["name"], "style name")}
 
 
+def outline_params(params):
+    require_keys(params, {"value"}, {"value"}, "outline level")
+    number(params["value"], 0, 9, "outline level", True)
+    return {"value": int(params["value"])}
+
+
+add(
+    "paragraph.outline_level.set",
+    "outline_level",
+    {"paragraph", "style"},
+    op.set_outline_level,
+    outline_params,
+    {"value": "0..9 (9 is body text)"},
+)
+add(
+    "paragraph.numbering_suppressed.set",
+    "numbering_suppressed",
+    {"paragraph"},
+    op.suppress_numbering,
+    scalar("boolean"),
+    {"value": "boolean"},
+)
+
+
 add(
     "paragraph.style.assign",
     "style",
@@ -475,7 +502,12 @@ for action, prop, handler, section, effects in (
         "table_of_contents",
         op.configure_toc,
         "table_of_contents",
-        ("managed TOC paragraphs", "standalone imported TOC fields", "field update setting", "confirmed heading outline levels"),
+        (
+            "managed TOC paragraphs",
+            "standalone imported TOC fields",
+            "field update setting",
+            "confirmed heading outline levels",
+        ),
     ),
     (
         "heading.numbering.configure",
@@ -537,6 +569,20 @@ for action, prop, handler, section, effects in (
         True,
         effects,
     )
+
+
+REGISTRY["heading.scheme.configure"] = Capability(
+    "heading.scheme.configure",
+    "heading_numbering",
+    frozenset({"document"}),
+    template_numbering.apply_heading_scheme,
+    template_numbering.validate_scheme,
+    template_numbering.read_heading_scheme,
+    template_numbering.verify_heading_scheme,
+    {"levels": "explicit Word numbering level definitions"},
+    True,
+    ("chapter heading styles and numbering; established manual prefixes",),
+)
 
 
 def capabilities():

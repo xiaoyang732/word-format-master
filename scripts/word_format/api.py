@@ -50,6 +50,7 @@ def build_plan(input_path, output, request, *, _document=None):
             "clear_direct_font_formatting",
             "verification",
             "profile_context",
+            "template_context",
         },
         label="request",
     )
@@ -102,6 +103,10 @@ def build_plan(input_path, output, request, *, _document=None):
         raise FormatError("Choose operations or legacy spec, not both")
     document = _document or Document(source)
     index = DocumentIndex(document)
+    if "template_context" in request:
+        from .templates import validate_context
+
+        validate_context(index, request["template_context"], request.get("operations"), destination)
     if "spec" in request:
         from .spec import spec_request
 
@@ -425,6 +430,16 @@ def apply_plan(plan, *, overwrite=False):
             from .profiles import validate_profile_source
 
             validate_profile_source(plan["request"]["profile_context"]["source"])
+        if "template_context" in plan["request"]:
+            from .templates import validate_template
+
+            context = plan["request"]["template_context"]
+            validate_template(context["definition"])
+            if (
+                context["source"]
+                and sha256(context["source"]["path"]) != context["source"]["sha256"]
+            ):
+                raise FormatError("Template changed during execution; output not published")
         if destination.exists() and not overwrite:
             raise FormatError("Output appeared during execution; output not replaced")
         os.replace(temporary, destination)
@@ -462,6 +477,14 @@ def apply_plan(plan, *, overwrite=False):
     }
     if "profile_context" in plan["request"]:
         result["profile_context"] = copy.deepcopy(plan["request"]["profile_context"])
+    if "template_context" in plan["request"]:
+        from .templates import compliance
+
+        result["compliance"] = compliance(
+            plan["request"]["template_context"],
+            format_status="passed",
+            visual_status=result["verification"]["visual"]["status"],
+        )
     return result
 
 
@@ -554,7 +577,7 @@ def verify_plan(plan, report, *, visual_report=None, render_manifest=None, rende
     status = "passed" if result["status"] == structure["status"] == "passed" else "failed"
     if visual["status"] == "failed":
         status = "failed"
-    return {
+    response = {
         "schema_version": SCHEMA_VERSION,
         "status": status,
         "format": result,
@@ -562,6 +585,17 @@ def verify_plan(plan, report, *, visual_report=None, render_manifest=None, rende
         "visual": visual,
         "output": str(output),
     }
+    if "template_context" in plan["request"]:
+        from .templates import compliance
+
+        response["compliance"] = compliance(
+            plan["request"]["template_context"],
+            format_status=status,
+            visual_status=visual["status"],
+        )
+        response["execution_status"] = status
+        response["status"] = response["compliance"]["status"]
+    return response
 
 
 def audit_document(input_path, request):

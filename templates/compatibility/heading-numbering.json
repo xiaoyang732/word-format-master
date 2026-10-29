@@ -1,0 +1,6 @@
+{
+  "chinese": {"format": "chineseCountingThousand", "text": "第%1章"},
+  "arabic": {"format": "decimal", "text": "%1、"},
+  "arabic-space": {"format": "decimal", "text": "%1"},
+  "keep": {"format": "chineseCountingThousand", "text": "第%1章"}
+}

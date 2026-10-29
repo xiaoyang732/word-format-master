@@ -3,7 +3,7 @@
 **把论文和格式要求交给 AI，自动完成 Word 排版与格式检查，原稿安全不破坏。**
 
 [![CI](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 
 你只需要提供**待排版的 Word 文档**，再给出一份**学校/期刊的格式要求**、一份**已经排好版的样例文档**，或者**直接用日常语言说出你想怎么改**。无需自己编写代码或手动敲命令，AI 会自动读懂要求、对齐章节结构，并调用本地确定性排版引擎生成排好版的新文档与清晰的前后对比验收报告。
 
@@ -188,4 +188,15 @@ python -m unittest discover -s _dev/tests -v
 
 README 面向使用者，介绍能力、安装和任务选择；`SKILL.md` 说明 AI 应如何选择 CLI 参数、处理附件证据和交付结果；`references/` 保存详细接口契约，`SECURITY.md` 记录本地处理与文件保护边界。
 
-[MIT License](LICENSE)
+[MIT License](LICENSE.txt)
+## 1.1 模板引擎更新
+
+新增独立内置模板与用户模板编译流程。已有论文和新生成初稿统一使用 `plan --template`；用户样例不再回退内置参数。参见 [模板引擎、迁移与验收](references/template-engine.md)。旧 spec / presets 接口保留兼容，新功能使用模板入口。
+
+
+详见 [重构方案](references/template-refactor-plan.md)与[主仓库验证报告](references/template-refactor-report.md)。一键执行共享流程：
+
+```powershell
+python scripts/run_format_pipeline.py input.docx output.docx --template thesis-standard
+python scripts/run_format_pipeline.py input.docx output.docx --template school-template.json --mapping mapping.json
+```

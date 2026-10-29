@@ -34,14 +34,6 @@ INDENTS = ("first_line_indent", "left_indent", "right_indent", "hanging_indent")
 META = {"style_name", "source_style_id", "numbering"}
 TOKENS = set(FONT) | set(PARA) | {f"{n}_{unit}" for n in INDENTS for unit in ("mm", "chars")}
 KEYWORD_STYLE_TOKENS = {"label_bold", "value_bold"}
-DEFAULT_TOC_TITLE_STYLE = {
-    "bold": True,
-    "font_size_pt": 14,
-    "alignment": "center",
-    "space_before_pt": 0,
-    "space_after_pt": 8,
-    "keep_with_next": True,
-}
 PAGE = {
     "width_mm": "page.width.set",
     "height_mm": "page.height.set",
@@ -109,7 +101,11 @@ def token_operations(tokens):
         if chars is not None and mm is not None:
             number(chars, 0, 500, name + "_chars")
             number(mm, -500 if name == "first_line_indent" else 0, 500, name + "_mm")
-            pt = tokens.get("font_size_pt", 12)
+            if "font_size_pt" not in tokens:
+                raise FormatError(
+                    f"Cannot compare character and mm units for {name} without an explicit font size"
+                )
+            pt = tokens["font_size_pt"]
             if abs(chars * pt * 25.4 / 72 - mm) > 0.1:
                 raise FormatError(f"Conflicting units for {name}; supply only chars or mm")
         value = chars if chars is not None else mm
@@ -155,14 +151,12 @@ def validate_keyword_tokens(tokens):
         if tokens[key] is not None:
             boolean(tokens[key], f"keywords.{key}")
     if "bold" in tokens and any(key in tokens for key in KEYWORD_STYLE_TOKENS):
-        raise FormatError(
-            "Choose whole-line keywords.bold or label/value bold controls, not both"
-        )
+        raise FormatError("Choose whole-line keywords.bold or label/value bold controls, not both")
 
 
 def keyword_text_ranges(text):
     """Return the label and value character ranges for a conventional keyword line."""
-    match = re.match(r"^\s*(?P<label>关键词|key\s*words?)\s*(?P<colon>[:：])?", text, re.I)
+    match = re.match(r"^\s*(?P<label>关\s*键\s*词|key\s*words?)\s*(?P<colon>[:：])?", text, re.I)
     if not match:
         return None
     label_start = match.start("label")
@@ -306,9 +300,21 @@ def validate_section(section, data):
     elif section == "table_of_contents":
         require_keys(
             data,
-            {"enabled", "title", "max_heading_level", "page_break_after", "title_style"},
+            {
+                "enabled",
+                "title",
+                "max_heading_level",
+                "page_break_after",
+                "title_format",
+                "title_style",
+                "field_format",
+                "break_format",
+            },
             label=section,
         )
+        for key in ("title_format", "field_format", "break_format"):
+            if key in data:
+                validate_tokens(data[key])
         for key in ("enabled", "page_break_after"):
             if key in data:
                 boolean(data[key], key)
@@ -318,6 +324,12 @@ def validate_section(section, data):
             number(data["max_heading_level"], 1, 9, "max_heading_level", True)
         if "title_style" in data:
             validate_tokens(data["title_style"])
+        if (
+            "title_style" in data
+            and "title_format" in data
+            and data["title_style"] != data["title_format"]
+        ):
+            raise FormatError("Conflicting TOC title_style and title_format; choose one appearance")
     elif section == "numbered":
         require_keys(data, {"style", "start", "left_indent_mm", "hanging_indent_mm"}, label=section)
         if "style" in data and data["style"] not in LIST_NUMBERING_STYLES:
@@ -503,7 +515,7 @@ def validate_spec(spec):
                 validate_tokens(tokens)
 
 
-def spec_request(index, spec, clear_direct=False):
+def spec_request(index, spec, clear_direct=False, *, isolated=False):
     """Expand a full legacy spec once; execution always uses REGISTRY."""
     validate_spec(spec)
     from .registry import REGISTRY
@@ -541,6 +553,10 @@ def spec_request(index, spec, clear_direct=False):
         if r.get("module") == "toc" and spec.get("table_of_contents", {}).get("enabled"):
             # The TOC operation owns both placeholder and generated title styling.
             # Assigning a generic Heading style first creates competing writes.
+            continue
+        if r.get("object_kind") not in {None, "text"}:
+            continue
+        if isolated and r.get("unsupported_container"):
             continue
         matching = [m for m in modules if m.get("kind") == r.get("module")]
         occurrence = max(0, r.get("module_occurrence", 1) - 1)
@@ -611,13 +627,20 @@ def spec_request(index, spec, clear_direct=False):
             if any(k in tokens for k in (name + "_mm", name + "_chars")):
                 for unit in ("mm", "chars"):
                     merged.pop(name + "_" + unit, None)
-        merged.update(tokens)
+        if isolated:
+            # A module rule is more specific than the global role baseline.
+            specific = dict(merged)
+            merged.clear()
+            merged.update(tokens)
+            merged.update(specific)
+        else:
+            merged.update(tokens)
     for oid, tokens in effective.items():
         for action, params in token_operations(tokens):
             # Word/WPS stretches every non-final line when a justified
             # paragraph contains manual line breaks. Preserve the requested
             # body formatting while making this exceptional case render safely.
-            if (
+            if not isolated and (
                 action == "paragraph.alignment.set"
                 and params.get("value") == "justify"
                 and _has_soft_break(index.elements[oid])
@@ -654,8 +677,9 @@ def spec_request(index, spec, clear_direct=False):
         + [(f"Heading {h['level']}", h) for h in spec.get("headings", [])]
         + [("Bibliography", spec.get("references", {}))]
     ):
-        for action, params in token_operations(tokens):
-            add(action, ["style:" + name], params)
+        if not isolated:
+            for action, params in token_operations(tokens):
+                add(action, ["style:" + name], params)
     page = spec.get("page", {})
     dims = {"A4": (210, 297), "Letter": (215.9, 279.4)}.get(page.get("size"))
     values = {k: v for k, v in page.items() if k in PAGE and v is not None}
@@ -675,6 +699,8 @@ def spec_request(index, spec, clear_direct=False):
         add(PAGE[key], ids, {"value": value})
     tables = spec.get("tables", {})
     for oid, r in index.records.items():
+        if isolated and r.get("unsupported_container"):
+            continue
         if r["kind"] == "table":
             if r.get("module") == "cover":
                 continue

@@ -37,6 +37,7 @@ def resolve_targets(index, target, allowed):
             "language",
             "segment",
             "number",
+            "module_occurrence",
         },
         {"type"},
         "target",
@@ -49,7 +50,7 @@ def resolve_targets(index, target, allowed):
             from .spec import keyword_text_ranges
 
             segment = text_value(target["segment"], "keyword segment")
-            if segment not in {"label", "value"}:
+            if segment not in {"label", "value", "content"}:
                 raise FormatError("Keyword segment must be label or value")
             if any(k in target for k in ("start", "end", "quote", "occurrence")):
                 raise FormatError("Choose a semantic segment or explicit text range")
@@ -62,7 +63,7 @@ def resolve_targets(index, target, allowed):
                 ranges = keyword_text_ranges(text)
                 if not ranges:
                     raise FormatError("Keyword label was not found", "needs_clarification")
-                start, end = ranges[target["segment"]]
+                start, end = ranges["value" if segment == "content" else segment]
                 if start == end:
                     raise FormatError("Keyword segment is empty", "needs_clarification")
                 simple_range(index.elements[ref["id"]], start, end)
@@ -78,7 +79,11 @@ def resolve_targets(index, target, allowed):
             return result
         if "quote" in target and any(k in target for k in ("start", "end")):
             raise FormatError("Choose quote or offsets for a text range")
-        base = {k: v for k, v in target.items() if k not in {"start", "end", "quote", "occurrence"}}
+        base = {
+            k: v
+            for k, v in target.items()
+            if k not in {"start", "end", "quote", "occurrence", "segment"}
+        }
         base["type"] = "paragraph"
         refs = resolve_targets(index, base, {"paragraph"})
         if len(refs) != 1:
@@ -145,6 +150,7 @@ def resolve_targets(index, target, allowed):
             "all",
             "part",
             "module",
+            "module_occurrence",
             "table_id",
             "row",
             "cell",
@@ -172,7 +178,7 @@ def resolve_targets(index, target, allowed):
             )
     if "id" in target:
         candidates = [r for r in candidates if r["id"] == target["id"]]
-    for field in ("role", "module", "part", "semantic_role", "language"):
+    for field in ("role", "module", "part", "semantic_role", "language", "module_occurrence"):
         if field in target:
             candidates = [r for r in candidates if r.get(field) == target[field]]
     if "level" in target:
