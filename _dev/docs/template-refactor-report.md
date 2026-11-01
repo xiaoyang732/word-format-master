@@ -22,7 +22,7 @@
 | 统一执行 | 新稿初稿与现有论文共同使用 `scripts/run_format_pipeline.py --template ...` 或模板 CLI |
 | 独立验收 | 执行前重建规则核对计划完整性；执行状态与整体符合状态分开报告 |
 
-流程与参数见 [模板引擎说明](template-engine.md)，设计细节见 [重构方案](template-refactor-plan.md)。
+流程与参数见 [模板引擎说明](../../references/template-engine.md)，设计细节见 [重构方案](template-refactor-plan.md)。
 
 ## 主仓库已有修复的保留与组合修正
 

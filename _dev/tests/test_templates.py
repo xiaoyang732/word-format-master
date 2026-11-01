@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import copy
 import json
 import sys
 import tempfile
@@ -17,7 +16,7 @@ from docx.shared import Pt
 from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
-from word_format.api import apply_plan, verify_plan
+from word_format.api import apply_plan, audit_document, verify_plan
 from word_format.contracts import FormatError, json_hash
 from word_format.inspect import DocumentIndex
 from word_format.profiles import requirements_profile, template_profile
@@ -45,6 +44,36 @@ class TemplateTests(unittest.TestCase):
                 for i, r in enumerate(rules)
             ],
         }
+
+    def test_read_only_audit_reports_template_limitations_and_visual_gap(self):
+        doc = Document()
+        doc.add_paragraph("Already formatted").runs[0].bold = True
+        doc.save(self.source)
+        original = self.source.read_bytes()
+        template = self.template([{
+            "action": "font.bold.set",
+            "target": {"type": "paragraph", "all": True},
+            "params": {"value": True},
+        }])
+        for limitations, expected in (([], "pending"), (["Table rule omitted"], "partial")):
+            with self.subTest(limitations=limitations):
+                template["limitations"] = limitations
+                plan = template_plan(self.source, self.output, template)
+                result = audit_document(self.source, plan["request"])
+                self.assertEqual(result["status"], expected)
+                self.assertEqual(result["execution_status"], "passed")
+                self.assertEqual(result["summary"]["failed"], 0)
+                self.assertEqual(result["compliance"]["limitations"], limitations)
+                self.assertEqual(result["compliance"]["coverage"], plan["request"]["template_context"]["coverage"])
+                self.assertEqual(self.source.read_bytes(), original)
+                self.assertFalse(self.output.exists())
+
+        template["rules"][0]["params"] = {"value": False}
+        plan = template_plan(self.source, self.output, template)
+        result = audit_document(self.source, plan["request"])
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["execution_status"], "failed")
+        self.assertEqual(result["summary"]["failed"], 1)
 
     def test_body_format_excludes_images_and_equations_and_preserves_media(self):
         image = self.root / "image.png"

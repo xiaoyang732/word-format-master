@@ -305,6 +305,12 @@ def _format_verification(document, checks):
             continue
         actual = _read(cap, index, ref)
         passed = cap.verifier(actual, check["params"], cap)
+        if cap.property == "numbered":
+            # Recheck the original scope as well as the surviving list items.
+            # Dropping numPr must not turn a failed operation into all([]).
+            expected = Counter(r["text"] for r in check["before"] if r["numbered_target"])
+            observed = Counter(r["text"] for r in actual if r["numbered_target"])
+            passed = passed and expected == observed
         output.append({**check, "after": actual, "status": "passed" if passed else "failed"})
         if not passed:
             failures.append(
@@ -527,6 +533,16 @@ def _validate_report_checks(plan, report):
                 "Each report check must identify its operation, action, source target and parameters"
             )
         actual[json_hash({field: check[field] for field in fields})] += 1
+        if check["action"] == "list.numbering.configure" and (
+            not isinstance(check.get("before"), list)
+            or any(
+                not isinstance(record, dict)
+                or not isinstance(record.get("text"), str)
+                or not isinstance(record.get("numbered_target"), bool)
+                for record in check["before"]
+            )
+        ):
+            raise FormatError("Report lacks source list coverage; apply the plan again")
         ref = check.get("output_target")
         target = check["target"]
         if (
@@ -642,7 +658,7 @@ def audit_document(input_path, request):
         if checks
         else "no_change"
     )
-    return {
+    response = {
         "schema_version": SCHEMA_VERSION,
         "kind": "word-format-audit",
         "status": status,
@@ -655,6 +671,17 @@ def audit_document(input_path, request):
             "Only explicitly requested properties are checked; structural agreement does not prove pagination."
         ],
     }
+    if "template_context" in plan["request"]:
+        from .templates import compliance
+
+        response["compliance"] = compliance(
+            plan["request"]["template_context"],
+            format_status=status,
+            visual_status=response["visual"]["status"],
+        )
+        response["execution_status"] = status
+        response["status"] = response["compliance"]["status"]
+    return response
 
 
 def apply_spec(

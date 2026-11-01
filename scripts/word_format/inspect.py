@@ -11,7 +11,14 @@ from docx.text.paragraph import Paragraph
 
 from .contracts import json_hash, sha256, source_path
 from .namespaces import qn
-from .properties import outline_level, read_font, read_paragraph, style_map, text_runs, xml_value
+from .properties import (
+    outline_level,
+    paragraph_style,
+    read_font,
+    read_paragraph,
+    text_runs,
+    xml_value,
+)
 
 
 def paragraph_text(p):
@@ -36,10 +43,9 @@ class DocumentIndex:
         body = document.element.body
         for i, p in enumerate(body.iter(qn("w:p"))):
             top = p.getparent() is body
-            style_node = p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle"))
-            style_id = style_node.get(qn("w:val")) if style_node is not None else "Normal"
-            style = style_map(document).get(style_id)
-            style_name = style.name if style is not None else style_id
+            style = paragraph_style(document, p)
+            style_id = style.style_id if style is not None else ""
+            style_name = style.name if style is not None else ""
             text = paragraph_text(p)
             outline = outline_level(document, p)
             level = heading_level(text.strip(), style_name, outline)

@@ -169,7 +169,9 @@ def read_complex_state(index, name):
         }
 
     if name in {"heading_numbering", "numbered", "reference_numbering"}:
-        from .structures import _get_numbering_element
+        from .numbering import effective_numbering
+        from .properties import read_paragraph
+        from .structures import _get_numbering_element, _has_numbered_list_marker
 
         numbering = _get_numbering_element(doc)
         records = []
@@ -184,8 +186,15 @@ def read_complex_state(index, name):
             ni = np.find(qn("w:numId")) if np is not None else None
             il = np.find(qn("w:ilvl")) if np is not None else None
             nid = ni.get(qn("w:val")) if ni is not None else None
+            level = int(il.get(qn("w:val"))) if il is not None else 0
+            if name == "numbered":
+                found = effective_numbering(doc, p._p)
+                if found is not None:
+                    nid, level = found[:2]
             marker = None
             start = None
+            num_format = None
+            lvl = None
             if numbering is not None and nid not in {None, "0"}:
                 num = next(
                     (n for n in numbering.findall(qn("w:num")) if n.get(qn("w:numId")) == nid), None
@@ -205,26 +214,62 @@ def read_complex_state(index, name):
                         (
                             n
                             for n in abstract.findall(qn("w:lvl"))
-                            if n.get(qn("w:ilvl"))
-                            == (il.get(qn("w:val")) if il is not None else "0")
+                            if n.get(qn("w:ilvl")) == str(level)
                         ),
                         None,
                     )
                     if abstract is not None
                     else None
                 )
+                if name == "numbered" and num is not None:
+                    override = next(
+                        (
+                            n
+                            for n in num.findall(qn("w:lvlOverride"))
+                            if n.get(qn("w:ilvl")) == str(level)
+                        ),
+                        None,
+                    )
+                    if override is not None and override.find(qn("w:lvl")) is not None:
+                        lvl = override.find(qn("w:lvl"))
                 marker_node = lvl.find(qn("w:lvlText")) if lvl is not None else None
                 start_node = lvl.find(qn("w:start")) if lvl is not None else None
                 marker = marker_node.get(qn("w:val")) if marker_node is not None else None
                 start = start_node.get(qn("w:val")) if start_node is not None else None
+                fmt_node = lvl.find(qn("w:numFmt")) if lvl is not None else None
+                num_format = fmt_node.get(qn("w:val")) if fmt_node is not None else None
+                if name == "numbered" and num is not None:
+                    override = next(
+                        (
+                            n
+                            for n in num.findall(qn("w:lvlOverride"))
+                            if n.get(qn("w:ilvl")) == str(level)
+                        ),
+                        None,
+                    )
+                    start_override = (
+                        override.find(qn("w:startOverride")) if override is not None else None
+                    )
+                    if start_override is not None:
+                        start = start_override.get(qn("w:val"))
             records.append(
                 {
                     "text": p.text,
                     "style": paragraph_style_name(doc, p._p),
                     "num_id": nid,
-                    "level": int(il.get(qn("w:val"))) + 1 if il is not None else 1,
+                    "level": level + 1,
                     "marker": marker,
                     "start": start,
+                    "number_format": num_format,
+                    "numbered_target": _has_numbered_list_marker(doc, p)
+                    if name == "numbered"
+                    else False,
+                    "left_indent": _read_list_indent(doc, p._p, lvl, "left_indent")
+                    if name == "numbered"
+                    else None,
+                    "hanging_indent": _read_list_indent(doc, p._p, lvl, "hanging_indent")
+                    if name == "numbered"
+                    else None,
                     "reference_entry": p._p in reference_nodes,
                     "chapter_heading": p._p in chapter_nodes,
                 }
@@ -255,6 +300,35 @@ def read_complex_state(index, name):
             if not paragraph_style_name(doc, p._p).startswith("WFM TOC")
         ]
     raise FormatError(f"Missing structural reader for {name}")
+
+
+def _read_list_indent(document, paragraph, level, name):
+    """Numbering level indentation precedes paragraph-style indentation."""
+    from .properties import read_paragraph
+
+    inherited = level.find("./" + qn("w:pPr") + "/" + qn("w:ind")) if level is not None else None
+    if inherited is None:
+        return read_paragraph(document, paragraph, name)
+    clone = copy.deepcopy(paragraph)
+    pr = clone.get_or_add_pPr()
+    direct = pr.find(qn("w:ind"))
+    merged = copy.deepcopy(inherited)
+    if direct is not None:
+        # A direct physical value must not inherit the corresponding character
+        # value, and first-line/hanging values replace each other.
+        groups = (
+            ("left", "leftChars", "start", "startChars"),
+            ("right", "rightChars", "end", "endChars"),
+            ("firstLine", "firstLineChars", "hanging", "hangingChars"),
+        )
+        for group in groups:
+            if any(qn("w:" + attr) in direct.attrib for attr in group):
+                for attr in group:
+                    merged.attrib.pop(qn("w:" + attr), None)
+        merged.attrib.update(direct.attrib)
+        pr.remove(direct)
+    pr.append(merged)
+    return read_paragraph(document, clone, name)
 
 
 def _verify_toc_title_format(title_formats, title_style):
@@ -434,18 +508,21 @@ def verify_complex_state(actual, params, name):
     if name == "numbered":
         from config import LIST_NUMBERING_STYLES
 
-        items = [
-            r
-            for r in actual
-            if r["num_id"] not in {None, "0"}
-            and not r["style"].startswith("Heading")
-            and r["style"] != "Bibliography"
-        ]
-        return all(
+        items = [r for r in actual if r["numbered_target"]]
+        matches = all(
             r["marker"] == LIST_NUMBERING_STYLES[params.get("style", "decimal-period")][1]
+            and r["number_format"]
+            == LIST_NUMBERING_STYLES[params.get("style", "decimal-period")][0]
             and r["start"] == str(params.get("start", 1))
             for r in items
         )
+        for key in ("left_indent", "hanging_indent"):
+            if key + "_mm" in params:
+                matches = matches and all(
+                    r[key]["unit"] == "mm" and abs(r[key]["value"] - params[key + "_mm"]) <= 0.025
+                    for r in items
+                )
+        return matches
     if name == "reference_numbering":
         items = [r for r in actual if r["reference_entry"] and r["text"].strip()]
         return all(
@@ -599,6 +676,22 @@ def atomic_projection(document, index, refs, cap):
                     pr.remove(hd)
                 if pr is not None and not len(pr) and not pr.attrib:
                     pr.getparent().remove(pr)
+            elif cap.property == "three_line":
+                pr = clone.find(qn("w:tblPr"))
+                if pr is not None:
+                    pr.attrib.pop("{urn:word-format-master:format}originalBorders", None)
+                    border = pr.find(qn("w:tblBorders"))
+                    if border is not None:
+                        pr.remove(border)
+                for row in clone.findall(qn("w:tr")):
+                    for cell in row.findall(qn("w:tc")):
+                        cellpr = cell.find(qn("w:tcPr"))
+                        if cellpr is not None:
+                            border = cellpr.find(qn("w:tcBorders"))
+                            if border is not None:
+                                cellpr.remove(border)
+                            if not len(cellpr) and not cellpr.attrib:
+                                cell.remove(cellpr)
             return (xml_value(clone), dimensions) if dimensions is not None else xml_value(clone)
         # Newly created styles from assigning a name are not unrelated changes.
         if node.tag == qn("w:style") and node.find(qn("w:name")) is not None:
@@ -678,6 +771,51 @@ def _page_number_content_projection(document):
 
 def structural_snapshot(index, cap, params, refs):
     """Protect body content/objects and unrelated parts across structural writes."""
+    if cap.property == "three_line":
+        restores = []
+        if not params["value"]:
+            import base64
+            import json
+
+            from docx.table import Table
+            from lxml import etree
+
+            for ref in refs:
+                table = index.elements[ref["id"]]
+                owners = [table.find(qn("w:tblPr"))] + [
+                    tc.find(qn("w:tcPr"))
+                    for row in table.findall(qn("w:tr"))
+                    for tc in row.findall(qn("w:tc"))
+                ]
+                saved = owners[0].get("{urn:word-format-master:format}originalBorders")
+                if saved is not None:
+                    snapshot = json.loads(saved)
+                    if len(snapshot) != len(owners):
+                        legacy = [owners[0]]
+                        for row in Table(table, index.document._body).rows:
+                            for cell in row.cells:
+                                owner = cell._tc.tcPr
+                                if owner not in legacy:
+                                    legacy.append(owner)
+                        owners = legacy
+                    if len(snapshot) != len(owners):
+                        raise FormatError("Saved table borders no longer match the table")
+                    expected = [
+                        xml_value(etree.fromstring(base64.b64decode(item))) if item else ""
+                        for item in snapshot
+                    ]
+                else:
+                    expected = [
+                        xml_value(owner.find(qn("w:tblBorders" if i == 0 else "w:tcBorders")))
+                        if owner is not None
+                        else ""
+                        for i, owner in enumerate(owners)
+                    ]
+                restores.extend(
+                    (owner, "tblBorders" if i == 0 else "tcBorders", expected[i])
+                    for i, owner in enumerate(owners)
+                )
+        return atomic_projection(index.document, index, refs, cap), restores
     if cap.property == "section_break":
         from .section_breaks import projection
 
@@ -779,10 +917,25 @@ def structural_snapshot(index, cap, params, refs):
     stories = (
         _page_number_content_projection(index.document) if cap.property == "page_numbers" else None
     )
-    return paragraphs, parts, stories
+    list_targets = None
+    if cap.property == "numbered":
+        from .structures import _has_numbered_list_marker
+
+        list_targets = [
+            p._p for p in index.document.paragraphs if _has_numbered_list_marker(index.document, p)
+        ]
+    return paragraphs, parts, stories, list_targets
 
 
 def verify_structural_preservation(index, cap, params, refs, before):
+    if cap.property == "three_line":
+        if before[0] != atomic_projection(index.document, index, refs, cap):
+            raise FormatError("Table borders changed unrelated content or properties")
+        for owner, tag, expected in before[1]:
+            actual = xml_value(owner.find(qn("w:" + tag))) if owner is not None else ""
+            if actual != expected:
+                raise FormatError("Table border restoration does not match the saved original")
+        return
     if cap.property == "section_break":
         from .section_breaks import projection
 
@@ -800,6 +953,8 @@ def verify_structural_preservation(index, cap, params, refs, before):
     after = structural_snapshot(index, cap, params, refs)
     if before[2] != after[2]:
         raise FormatError("Page-number configuration changed unrelated header/footer content")
+    if before[3] != after[3]:
+        raise FormatError("List operation changed its original numbered paragraph scope")
     by_node = {p: (text, xml) for p, text, xml in after[0]}
     for node, text, xml in before[0]:
         if node not in by_node:

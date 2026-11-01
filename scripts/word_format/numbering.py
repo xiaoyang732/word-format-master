@@ -72,16 +72,17 @@ def validate_scheme(params):
 
 def effective_numbering(document, paragraph):
     num_id = None
-    ilvl = 0
+    ilvl = None
     for pr in ppr_sources(document, paragraph):
         np = pr.find(qn("w:numPr")) if pr is not None else None
         if np is None:
             continue
         ni, il = np.find(qn("w:numId")), np.find(qn("w:ilvl"))
-        if il is not None:
+        if ilvl is None and il is not None:
             ilvl = int(il.get(qn("w:val")))
-        if ni is not None:
+        if num_id is None and ni is not None:
             num_id = ni.get(qn("w:val"))
+        if num_id is not None and ilvl is not None:
             break
     if num_id in {None, "0"}:
         return None
@@ -96,7 +97,7 @@ def effective_numbering(document, paragraph):
         ),
         None,
     )
-    return num_id, ilvl, abstract, num
+    return num_id, ilvl if ilvl is not None else 0, abstract, num
 
 
 def level_spec(level):

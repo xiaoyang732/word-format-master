@@ -2,27 +2,27 @@
 
 import copy
 import json
-from pathlib import Path
 import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from docx import Document
-from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Pt
+from lxml import etree
 
 ROOT=Path(__file__).resolve().parents[2]
 sys.path.insert(0,str(ROOT/"scripts"))
-from word_format import apply_plan, build_plan, inspect_document, verify_plan
-from word_format.contracts import FormatError, sha256
-from word_format.registry import REGISTRY
 from apply_spec import apply_document
 from parse_requirements import parse_requirements
 from verify_output import verify_structure
+from word_format import apply_plan, build_plan, inspect_document, verify_plan
+from word_format.contracts import FormatError, sha256
+from word_format.registry import REGISTRY
 
 
 class FormatCoreTests(unittest.TestCase):
@@ -162,6 +162,172 @@ class FormatCoreTests(unittest.TestCase):
         out,_=self.execute([self.operation("table.header_repeat.set",{"value":False},{"type":"table","id":"t0"}),self.operation("table.three_line.apply",{"value":False},{"type":"table","id":"t0"})])
         self.assertIsNone(out.tables[0]._tbl.find("./"+qn("w:tr")+"/"+qn("w:trPr")+"/"+qn("w:tblHeader")))
         self.assertIsNone(out.tables[0]._tbl.find("./"+qn("w:tblPr")+"/"+qn("w:tblBorders")))
+
+    def test_list_numbering_clears_conflicting_character_indents(self):
+        doc=Document(self.source)
+        p=doc.add_paragraph("numbered item",style="List Number")
+        ind=OxmlElement("w:ind");ind.set(qn("w:leftChars"),"500");ind.set(qn("w:hangingChars"),"200")
+        p._p.get_or_add_pPr().append(ind)
+        doc.save(self.source);self.original_hash=sha256(self.source)
+        params={"style":"decimal-period","start":1,"left_indent_mm":10,"hanging_indent_mm":5}
+        out,_=self.execute([self.operation("list.numbering.configure",params,{"type":"document"})])
+        ind=out.paragraphs[-1]._p.find("./"+qn("w:pPr")+"/"+qn("w:ind"))
+        self.assertIsNone(ind.get(qn("w:leftChars")))
+        self.assertIsNone(ind.get(qn("w:hangingChars")))
+        self.assertEqual(ind.get(qn("w:left")),"567")
+        self.assertEqual(ind.get(qn("w:hanging")),"283")
+        from word_format.inspect import DocumentIndex
+        cap=REGISTRY["list.numbering.configure"]
+        ind.set(qn("w:leftChars"),"500")
+        self.assertFalse(cap.verifier(cap.reader(DocumentIndex(out),{},cap),params,cap))
+
+    def test_list_audit_checks_inherited_numbering(self):
+        from word_format.api import audit_document
+        doc=Document();doc.add_paragraph("numbered item",style="List Number");doc.save(self.source)
+        result=audit_document(self.source,{"operations":[self.operation("list.numbering.configure",{"style":"decimal-bracket","start":7},{"type":"document"})]})
+        self.assertEqual(result["status"],"failed")
+
+    def test_list_scope_uses_effective_level_and_override(self):
+        from docx.enum.style import WD_STYLE_TYPE
+        from word_format.api import audit_document
+
+        for first_format, second_format, override_format, direct_level in (
+            ("bullet", "decimal", None, False),
+            ("decimal", "bullet", None, False),
+            ("bullet", "bullet", "decimal", False),
+            ("bullet", "decimal", None, True),
+        ):
+            with self.subTest(first=first_format, second=second_format, override=override_format, direct_level=direct_level):
+                doc = Document()
+                numbering = doc.part.numbering_part.element
+                abstract = OxmlElement("w:abstractNum")
+                abstract.set(qn("w:abstractNumId"), "100")
+
+                def level(index, fmt):
+                    node = OxmlElement("w:lvl")
+                    node.set(qn("w:ilvl"), str(index))
+                    for tag, value in (("numFmt", fmt), ("lvlText", f"%{index + 1}."), ("start", "1")):
+                        child = OxmlElement("w:" + tag)
+                        child.set(qn("w:val"), value)
+                        node.append(child)
+                    return node
+
+                abstract.extend([level(0, first_format), level(1, second_format)])
+                numbering.append(abstract)
+                num = OxmlElement("w:num")
+                num.set(qn("w:numId"), "100")
+                aid = OxmlElement("w:abstractNumId")
+                aid.set(qn("w:val"), "100")
+                num.append(aid)
+                if override_format:
+                    override = OxmlElement("w:lvlOverride")
+                    override.set(qn("w:ilvl"), "1")
+                    override.append(level(1, override_format))
+                    num.append(override)
+                numbering.append(num)
+                style = doc.styles.add_style("Custom numbered scope", WD_STYLE_TYPE.PARAGRAPH)
+                numpr = OxmlElement("w:numPr")
+                for tag, value in (("ilvl", "0" if direct_level else "1"), ("numId", "100")):
+                    child = OxmlElement("w:" + tag)
+                    child.set(qn("w:val"), value)
+                    numpr.append(child)
+                style.element.get_or_add_pPr().append(numpr)
+                paragraph = doc.add_paragraph("Mixed list item", style=style)
+                if direct_level:
+                    direct_numpr = OxmlElement("w:numPr")
+                    direct_ilvl = OxmlElement("w:ilvl")
+                    direct_ilvl.set(qn("w:val"), "1")
+                    direct_numpr.append(direct_ilvl)
+                    paragraph._p.get_or_add_pPr().append(direct_numpr)
+                before = paragraph._p.xml
+                doc.save(self.source)
+                request = {"operations": [self.operation("list.numbering.configure", {"style": "decimal-bracket", "start": 7}, {"type": "document"})]}
+                numbered = (override_format or second_format) == "decimal"
+                self.assertEqual(audit_document(self.source, request)["status"], "failed" if numbered else "passed")
+                plan = build_plan(self.source, self.output, request)
+                report = apply_plan(plan, overwrite=True)
+                self.assertEqual(verify_plan(plan, report)["status"], "passed")
+                actual = Document(self.output).paragraphs[0]
+                if numbered:
+                    self.assertIsNotNone(actual._p.find("./" + qn("w:pPr") + "/" + qn("w:numPr")))
+                else:
+                    self.assertEqual(actual._p.xml, before)
+
+    def test_list_writer_cannot_drop_original_targets_and_pass(self):
+        from dataclasses import replace
+
+        doc = Document()
+        paragraph = doc.add_paragraph("Numbered through direct properties")
+        numpr = OxmlElement("w:numPr")
+        numid = OxmlElement("w:numId")
+        numid.set(qn("w:val"), "5")
+        numpr.append(numid)
+        paragraph._p.get_or_add_pPr().append(numpr)
+        doc.save(self.source)
+        cap = REGISTRY["list.numbering.configure"]
+
+        def wrong(index, ref, params):
+            ppr = index.document.paragraphs[0]._p.pPr
+            ppr.remove(ppr.find(qn("w:numPr")))
+
+        plan = build_plan(self.source, self.output, {"operations": [self.operation(cap.action, {"style": "decimal-bracket", "start": 7}, {"type": "document"})]})
+        with patch.dict(REGISTRY, {cap.action: replace(cap, handler=wrong)}):
+            with self.assertRaises(FormatError):
+                apply_plan(plan)
+        self.assertFalse(self.output.exists())
+
+    def test_three_line_table_clears_all_direct_cell_borders_and_restores(self):
+        doc=Document(self.source);table=doc.tables[0]
+        table.add_row();table.cell(1,0).merge(table.cell(1,1))
+        cells=[tc for tr in table._tbl.findall(qn("w:tr")) for tc in tr.findall(qn("w:tc"))]
+        for tc in cells:
+            borders=OxmlElement("w:tcBorders")
+            for edge in ("top","bottom","left","right","start","end","tl2br","tr2bl"):
+                node=OxmlElement("w:"+edge);node.set(qn("w:val"),"single");node.set(qn("w:sz"),"16");borders.append(node)
+            tc.get_or_add_tcPr().append(borders)
+        before=[etree.tostring(tc.tcPr.find(qn("w:tcBorders"))) for tc in cells]
+        doc.save(self.source);self.original_hash=sha256(self.source)
+        out,_=self.execute([self.operation("table.three_line.apply",{"value":True},{"type":"table","id":"t0"})])
+        from word_format.inspect import DocumentIndex
+        cap=REGISTRY["table.three_line.apply"]
+        for tr in out.tables[0]._tbl.findall(qn("w:tr")):
+            for tc in tr.findall(qn("w:tc")):
+                borders=tc.tcPr.find(qn("w:tcBorders"))
+                for edge in ("left","right","start","end","tl2br","tr2bl"):
+                    node=borders.find(qn("w:"+edge)) if borders is not None else None
+                    self.assertTrue(node is None or node.get(qn("w:val")) in {"none","nil"})
+        tc=out.tables[0].cell(2,1)._tc
+        borders=tc.tcPr.find(qn("w:tcBorders"));node=OxmlElement("w:left");node.set(qn("w:val"),"single");node.set(qn("w:sz"),"16")
+        if borders.find(qn("w:left")) is not None:borders.remove(borders.find(qn("w:left")))
+        borders.append(node)
+        self.assertFalse(cap.verifier(cap.reader(DocumentIndex(out),{"id":"t0","kind":"table"},cap),{"value":True},cap))
+        self.source=self.output;self.output=self.folder/"restored.docx";self.original_hash=sha256(self.source)
+        restored,_=self.execute([self.operation("table.three_line.apply",{"value":False},{"type":"table","id":"t0"})])
+        cells=[tc for tr in restored.tables[0]._tbl.findall(qn("w:tr")) for tc in tr.findall(qn("w:tc"))]
+        self.assertEqual([etree.tostring(tc.tcPr.find(qn("w:tcBorders"))) for tc in cells],before)
+
+    def test_three_line_table_preserves_unrelated_table_properties(self):
+        from dataclasses import replace
+        cap=REGISTRY["table.three_line.apply"]
+        def wrong(index,ref,params):
+            cap.handler(index,ref,params)
+            index.elements[ref["id"]].tblPr.append(OxmlElement("w:bidiVisual"))
+        with patch.dict(REGISTRY,{cap.action:replace(cap,handler=wrong)}):
+            with self.assertRaises(FormatError):
+                self.execute([self.operation(cap.action,{"value":True},{"type":"table","id":"t0"})])
+        self.assertFalse(self.output.exists())
+
+    def test_three_line_restore_checks_saved_borders_not_only_snapshot_removal(self):
+        self.execute([self.operation("table.three_line.apply",{"value":True},{"type":"table","id":"t0"})])
+        self.source=self.output;self.output=self.folder/"bad-restore.docx";self.original_hash=sha256(self.source)
+        from dataclasses import replace
+        cap=REGISTRY["table.three_line.apply"]
+        def wrong(index,ref,params):
+            index.elements[ref["id"]].tblPr.attrib.pop("{urn:word-format-master:format}originalBorders")
+        with patch.dict(REGISTRY,{cap.action:replace(cap,handler=wrong)}):
+            with self.assertRaises(FormatError):
+                self.execute([self.operation(cap.action,{"value":False},{"type":"table","id":"t0"})])
+        self.assertFalse(self.output.exists())
 
     def test_parser_does_not_leak_heading_spacing_or_invent_numbering(self):
         patch=parse_requirements("一级标题黑体，1.5倍行距。正文宋体，首行缩进0字符。")["spec_patch"]

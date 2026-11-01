@@ -54,7 +54,7 @@ python scripts/format_cli.py template validate school-template.json
 
 ## 验收状态
 
-verify 分开报告 execution_status 与 compliance。格式回读和对象保护通过，但没有绑定逐页视觉报告时，完整符合状态为 pending；明确跳过要求为 partial；执行或视觉失败为 failed。只有覆盖完整且视觉验收通过才是 passed。渲染成功本身不能代替视觉检查。
+`verify` 和 `audit --template` 分开报告 execution_status 与 compliance。已检查格式通过，但没有绑定逐页视觉报告时，完整符合状态为 pending；明确跳过要求为 partial；检查或视觉失败为 failed。只有覆盖完整且视觉验收通过才是 passed。只读 audit 不渲染、不修改文档，也不能证明执行时的对象保护。渲染成功本身不能代替视觉检查。
 
 模板、来源或规则发生变化必须重新规划。执行时从原始模板重新生成预期操作和覆盖账本，删除操作后重新计算计划哈希也无法绕过完整性检查。
 

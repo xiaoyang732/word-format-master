@@ -1,13 +1,12 @@
 """Evidence extraction, semantic mapping and deterministic profile round trips."""
 
-import copy
-from dataclasses import replace
 import json
 import subprocess
 import sys
 import tempfile
 import unittest
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
@@ -22,8 +21,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from word_format import apply_plan, verify_plan
 from word_format.contracts import FormatError, sha256
 from word_format.profiles import profile_plan, requirements_profile, template_profile
-from word_format.requirement_sources import extract_requirements
 from word_format.registry import REGISTRY
+from word_format.requirement_sources import extract_requirements
 
 
 class ProfileTests(unittest.TestCase):
@@ -67,6 +66,75 @@ class ProfileTests(unittest.TestCase):
                 review = profile_plan(self.target, self.output, profile)
                 self.assertEqual(review["status"], "needs_clarification")
                 self.assertFalse(self.output.exists())
+
+    def test_requirement_language_qualifiers_stay_on_their_scope(self):
+        cases = (
+            ("英文摘要正文小四。", "abstract_body", "en"),
+            ("中文摘要正文小四。", "abstract_body", "zh"),
+            ("English Abstract body 小四。", "abstract_body", "en"),
+            ("Chinese Abstract body 小四。", "abstract_body", "zh"),
+            ("中文关键词宋体。", "keywords", "zh"),
+            ("英文关键词宋体。", "keywords", "en"),
+            ("English Keywords 宋体。", "keywords", "en"),
+            ("Chinese Keywords 宋体。", "keywords", "zh"),
+            ("English Abstract 小四。", "abstract_heading", "en"),
+            ("Chinese Abstract 小四。", "abstract_heading", "zh"),
+            ("论文题目（英文）小四。", "abstract_title", "en"),
+            ("摘要正文小四。", "abstract_body", None),
+            ("关键词宋体。", "keywords", None),
+        )
+        for wording, role, language in cases:
+            with self.subTest(wording=wording):
+                profile = self.requirements(wording)
+                self.assertEqual(profile["issues"], [])
+                self.assertEqual(len(profile["rules"]), 1)
+                target = profile["rules"][0]["target"]
+                self.assertEqual(target.get("semantic_role", target.get("role")), role)
+                self.assertEqual(target.get("language"), language)
+
+        profile = self.requirements("中文摘要正文小四，英文摘要正文五号。")
+        self.assertEqual(profile["issues"], [])
+        self.assertEqual(
+            {(r["target"]["language"], r["params"]["value"]) for r in profile["rules"]},
+            {("zh", 12), ("en", 10.5)},
+        )
+
+    def test_bilingual_requirement_plan_only_changes_the_requested_language(self):
+        doc = Document()
+        for text in (
+            "中文摘要", "中文摘要内容", "关键词：系统；测试",
+            "Abstract", "English abstract content.", "Keywords: system; test",
+            "第1章 目标研究", "正文内容",
+        ):
+            run = doc.add_paragraph(text).runs[0]
+            run.font.size = Pt(16)
+            run._r.get_or_add_rPr().get_or_add_rFonts().set(qn("w:eastAsia"), "黑体")
+        doc.save(self.target)
+        source_hash = sha256(self.target)
+        profile = self.requirements("英文摘要正文小四。中文关键词宋体。")
+        self.assertEqual(profile["issues"], [])
+        plan = profile_plan(self.target, self.output, profile)
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["status"], "passed")
+        out = Document(self.output)
+        self.assertEqual(out.paragraphs[1].runs[0].font.size.pt, 16)
+        self.assertEqual(out.paragraphs[4].runs[0].font.size.pt, 12)
+        self.assertEqual(out.paragraphs[2].runs[0]._r.rPr.rFonts.get(qn("w:eastAsia")), "宋体")
+        self.assertEqual(out.paragraphs[5].runs[0]._r.rPr.rFonts.get(qn("w:eastAsia")), "黑体")
+        self.assertEqual([p.text for p in out.paragraphs], [p.text for p in doc.paragraphs])
+        self.assertEqual(sha256(self.target), source_hash)
+
+    def test_unqualified_abstract_requirement_applies_to_both_languages(self):
+        doc = Document()
+        for text in ("摘要", "中文摘要内容", "Abstract", "English abstract content."):
+            doc.add_paragraph(text).runs[0].font.size = Pt(16)
+        doc.save(self.target)
+        profile = self.requirements("摘要正文小四。")
+        plan = profile_plan(self.target, self.output, profile)
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["status"], "passed")
+        out = Document(self.output)
+        self.assertEqual([p.runs[0].font.size.pt for p in out.paragraphs], [16, 12, 16, 12])
 
     def test_explicit_resolution_keeps_conflicting_evidence(self):
         profile = self.requirements("正文小四。正文五号。")

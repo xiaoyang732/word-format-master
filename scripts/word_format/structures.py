@@ -14,7 +14,6 @@ from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls
-from docx.shared import Mm
 from lxml import etree
 
 from .namespaces import qn
@@ -178,12 +177,13 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
             tblPr.append(parse_xml(f'<w:jc {nsdecls("w")} w:val="{alignment}"/>'))
 
         snapshot_key = "{urn:word-format-master:format}originalBorders"
+        cells = [tc for tr in table._tbl.findall(qn("w:tr")) for tc in tr.findall(qn("w:tc"))]
         if three_line and snapshot_key not in tblPr.attrib:
-            border_nodes = [tblPr] + [cell for row in table.rows for cell in row.cells]
+            border_nodes = [tblPr] + cells
             snapshot = []
             seen_cells = set()
             for node in border_nodes:
-                owner = node if node is tblPr else node._tc.get_or_add_tcPr()
+                owner = node if node is tblPr else node.get_or_add_tcPr()
                 if owner in seen_cells:
                     continue
                 seen_cells.add(owner)
@@ -196,12 +196,18 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
             tblPr.set(snapshot_key, json.dumps(snapshot))
         if "three_line_table" in tables and not three_line and snapshot_key in tblPr.attrib:
             snapshot = json.loads(tblPr.attrib.pop(snapshot_key))
-            owners = [tblPr]
-            for row in table.rows:
-                for cell in row.cells:
-                    owner = cell._tc.get_or_add_tcPr()
-                    if owner not in owners:
-                        owners.append(owner)
+            owners = [tblPr] + [tc.get_or_add_tcPr() for tc in cells]
+            if len(snapshot) != len(owners):
+                # Older snapshots used the grid view, which omits continuation
+                # cells of vertical merges. Those cells were never changed.
+                legacy = [tblPr]
+                for row in table.rows:
+                    for cell in row.cells:
+                        owner = cell._tc.get_or_add_tcPr()
+                        if owner not in legacy:
+                            legacy.append(owner)
+                if len(snapshot) == len(legacy):
+                    owners = legacy
             if len(snapshot) != len(owners):
                 raise ValueError("Table structure changed; saved borders cannot be restored")
             for index, (owner, saved) in enumerate(zip(owners, snapshot)):
@@ -226,18 +232,43 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
             )
             tblPr.append(three_line_xml)
 
-            if table.rows:
-                header_row = table.rows[0]
-                for cell in header_row.cells:
-                    tcPr = cell._tc.get_or_add_tcPr()
+            rows = table._tbl.findall(qn("w:tr"))
+            for row_index, row in enumerate(rows):
+                for cell in row.findall(qn("w:tc")):
+                    tcPr = cell.get_or_add_tcPr()
                     existing_tc_borders = tcPr.find(qn("w:tcBorders"))
                     if existing_tc_borders is not None:
                         tcPr.remove(existing_tc_borders)
-                    tc_border_xml = parse_xml(
-                        f"<w:tcBorders {nsdecls('w')}>"
-                        f'<w:bottom w:val="single" w:sz="6" w:space="0" w:color="auto"/>'
-                        f"</w:tcBorders>"
-                    )
+                    tc_border_xml = OxmlElement("w:tcBorders")
+                    # Direct cell borders override table and conditional-style
+                    # borders. Cover actual cells, including merge continuations.
+                    for edge in (
+                        "top",
+                        "bottom",
+                        "left",
+                        "right",
+                        "start",
+                        "end",
+                        "insideH",
+                        "insideV",
+                        "tl2br",
+                        "tr2bl",
+                    ):
+                        border = OxmlElement("w:" + edge)
+                        size = (
+                            12
+                            if (edge == "top" and row_index == 0)
+                            or (edge == "bottom" and row_index == len(rows) - 1)
+                            else 6
+                            if edge == "bottom" and row_index == 0
+                            else None
+                        )
+                        border.set(qn("w:val"), "single" if size else "nil")
+                        if size:
+                            border.set(qn("w:sz"), str(size))
+                            border.set(qn("w:space"), "0")
+                            border.set(qn("w:color"), "auto")
+                        tc_border_xml.append(border)
                     tcPr.append(tc_border_xml)
 
         if "repeat_header_row" in tables and not repeat_header and table.rows:
@@ -1380,7 +1411,7 @@ def _numbering_max_id(numbering, tag: str, attribute: str) -> int:
     return max(values, default=-1)
 
 
-def _num_format_for_num_id(numbering, num_id: str | None) -> str | None:
+def _num_format_for_num_id(numbering, num_id: str | None, ilvl: int = 0) -> str | None:
     if not num_id:
         return None
     num = next(
@@ -1399,7 +1430,20 @@ def _num_format_for_num_id(numbering, num_id: str | None) -> str | None:
         ),
         None,
     )
-    level = abstract.find(qn("w:lvl")) if abstract is not None else None
+    level = (
+        next(
+            (node for node in abstract.findall(qn("w:lvl")) if node.get(qn("w:ilvl")) == str(ilvl)),
+            None,
+        )
+        if abstract is not None
+        else None
+    )
+    override = next(
+        (node for node in num.findall(qn("w:lvlOverride")) if node.get(qn("w:ilvl")) == str(ilvl)),
+        None,
+    )
+    if override is not None and override.find(qn("w:lvl")) is not None:
+        level = override.find(qn("w:lvl"))
     num_fmt = level.find(qn("w:numFmt")) if level is not None else None
     return num_fmt.get(qn("w:val")) if num_fmt is not None else None
 
@@ -1446,14 +1490,14 @@ def _has_numbered_list_marker(document: Document, paragraph) -> bool:
         }
     ):
         return False
-    numbering = _get_numbering_element(document, create=False)
-    ppr = paragraph._p.pPr
-    num_pr = ppr.find(qn("w:numPr")) if ppr is not None else None
-    if num_pr is not None and numbering is not None:
-        num_id = num_pr.find(qn("w:numId"))
-        fmt = _num_format_for_num_id(
-            numbering, num_id.get(qn("w:val")) if num_id is not None else None
-        )
+    from .numbering import effective_numbering
+    from .properties import read_paragraph
+
+    if read_paragraph(document, paragraph._p, "numbering_suppressed"):
+        return False
+    found = effective_numbering(document, paragraph._p)
+    if found is not None:
+        fmt = _num_format_for_num_id(_get_numbering_element(document), found[0], found[1])
         return fmt not in {None, "bullet", "picture"}
     return any(
         marker in style_name for marker in ("list number", "numbered", "编号", "list paragraph")
@@ -1560,11 +1604,15 @@ def apply_numbered_lists(document: Document, tokens: dict[str, Any]) -> list[str
         num_id = _append_numbering_definition(document, style, start)
         for paragraph in paragraphs[index : end + 1]:
             _set_managed_num_pr(paragraph, num_id)
-            p_format = paragraph.paragraph_format
+            from .properties import write_paragraph
+
+            ppr = paragraph._p.get_or_add_pPr()
             if left_indent is not None:
-                p_format.left_indent = Mm(float(left_indent))
+                write_paragraph(ppr, "left_indent", {"value": float(left_indent), "unit": "mm"})
             if hanging_indent is not None:
-                p_format.first_line_indent = Mm(-float(hanging_indent))
+                write_paragraph(
+                    ppr, "hanging_indent", {"value": float(hanging_indent), "unit": "mm"}
+                )
         changes.append(f"Applied managed {style} numbering to {end - index + 1} list paragraph(s)")
         index = end + 1
     return changes

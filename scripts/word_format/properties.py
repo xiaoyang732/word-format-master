@@ -7,6 +7,7 @@ import copy
 from functools import lru_cache
 from xml.etree import ElementTree
 
+from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import OxmlElement
 
 from .contracts import FormatError
@@ -97,12 +98,19 @@ def style_map(document):
     return cached[2]
 
 
-def paragraph_style_name(document, paragraph):
+def paragraph_style(document, paragraph):
+    """Resolve an explicit paragraph style or the package's actual default."""
     pr = paragraph.find(qn("w:pPr"))
     node = pr.find(qn("w:pStyle")) if pr is not None else None
-    sid = node.get(qn("w:val")) if node is not None else "Normal"
-    style = style_map(document).get(sid)
-    return style.name if style is not None else sid
+    style = style_map(document).get(node.get(qn("w:val"))) if node is not None else None
+    if style is not None and style.type == WD_STYLE_TYPE.PARAGRAPH:
+        return style
+    return document.styles.default(WD_STYLE_TYPE.PARAGRAPH)
+
+
+def paragraph_style_name(document, paragraph):
+    style = paragraph_style(document, paragraph)
+    return style.name if style is not None else ""
 
 
 @lru_cache(maxsize=16)
@@ -144,14 +152,11 @@ def rpr_sources(document, paragraph, run=None):
                     seen.add(style.style_id)
                     yield style.element.find(qn("w:rPr"))
                     style = style.base_style
-    style_id = None
     ppr = paragraph.find(qn("w:pPr"))
     if ppr is not None:
         if run is None:
             yield ppr.find(qn("w:rPr"))
-        pstyle = ppr.find(qn("w:pStyle"))
-        style_id = pstyle.get(qn("w:val")) if pstyle is not None else None
-    style = style_map(document).get(style_id or "Normal")
+    style = paragraph_style(document, paragraph)
     seen = set()
     while style is not None and style.style_id not in seen:
         seen.add(style.style_id)
@@ -165,9 +170,7 @@ def rpr_sources(document, paragraph, run=None):
 def ppr_sources(document, paragraph):
     pr = paragraph.find(qn("w:pPr"))
     yield pr
-    pstyle = pr.find(qn("w:pStyle")) if pr is not None else None
-    style_id = pstyle.get(qn("w:val")) if pstyle is not None else "Normal"
-    style = style_map(document).get(style_id or "Normal")
+    style = paragraph_style(document, paragraph)
     seen = set()
     while style is not None and style.style_id not in seen:
         seen.add(style.style_id)
@@ -241,6 +244,15 @@ def resolved_color(document, node):
         return "theme:" + theme
 
 
+def _toggle_value(sources, tag):
+    state = False
+    for pr in reversed(sources):
+        node = pr.find(qn("w:" + tag)) if pr is not None else None
+        if node is not None and node.get(qn("w:val"), "1") not in {"0", "false", "off"}:
+            state = not state
+    return state
+
+
 def read_font(document, paragraph, run, name):
     sources = list(rpr_sources(document, paragraph, run))
     if name in {"font_east_asia", "font_latin"}:
@@ -278,12 +290,7 @@ def read_font(document, paragraph, run, name):
         node = direct.find(qn("w:" + tag)) if direct is not None else None
         if node is not None:
             return node.get(qn("w:val"), "1") not in {"0", "false", "off"}
-        state = False
-        for pr in reversed(sources):
-            node = pr.find(qn("w:" + tag)) if pr is not None else None
-            if node is not None and node.get(qn("w:val"), "1") not in {"0", "false", "off"}:
-                state = not state
-        return state
+        return _toggle_value(sources, tag)
     for pr in sources:
         node = pr.find(qn("w:color")) if pr is not None else None
         if node is not None:
@@ -309,6 +316,20 @@ def write_font(pr, name, value):
         node.set(qn("w:val"), value.lstrip("#").upper() if value != "auto" else value)
         for attr in ("themeColor", "themeTint", "themeShade"):
             node.attrib.pop(qn("w:" + attr), None)
+
+
+def write_style_font(document, style, name, value):
+    """Set an effective style value; b/i in styles are relative toggles."""
+    pr = element(style.element, "rPr")
+    if name not in {"bold", "italic"}:
+        write_font(pr, name, value)
+        return
+    paragraph = OxmlElement("w:p")
+    element(element(paragraph, "pPr"), "pStyle").set(qn("w:val"), style.style_id)
+    inherited = [source for source in rpr_sources(document, paragraph) if source is not pr]
+    for tag in ("b", "bCs") if name == "bold" else ("i", "iCs"):
+        toggle = value != _toggle_value(inherited, tag)
+        element(pr, tag).set(qn("w:val"), "1" if toggle else "0")
 
 
 def read_paragraph(document, paragraph, name):

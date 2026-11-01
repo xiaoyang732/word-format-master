@@ -85,6 +85,7 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 ## 能力与代码对应
 
 `capabilities` 返回每项操作的 action、handler、validator、reader、verifier、参数、允许范围和测试文件。注册表位于 `registry.py`，入口只能执行已登记 action。
+测试文件链接是回归入口，不代表每个参数组合或渲染器均有覆盖。
 
 | 格式 | 操作 | 唯一写入职责 |
 |---|---|---|

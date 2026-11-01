@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from apply_spec import validate_spec
 from word_format.registry import REGISTRY
 from word_format.templates import list_templates, load_template
+
 REQUIRED = [
     "SKILL.md", "README.md", "agents/openai.yaml", "assets/presets.json",
     "references/format-profile.md", "references/direct-format-api.md",
@@ -53,6 +54,9 @@ def main():
         for attribute in ("handler", "validator", "reader", "verifier"):
             if not callable(getattr(cap, attribute)):
                 errors.append(f"{cap.action}: missing {attribute}")
+        test_path = cap.public()["test"]
+        if not (ROOT / test_path).is_file():
+            errors.append(f"{cap.action}: referenced test file does not exist: {test_path}")
     presets_path = ROOT / "assets" / "presets.json"
     if presets_path.is_file():
         try:

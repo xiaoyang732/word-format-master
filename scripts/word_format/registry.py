@@ -40,9 +40,9 @@ class Capability:
             "parameters": self.parameters,
             "structural": self.structural,
             "effects": list(self.effects),
-            "test": "tests/test_headers.py"
+            "test": "_dev/tests/test_headers.py"
             if self.property.startswith("header:") or self.property == "section_break"
-            else "tests/test_format_core.py",
+            else "_dev/tests/test_format_core.py",
         }
 
 
@@ -174,29 +174,51 @@ def read_atomic(index, ref, cap):
     if cap.property == "three_line":
         borders = p.find("./" + qn("w:tblPr") + "/" + qn("w:tblBorders"))
 
-        def val(tag, attr):
-            node = borders.find(qn("w:" + tag)) if borders is not None else None
-            return node.get(qn("w:" + attr)) if node is not None else None
+        def matches(owner, edge, size=None):
+            node = owner.find(qn("w:" + edge)) if owner is not None else None
+            if node is None:
+                return False
+            if size is None:
+                return node.get(qn("w:val")) in {"none", "nil"}
+            return node.get(qn("w:val")) == "single" and node.get(qn("w:sz")) == str(size)
 
-        header = p.find(
-            "./"
-            + qn("w:tr")
-            + "/"
-            + qn("w:tc")
-            + "/"
-            + qn("w:tcPr")
-            + "/"
-            + qn("w:tcBorders")
-            + "/"
-            + qn("w:bottom")
+        valid = all(
+            matches(borders, edge, 12 if edge in {"top", "bottom"} else None)
+            for edge in ("top", "bottom", "left", "right", "insideH", "insideV")
         )
-        return (
-            val("top", "sz") == "12"
-            and val("bottom", "sz") == "12"
-            and val("insideV", "val") == "none"
-            and header is not None
-            and header.get(qn("w:sz")) == "6"
-        )
+        rows = p.findall(qn("w:tr"))
+        valid = valid and bool(rows)
+        for i, row in enumerate(rows):
+            cells = row.findall(qn("w:tc"))
+            valid = valid and bool(cells)
+            for cell in cells:
+                cell_borders = cell.find("./" + qn("w:tcPr") + "/" + qn("w:tcBorders"))
+                for edge in (
+                    "top",
+                    "bottom",
+                    "left",
+                    "right",
+                    "start",
+                    "end",
+                    "insideH",
+                    "insideV",
+                    "tl2br",
+                    "tr2bl",
+                ):
+                    size = (
+                        12
+                        if (edge == "top" and i == 0) or (edge == "bottom" and i == len(rows) - 1)
+                        else 6
+                        if edge == "bottom" and i == 0
+                        else None
+                    )
+                    valid = valid and matches(cell_borders, edge, size)
+        tblpr = p.find(qn("w:tblPr"))
+        return {
+            "enabled": valid,
+            "saved": tblpr is not None
+            and "{urn:word-format-master:format}originalBorders" in tblpr.attrib,
+        }
     raise FormatError(f"No reader for {cap.property}")
 
 
@@ -213,6 +235,8 @@ def equal_value(actual, expected, tolerance=0.025):
 
 
 def verify_atomic(actual, params, cap):
+    if cap.property == "three_line":
+        return actual["enabled"] if params["value"] else not actual["saved"]
     expected = (
         params
         if cap.property == "line_spacing" or cap.property.endswith("indent")

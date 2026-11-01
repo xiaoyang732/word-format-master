@@ -28,3 +28,10 @@ _dev/scripts/*
 _dev/ci/*
 !_dev/ci/pyproject.toml
 !_dev/ci/requirements-dev.txt
+!_dev/docs/
+_dev/docs/*
+!_dev/docs/native-heading-numbering-fix.md
+!_dev/docs/template-refactor-plan.md
+!_dev/docs/template-refactor-report.md
+!_dev/docs/template-fidelity-fix.md
+!_dev/docs/reliability-review-2026-10-31.md

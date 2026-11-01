@@ -4,7 +4,6 @@
 
 生成文件中的章节、小节、列表、参考文献使用 Word 自动编号；题注、公式、页码和交叉引用使用动态域，禁止键入结构编号。交付前必须执行 `python scripts/check_numbering.py OUTPUT.docx --output numbering.json`；统一流水线自动拦截检查失败的结果。详见 [生成规范](references/thesis-generation.md)。
 
-[![CI](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 
 你只需要提供**待排版的 Word 文档**，再给出一份**学校/期刊的格式要求**、一份**已经排好版的样例文档**，或者**直接用日常语言说出你想怎么改**。无需自己编写代码或手动敲命令，AI 会自动读懂要求、对齐章节结构，并调用本地确定性排版引擎生成排好版的新文档与清晰的前后对比验收报告。
@@ -104,7 +103,7 @@ python -m venv .venv
 ```
 1. **读取解析（Inspect & Profile）**：扫描目标论文的章节与段落结构，同时从要求文档或样例文档中提取排版规则，保留原文依据。
 2. **规则对齐与规划（Plan）**：将排版规则与论文中的各个模块（封面、摘要、各级标题、正文、参考文献、致谢等）一一对应，生成可预览的修改计划。遇到冲突或歧义时先交由用户决定。
-3. **安全写入（Apply）**：由经过严格测试的 63 项标准格式算子执行修改，只改请求指定的属性，先写入临时文件，确保原子性与原稿安全。
+3. **安全写入（Apply）**：由统一注册的格式算子执行修改，只改请求指定的属性，先写入临时文件，确保原子性与原稿安全。实际能力与参数以 `capabilities` 输出为准。
 4. **独立复核（Verify & Render）**：重新打开生成的文档，逐项比对格式数值、校验正文与未修改部分是否完好无损，并支持渲染为页面图片检查分页、页眉和表格跨页效果。
 
 ### 2. 核心目录结构
@@ -119,8 +118,10 @@ word-format-master/
 │   ├── render_docx.py        # 页面视觉渲染工具（调用 Word / WPS / LibreOffice 导出页面图）
 │   ├── verify_output.py      # 输出文档结构与格式复核工具
 │   ├── thesis_quality.py     # 正文长度、数字引用映射与人工内容核验状态报告
-│   └── word_format/          # 底层确定性排版核心库（63 项标准格式操作算子）
-└── references/               # 详细接口规范与进阶参考文档
+│   └── word_format/          # 底层确定性排版核心库，唯一注册写入路径
+├── templates/               # 新模板入口的数据；compatibility/ 保留旧编号协议
+├── references/              # 当前接口规范与工作流契约
+└── _dev/                    # 回归测试、开发配置、验证脚本与历史改造记录
 ```
 
 ### 3. 命令行工作流示例（由 AI 在后台自动组织调用）
@@ -172,10 +173,10 @@ python scripts/render_docx.py "论文-排版后.docx" --output-dir render --meth
 
 ## 五、 开发验证与进阶文档
 
-> 本项目将自动化测试与开发配置归档于 `_dev/` 目录（配置于 `.gitignore`，不提交至生产包）：
+自动化测试、开发配置和验证脚本位于 `_dev/`，并已纳入版本控制。生成文件与缓存由 `.gitignore` 排除；开发历史记录放在 `_dev/docs/`。
 
 ```powershell
-# 本地开发回归测试与算子校验（需在包含 _dev/ 的本地环境下执行）
+# 在仓库根目录运行本地回归与算子校验
 python _dev/scripts/validate_project.py
 python _dev/scripts/smoke_test.py
 python -m unittest discover -s _dev/tests -v
@@ -187,6 +188,7 @@ python -m unittest discover -s _dev/tests -v
 - [按样例生成论文流程](references/thesis-generation.md)
 - [兼容格式规范](references/format-spec.md) · [页眉设置](references/header-requirements.md) · [标准与预设](references/standards-registry.md)
 - [架构说明](references/architecture.md) · [安全边界](SECURITY.md)
+- [本次可靠性审查与优化建议](_dev/docs/reliability-review-2026-10-31.md)
 
 README 面向使用者，介绍能力、安装和任务选择；`SKILL.md` 说明 AI 应如何选择 CLI 参数、处理附件证据和交付结果；`references/` 保存详细接口契约，`SECURITY.md` 记录本地处理与文件保护边界。
 
@@ -196,7 +198,7 @@ README 面向使用者，介绍能力、安装和任务选择；`SKILL.md` 说�
 新增独立内置模板与用户模板编译流程。已有论文和新生成初稿统一使用 `plan --template`；用户样例不再回退内置参数。参见 [模板引擎、迁移与验收](references/template-engine.md)。旧 spec / presets 接口保留兼容，新功能使用模板入口。
 
 
-详见 [重构方案](references/template-refactor-plan.md)与[主仓库验证报告](references/template-refactor-report.md)。一键执行共享流程：
+历史设计与验证记录归档于 [_dev/docs/](_dev/docs/template-refactor-report.md)。一键执行共享流程：
 
 ```powershell
 python scripts/run_format_pipeline.py input.docx output.docx --template thesis-standard

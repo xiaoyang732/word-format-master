@@ -5,11 +5,13 @@ import re
 from parse_requirements import CN_SIZE_PT, FONT_NAMES, measure_to_mm
 
 MEASURE = r"(\d+(?:\.\d+)?)\s*(厘米|毫米|英寸|磅|cm|mm|inches|inch|in|pt)"
+LANGUAGE_PREFIX = r"(?:(?:中文|英文)\s*|(?:Chinese|English)\s+)?"
 ROLES = [
-    (r"摘要正文|abstract\s+body", "abstract"),
+    (LANGUAGE_PREFIX + r"(?:摘要正文|abstract\s+body)", "abstract"),
     (r"(?:设计[（(]论文[）)]|论文|中文|英文)题目", "abstract_title"),
     (
-        r"[“\"]?摘要[”\"]?字样|[“\"]摘要[”\"]|^\s*摘要(?=\s*[（(])|\bAbstract\b(?!\s+body)",
+        LANGUAGE_PREFIX
+        + r"(?:[“\"]?摘要[”\"]?字样|[“\"]摘要[”\"]|^\s*摘要(?=\s*[（(])|\bAbstract\b(?!\s+body))",
         "abstract_heading",
     ),
     (r"页眉(?!距)|header(?!\s+distance)", "header"),
@@ -18,7 +20,7 @@ ROLES = [
     (r"正文|body(?:\s+text)?|(?<=[，,])\s*内容(?=采用|用)|^\s*内容(?=采用|用)", "body"),
     (r"章节题目|章节标题|标题(?=\s*(?:加黑|加粗))", "chapter_heading"),
     (r"参考文献|references|bibliography", "reference"),
-    (r"关键词|keywords", "keywords"),
+    (LANGUAGE_PREFIX + r"(?:关键词|keywords)", "keywords"),
     (r"图题|图注|figure\s+caption", "figure"),
     (r"表题|表注|table\s+caption", "table"),
 ]
@@ -100,6 +102,14 @@ def parse_blocks(blocks):
             found_roles = []
             for match, role in _scopes(clause):
                 selected = {"type": "paragraph", "role": role, "all": True}
+                scope_text = match.group()
+                language = (
+                    "en"
+                    if re.search(r"英文|\bEnglish\b", scope_text, re.I)
+                    else "zh"
+                    if re.search(r"中文|\bChinese\b", scope_text, re.I)
+                    else None
+                )
                 if role == "heading":
                     raw = match.group(1) or match.group(2)
                     selected["level"] = (
@@ -112,12 +122,15 @@ def parse_blocks(blocks):
                         "type": "paragraph",
                         "semantic_role": role,
                         "all": True,
-                        "language": "en" if re.search(r"英文|\bAbstract\b", clause, re.I) else "zh",
+                        "language": language
+                        or ("en" if re.search(r"英文|\bAbstract\b", clause, re.I) else "zh"),
                     }
                 elif role == "chapter_heading":
                     selected.update(role="heading", module="chapters")
                 elif role in {"figure", "table"}:
                     selected.update(role="caption", contains="图" if role == "figure" else "表")
+                if language:
+                    selected["language"] = language
                 found_roles.append(selected)
                 consume(match)
             found_roles = [dict(items) for items in {tuple(s.items()) for s in found_roles}]
