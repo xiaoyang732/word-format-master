@@ -115,16 +115,18 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
             if (
                 style_name.startswith("heading")
                 or style_name.startswith("标题")
+                or (style_name.startswith("wfm ") and style_name.endswith(" heading"))
                 or style_name in {"title", "subtitle", "toc", "wfm toc heading", "bibliography", "references", "reference", "参考文献"}
             ):
                 continue
             ppr = paragraph._p.pPr
             num_pr = ppr.find(qn("w:numPr")) if ppr is not None else None
             if num_pr is not None:
-                list_paragraphs += 1
                 num_id = num_pr.find(qn("w:numId"))
-                if num_id is not None and num_id.get(qn("w:val")):
-                    num_ids.add(num_id.get(qn("w:val")))
+                val = num_id.get(qn("w:val")) if num_id is not None else None
+                if val and val != "0":
+                    list_paragraphs += 1
+                    num_ids.add(val)
         expected_marker = EXPECTED_LIST_MARKERS.get(str(numbered.get("style")))
         marker_matches = False
         try:

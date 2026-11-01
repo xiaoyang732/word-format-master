@@ -254,6 +254,14 @@
       },
       "space_after_pt": 0
     },
+    "semantic_roles": {
+      "reference_heading": {
+        "page_break_before": true
+      },
+      "acknowledgements_heading": {
+        "page_break_before": true
+      }
+    },
     "notes": [
       "依据 GB/T 7713.1、GB/T 7714-2015 学位论文标准规范。",
       "页面设置：标准 A4 纵向，页边距上 25.4mm、下 25.4mm、左 25.0mm、右 25.0mm，装订线 0mm，页眉/页脚距边界 15.0mm。",

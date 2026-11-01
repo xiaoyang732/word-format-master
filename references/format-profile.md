@@ -9,9 +9,9 @@ python scripts/format_cli.py profile requirements "学校要求.docx" --output p
 python scripts/format_cli.py profile template "样例.docx" --output profile.json
 ```
 
-`requirements` 支持 UTF-8 TXT/MD、DOCX/DOTX 和可提取文字的 PDF。DOCX 保留正文、表格行/单元格、页眉页脚、脚注尾注、批注及可读文本框的文字锚点。PDF 保存页码和页面范围；这不是文字级坐标或 Word 格式推断。扫描页产生 OCR 问题；混合图片的 PDF 页面和含图形/对象的 DOCX 同样会提示视觉复核，避免遗漏截图中的要求。Markdown 标记和说明性文字也可能进入未解析问题，AI 需结合完整原文处理。
+`requirements` 支持 UTF-8 TXT/MD、DOCX/DOTX（以及本机装有 Word/WPS/LibreOffice 时的只读 DOC/DOT/WPS）和可提取文字的 PDF。DOCX 保留正文、表格行/单元格、页眉页脚、脚注尾注、批注及可读文本框的文字锚点。PDF 保存页码和页面范围；这不是文字级坐标或 Word 格式推断。扫描页产生 OCR 问题；混合图片的 PDF 页面和含图形/对象的 DOCX 同样会提示视觉复核，避免遗漏截图中的要求。Markdown 标记和说明性文字也可能进入未解析问题，AI 需结合完整原文处理。
 
-`template` 支持 DOCX/DOTX。DOTX 在内存中转换读取，不改原文件。提取正文与表格段落的有效字体/字号/粗斜体/颜色、对齐/段距/行距/缩进/分页控制，按角色、模块、标题级别分组。全部页面节单独记录尺寸、方向、边距、装订线及页眉页脚距离。首页开关按节，奇偶页开关属于全文。表格提取对齐、首行重复及可识别三线表。
+`template` 支持 DOCX/DOTX（以及本机装有 Word/WPS/LibreOffice 时的只读 DOC/DOT/WPS；DOTX 在内存中转换读取，旧二进制格式从只读临时副本转换缓存，绝不改原文件）。提取正文与表格段落的有效字体/字号/粗斜体/颜色、对齐/段距/行距/缩进/分页控制，按角色、模块、标题级别分组。全部页面节单独记录尺寸、方向、边距、装订线及页眉页脚距离。首页开关按节，奇偶页开关属于全文。表格提取对齐、首行重复及可识别三线表。
 
 ## 档案结构
 
@@ -130,11 +130,14 @@ python scripts/format_cli.py verify --plan plan.json --report report.json --outp
 
 `inspect` 为可确认的区域补充 `semantic_role`，不替换原有 `role/module`：
 `cover_title`、`cover_subject`、`cover_student`、`cover_college`、`cover_major`、
-`cover_advisor`、`cover_student_id`、`cover_date`、`abstract_title`、
-`abstract_heading`、`abstract_body`、`keywords`、`reference_heading`。
+`cover_advisor`、`cover_student_id`、`cover_date`、`declaration_heading`、
+`declaration_salutation`、`declaration_body`、`declaration_signature`、`abstract_title`、
+`abstract_heading`、`abstract_inline`、`abstract_body`、`keywords`、`toc_heading`、
+`symbols_heading`、`symbols_body`、`reference_heading`、`acknowledgements_heading`、
+`acknowledgements_body`、`appendix_heading`、`appendix_body`。
 摘要与关键词使用 `language: zh/en` 区分。无法可靠识别的区域保留原角色，需明确映射。
 
-模板规则按这些区域分组；关键词字体以 `text_range` 的 `segment: label/value`
+模板规则按这些区域分组；关键词与行内摘要（`abstract_inline`，如 `摘 要：…` / `Abstract: …`）的字体以 `text_range` 的 `segment: label/value`
 分别提取和对应，段落属性仍作用于整段。空词条不提供内容字体依据。空摘要占位段的
 现有格式保存在快照中并产生待核实项，不能把紧邻标题遗留的格式当作摘要正文要求。
 

@@ -47,7 +47,7 @@ def resolve_targets(index, target, allowed):
         if kind not in allowed:
             raise FormatError("Operation does not support text ranges", "unsupported")
         if "segment" in target:
-            from .spec import keyword_text_ranges
+            from .spec import semantic_text_ranges
 
             segment = text_value(target["segment"], "keyword segment")
             if segment not in {"label", "value", "content"}:
@@ -59,8 +59,11 @@ def resolve_targets(index, target, allowed):
             refs = resolve_targets(index, base, {"paragraph"})
             result = []
             for ref in refs:
-                text = index.records[ref["id"]]["text"]
-                ranges = keyword_text_ranges(text)
+                rec = index.records[ref["id"]]
+                text = rec["text"]
+                ranges = semantic_text_ranges(
+                    text, target.get("semantic_role") or rec.get("semantic_role")
+                )
                 if not ranges:
                     raise FormatError("Keyword label was not found", "needs_clarification")
                 start, end = ranges["value" if segment == "content" else segment]
@@ -155,7 +158,7 @@ def resolve_targets(index, target, allowed):
             "row",
             "cell",
         },
-        "table": {"ordinal", "all"},
+        "table": {"ordinal", "all", "module"},
         "section": {"number", "all"},
     }
     extras = set(target) - ({"type", "id", "ids"} | allowed_fields.get(kind, set()))

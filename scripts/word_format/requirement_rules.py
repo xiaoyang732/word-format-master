@@ -7,12 +7,30 @@ from parse_requirements import CN_SIZE_PT, FONT_NAMES, measure_to_mm
 MEASURE = r"(\d+(?:\.\d+)?)\s*(厘米|毫米|英寸|磅|cm|mm|inches|inch|in|pt)"
 LANGUAGE_PREFIX = r"(?:(?:中文|英文)\s*|(?:Chinese|English)\s+)?"
 ROLES = [
-    (LANGUAGE_PREFIX + r"(?:摘要正文|abstract\s+body)", "abstract"),
+    (LANGUAGE_PREFIX + r"(?:(?:内容)?摘要正文|abstract\s+body)", "abstract"),
     (r"(?:设计[（(]论文[）)]|论文|中文|英文)题目", "abstract_title"),
     (
         LANGUAGE_PREFIX
-        + r"(?:[“\"]?摘要[”\"]?字样|[“\"]摘要[”\"]|^\s*摘要(?=\s*[（(])|\bAbstract\b(?!\s+body))",
+        + r"(?:[“\"]?(?:内容)?摘要[”\"]?(?:标题|字样)|[“\"](?:内容)?摘要[”\"]|^\s*(?:内容)?摘要(?=\s*[（(])|\bAbstract\b(?!\s+body))",
         "abstract_heading",
+    ),
+    (r"(?:诚信声明|原创性声明|独创性声明)(?:标题|字样)?", "declaration_heading"),
+    (
+        r"(?:目录标题|[“\"]目录[”\"](?:字样)?|目录(?=\s*(?:另起一页|单独开一页|单独成页|新起一页)))",
+        "toc_heading",
+    ),
+    (
+        r"(?:符号说明(?:标题|字样)?|主要符号表(?:标题|字样)?|[“\"]符号说明[”\"](?:字样)?)",
+        "symbols_heading",
+    ),
+    (
+        r"(?:参考文献标题|[“\"]参考文献[”\"](?:字样)?|参考文献(?=\s*(?:和\s*(?:致谢|附录)\s*)?(?:都\s*|均\s*|要\s*|应\s*)*(?:另起一页|单独开一页|单独成页|新起一页)))",
+        "reference_heading",
+    ),
+    (r"(?:(?:致谢|谢辞)(?:标题|字样)?|[“\"](?:致谢|谢辞)[”\"](?:字样)?)", "acknowledgements_heading"),
+    (
+        r"(?:附录(?:标题|字样)?|[“\"]附录[”\"](?:字样)?|附录(?=\s*(?:另起一页|单独开一页|单独成页|新起一页)))",
+        "appendix_heading",
     ),
     (r"页眉(?!距)|header(?!\s+distance)", "header"),
     (r"页脚(?!距)|footer(?!\s+distance)", "footer"),
@@ -125,6 +143,15 @@ def parse_blocks(blocks):
                         "language": language
                         or ("en" if re.search(r"英文|\bAbstract\b", clause, re.I) else "zh"),
                     }
+                elif role in {
+                    "declaration_heading",
+                    "toc_heading",
+                    "symbols_heading",
+                    "reference_heading",
+                    "acknowledgements_heading",
+                    "appendix_heading",
+                }:
+                    selected = {"type": "paragraph", "semantic_role": role, "all": True}
                 elif role == "chapter_heading":
                     selected.update(role="heading", module="chapters")
                 elif role in {"figure", "table"}:
@@ -305,6 +332,10 @@ def parse_blocks(blocks):
                 for action, pattern in [
                     ("font.bold.set", r"(?:不加粗|不加黑|非粗体|not bold|加粗|加黑|粗体|bold)"),
                     ("font.italic.set", r"(?:不倾斜|非斜体|not italic|斜体|italic)"),
+                    (
+                        "paragraph.page_break_before.set",
+                        r"(?:不另起一页|不单独开一页|not start on a new page|另起一页|单独开一页|单独成页|新起一页|start on a new page)",
+                    ),
                 ]:
                     for match in re.finditer(pattern, "".join(remaining), re.I):
                         emit(

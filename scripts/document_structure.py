@@ -24,6 +24,9 @@ MODULE_ORDER = (
     "appendix",
 )
 
+_ABSTRACT_LABEL_RE = r"(?:摘\s*要|中文摘要|英文摘要|内容摘要|提\s*要|abstracts?)"
+_KEYWORDS_LABEL_RE = r"(?:关\s*键\s*词|主\s*题\s*词|key\s*words?|index\s+terms?)"
+
 MODULE_MARKERS = {
     "declaration": re.compile(
         r"^\s*(?:(?:本科|学士|硕士|博士)?(?:学位|毕业)?(?:论文|设计)(?:[（(](?:设计|论文)[）)])?)?\s*"
@@ -31,14 +34,80 @@ MODULE_MARKERS = {
         r"(?:版权使用|使用)?授权书|声明与授权|授权声明|诚信承诺|承诺书|声明)\s*$",
         re.I,
     ),
-    "abstract": re.compile(r"^\s*(?:摘\s*要|中文摘要|英文摘要|abstracts?)(?:\s*[:：].*)?$", re.I),
-    "keywords": re.compile(r"^\s*(?:关\s*键\s*词|key\s*words?)(?:\s*[:：].*)?$", re.I),
-    "toc": re.compile(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", re.I),
-    "references": re.compile(r"^\s*(?:参考文献|参考资料|references|bibliography|works\s+cited)\s*$", re.I),
-    "acknowledgements": re.compile(r"^\s*(?:致\s*谢|acknowledg(?:e)?ments?)\s*$", re.I),
-    "appendix": re.compile(r"^\s*(?:附\s*录|appendix)(?:\s*[A-Z0-9一二三四五六七八九十]+(?:[\s:：、].*)?)?\s*$", re.I),
-    "symbols": re.compile(r"^\s*(?:符号说明|符号表|术语表|symbols?|glossary)\s*$", re.I),
+    "abstract": re.compile(
+        rf"^\s*(?:[【\[]\s*{_ABSTRACT_LABEL_RE}\s*[】\]]\s*(?:[:：]\s*)?.*|{_ABSTRACT_LABEL_RE}(?:\s*[:：].*)?)$",
+        re.I,
+    ),
+    "keywords": re.compile(
+        rf"^\s*(?:[【\[]\s*{_KEYWORDS_LABEL_RE}\s*[】\]]\s*(?:[:：]\s*)?.*|{_KEYWORDS_LABEL_RE}(?:\s*[:：].*)?)$",
+        re.I,
+    ),
+    "toc": re.compile(r"^\s*(?:目\s*录|目\s*次|table\s+of\s+contents|contents)\s*$", re.I),
+    "references": re.compile(
+        r"^\s*(?:参考文献|参考资料|引用文献|references|bibliography|works\s+cited)\s*$",
+        re.I,
+    ),
+    "acknowledgements": re.compile(
+        r"^\s*(?:致\s*谢|谢\s*辞|后\s*记|acknowledg(?:e)?ments?)\s*$",
+        re.I,
+    ),
+    "appendix": re.compile(
+        r"^\s*(?:附\s*录|appendix)(?:\s*[A-Z0-9一二三四五六七八九十]+(?:[\s:：、].*)?)?\s*$",
+        re.I,
+    ),
+    "symbols": re.compile(
+        r"^\s*(?:主要符号(?:对照)?表|符号(?:与|及)?缩略语说明|符号说明|缩略语(?:对照)?表|"
+        r"符号表|术语表|symbols?|abbreviations?|nomenclature|glossary)\s*$",
+        re.I,
+    ),
 }
+
+
+def _prefixed_ranges(text: str, core_pattern: str) -> dict[str, tuple[int, int]] | None:
+    bracket_match = re.match(
+        rf"^\s*(?P<label>[【\[]\s*{core_pattern}\s*[】\]])\s*(?P<colon>[:：])?",
+        text,
+        re.I,
+    )
+    plain_match = (
+        None
+        if bracket_match
+        else re.match(
+            rf"^\s*(?P<label>{core_pattern})\s*(?P<colon>[:：])?",
+            text,
+            re.I,
+        )
+    )
+    match = bracket_match or plain_match
+    if not match:
+        return None
+    # Unbracketed labels with trailing text must use a colon so prose like
+    # "Abstract classes in Java" or "Keywords in C" is never split as a label.
+    remainder = text[match.end() :]
+    if plain_match and not match.group("colon") and remainder.strip():
+        return None
+    label_start = match.start("label")
+    label_end = match.end("colon") if match.group("colon") else match.end("label")
+    value_start = match.end()
+    while value_start < len(text) and text[value_start].isspace():
+        value_start += 1
+    return {
+        "label": (label_start, label_end),
+        "value": (value_start, len(text)),
+    }
+
+
+def keyword_label_ranges(text: str) -> dict[str, tuple[int, int]] | None:
+    return _prefixed_ranges(text, _KEYWORDS_LABEL_RE)
+
+
+def abstract_label_ranges(text: str) -> dict[str, tuple[int, int]] | None:
+    return _prefixed_ranges(text, _ABSTRACT_LABEL_RE)
+
+
+def is_inline_abstract(text: str) -> bool:
+    ranges = abstract_label_ranges(text)
+    return bool(ranges and ranges["value"][0] < ranges["value"][1])
 
 _CHAPTER_RE = re.compile(r"^\s*(?:第\s*[一二三四五六七八九十百零〇0-9]+\s*章\s*|\d+(?:[、.．]\s*|\s+))(.+)$")
 _LEVEL2_RE = re.compile(r"^\s*\d+\.\d+(?:[、.．]\s*|\s+)(.+)$")
@@ -63,6 +132,7 @@ _NUMBERED_ACTION_RE = re.compile(
 )
 _MEASUREMENT_PREFIX_RE = re.compile(
     r"^\s*\d+(?:\.\d+)?\s*(?:倍(?:行距)?|%|％|毫秒|秒|分钟|小时|"
+    r"年|月|日|届|级|"
     r"(?:cm|mm|ms|px)(?![A-Za-z]))",
     re.I,
 )
@@ -133,8 +203,15 @@ def classify_role(text: str, style_name: str = "", *, first: bool = False) -> st
     normalized = normalized_style_name(style_name)
     if normalized in {"title", "subtitle"}:
         return "title"
-    if "keyword" in normalized or "关键词" in normalized or re.search(r"^\s*(?:关\s*键\s*词|key\s*words?)\s*[:：]", text, re.I):
+    if (
+        "keyword" in normalized
+        or "关键词" in normalized
+        or "主题词" in normalized
+        or keyword_label_ranges(text) is not None
+    ):
         return "keywords"
+    if is_inline_abstract(text):
+        return "body"
     if first:
         return "heading"
     if normalized.startswith("heading") or normalized.startswith("标题") or is_heading_candidate(text, style_name):

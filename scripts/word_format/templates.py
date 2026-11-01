@@ -262,9 +262,12 @@ def compile_template(profiles, *, identifier="user-template", resolutions=None):
 
 
 def _heading_structure(index, operations, preserved=()):
+    from .properties import read_font
+
     touched = set()
     explicit_style = set()
     explicit_outline = set()
+    explicit_color = set()
     for op in operations:
         cap = REGISTRY[op["action"]]
         if cap.property == "heading_numbering":
@@ -278,15 +281,40 @@ def _heading_structure(index, operations, preserved=()):
                 explicit_style.update(r["id"] for r in refs)
             if op["action"] == "paragraph.outline_level.set":
                 explicit_outline.update(r["id"] for r in refs)
+            if op["action"] == "font.color.set":
+                explicit_color.update(r["id"] for r in refs)
+        elif op["target"]["type"] == "style" and op["action"] == "font.color.set":
+            style_name = op["target"].get("name")
+            explicit_color.update(
+                oid
+                for oid in index.top_ids
+                if index.records[oid].get("role") == "heading"
+                and (
+                    index.records[oid].get("style_name") == style_name
+                    or (
+                        oid not in explicit_style
+                        and index.records[oid].get("module") == "chapters"
+                        and style_name
+                        == f"Heading {index.records[oid].get('heading_level') or 1}"
+                    )
+                )
+            )
     result = []
+    front_matter_modules = {"cover", "declaration", "abstract", "toc"}
     for oid in index.top_ids:
         record = index.records[oid]
-        if oid in preserved or oid not in touched or record.get("role") != "heading":
+        if (
+            oid in preserved
+            or oid not in touched
+            or record.get("role") != "heading"
+            or record.get("module") == "toc"
+        ):
             continue
         target = {"type": "paragraph", "id": oid}
         level = record.get("heading_level") or 1
+        assigned_style = None
         if oid not in explicit_style:
-            name = (
+            assigned_style = (
                 f"Heading {level}"
                 if record.get("module") == "chapters"
                 else f"WFM {record.get('module')} Heading"
@@ -296,17 +324,47 @@ def _heading_structure(index, operations, preserved=()):
                     "id": f"semantic.{oid}.style",
                     "action": "paragraph.style.assign",
                     "target": target,
-                    "params": {"name": name},
+                    "params": {"name": assigned_style},
                 }
             )
+        # Preserve effective heading color so assigning Office's blue Heading N style
+        # or enabling automatic numbering never turns black headings/numbers blue.
+        if oid not in explicit_color:
+            run_colors = index.font_values(oid, "color")
+            if len(run_colors) == 1:
+                vis_color = run_colors[0]
+                if isinstance(vis_color, str) and (
+                    vis_color == "auto" or re.fullmatch(r"[0-9a-fA-F]{6}", vis_color)
+                ):
+                    style_drift = (
+                        assigned_style is not None
+                        and "style:" + assigned_style in index.records
+                        and index.font_values("style:" + assigned_style, "color") != vis_color
+                    )
+                    mark_drift = (
+                        read_font(index.document, index.elements[oid], None, "color") != vis_color
+                    )
+                    if style_drift or mark_drift:
+                        result.append(
+                            {
+                                "id": f"semantic.{oid}.color",
+                                "action": "font.color.set",
+                                "target": target,
+                                "params": {"value": vis_color},
+                            }
+                        )
         # Only create missing outline semantics. Explicit sample rules are already resolved.
+        # Front-matter headings (cover, declaration, abstract, toc) must default to
+        # outline level 9 (body text) so Word TOC fields never index them.
         if oid not in explicit_outline:
             result.append(
                 {
                     "id": f"semantic.{oid}.outline",
                     "action": "paragraph.outline_level.set",
                     "target": target,
-                    "params": {"value": 9 if record.get("module") == "toc" else level - 1},
+                    "params": {
+                        "value": 9 if record.get("module") in front_matter_modules else level - 1
+                    },
                 }
             )
         if record.get("module") != "chapters":
@@ -337,27 +395,43 @@ def bind_template(index, template, mapping=None):
         if not isinstance(key, str) or not re.fullmatch(r"(?:s[1-9]\d*:)?[1-9]\d*", key):
             raise FormatError("Section mapping keys must be a section number or sSOURCE:SECTION")
         number(value, 1, len(index.document.sections), "mapped section", True)
+    preserve = mapping.get("preserve", {})
+    if not isinstance(preserve, dict):
+        raise FormatError("mapping.preserve must map paragraph IDs to reasons")
+    for oid, reason in preserve.items():
+        if index.records.get(oid, {}).get("kind") != "paragraph":
+            raise FormatError("Unknown preserved target paragraph ID")
+        text_value(reason, "preserved paragraph reason")
     operations, ledger = [], []
     pending = copy.deepcopy(template["issues"])
-    if "format" in template:
-        from .spec import spec_request
-
-        expanded = spec_request(index, template["format"], isolated=True)
+    if "format" in template or any(s["kind"] == "template" for s in template["sources"]):
         for record in index.records.values():
             if (
                 record["kind"] == "paragraph"
                 and record.get("unsupported_container")
                 and record.get("text", "").strip()
+                and record["id"] not in preserve
             ):
                 ledger.append(
                     {
                         "rule_id": f"protected.{record['id']}",
                         "state": "preserved",
                         "target_ids": [record["id"]],
-                        "reason": "Complex container preserved; automatic builtin formatting is not supported here",
+                        "reason": "Complex container preserved; automatic formatting is not supported here",
                     }
                 )
+    if "format" in template:
+        from .spec import spec_request
+
+        expanded = spec_request(index, template["format"], isolated=True)
         for n, op in enumerate(expanded["operations"], 1):
+            if preserve and op["target"].get("type") == "paragraph" and "ids" in op["target"]:
+                kept = [oid for oid in op["target"]["ids"] if oid not in preserve]
+                if not kept:
+                    continue
+                op = {**op, "target": {**op["target"], "ids": kept}}
+            elif preserve and op["target"].get("id") in preserve:
+                continue
             operation = {**op, "id": f"builtin.{n}"}
             operations.append(operation)
             ledger.append(
@@ -397,6 +471,21 @@ def bind_template(index, template, mapping=None):
                     {"rule_id": rule["id"], "state": "not_applicable", "reason": str(exc)}
                 )
             continue
+        if preserve and target.get("type") in {"paragraph", "text_range"}:
+            kept_refs = [r for r in refs if r["id"] not in preserve]
+            if len(kept_refs) != len(refs):
+                if not kept_refs:
+                    ledger.append(
+                        {
+                            "rule_id": rule["id"],
+                            "state": "not_applicable",
+                            "reason": "All matching paragraphs are explicitly preserved",
+                        }
+                    )
+                    continue
+                if target.get("type") == "paragraph":
+                    target = {"type": "paragraph", "ids": [r["id"] for r in kept_refs]}
+                    refs = kept_refs
         if (
             any(e.get("confidence", 1) < 1 for e in rule["evidence"])
             and rule["id"] not in overrides
@@ -421,13 +510,7 @@ def bind_template(index, template, mapping=None):
                 "evidence": rule["evidence"],
             }
         )
-    preserve = mapping.get("preserve", {})
-    if not isinstance(preserve, dict):
-        raise FormatError("mapping.preserve must map paragraph IDs to reasons")
     for oid, reason in preserve.items():
-        if index.records.get(oid, {}).get("kind") != "paragraph":
-            raise FormatError("Unknown preserved target paragraph ID")
-        text_value(reason, "preserved paragraph reason")
         ledger.append(
             {
                 "rule_id": f"preserve.{oid}",
@@ -438,6 +521,9 @@ def bind_template(index, template, mapping=None):
         )
     if any(s["kind"] == "template" for s in template["sources"]):
         covered = {oid for entry in ledger for oid in entry.get("target_ids", [])}
+        toc_enabled = any(
+            op["action"] == "toc.configure" and op["params"].get("enabled") for op in operations
+        )
         uncovered = [
             r["id"]
             for r in index.records.values()
@@ -445,6 +531,7 @@ def bind_template(index, template, mapping=None):
             and r["part"] == "word/document.xml"
             and r.get("text", "").strip()
             and r["id"] not in covered
+            and not (toc_enabled and r.get("semantic_role") == "toc_heading")
         ]
         if uncovered:
             pending.append(
@@ -459,6 +546,9 @@ def bind_template(index, template, mapping=None):
     operations = [
         {**op, "params": REGISTRY[op["action"]].validator(op["params"])} for op in operations
     ]
+    toc_ops = [op for op in operations if op["action"] == "toc.configure"]
+    if toc_ops:
+        operations = [op for op in operations if op["action"] != "toc.configure"] + toc_ops
     ledger = [
         {"rule_id": op["id"], "state": "planned", "evidence": "Word heading semantics"}
         for op in semantics

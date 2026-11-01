@@ -119,12 +119,16 @@ def _theme_root(blob):
 
 
 @lru_cache(maxsize=16)
-def _theme_fonts(blob):
+def _theme_fonts(blob, settings=None):
     from analyze_docx import parse_theme_fonts
 
     class Parts:
         def read(self, path):
-            return blob
+            if path == "word/theme/theme1.xml":
+                return blob
+            if path == "word/settings.xml" and settings is not None:
+                return settings
+            raise KeyError(path)
 
     return parse_theme_fonts(Parts())
 
@@ -136,6 +140,13 @@ def theme_blob(document):
         theme = next(p for p in part.package.parts if str(p.partname) == "/word/theme/theme1.xml")
         part._wfm_theme_part = theme
     return theme.blob
+
+
+def settings_blob(document):
+    try:
+        return document.settings.element.xml.encode("utf-8")
+    except AttributeError:
+        return None
 
 
 def rpr_sources(document, paragraph, run=None):
@@ -266,7 +277,9 @@ def read_font(document, paragraph, run, name):
                 theme = node.get(qn("w:" + attr + "Theme"))
                 if theme:
                     try:
-                        return _theme_fonts(theme_blob(document)).get(theme, "theme:" + theme)
+                        return _theme_fonts(theme_blob(document), settings_blob(document)).get(
+                            theme, "theme:" + theme
+                        )
                     except (StopIteration, KeyError):
                         return "theme:" + theme
                 value = node.get(qn("w:" + attr))
@@ -286,7 +299,11 @@ def read_font(document, paragraph, run, name):
     if name in {"bold", "italic"}:
         # OOXML style b/i are toggle properties; direct rPr values are absolute.
         tag = "b" if name == "bold" else "i"
-        direct = run.find(qn("w:rPr")) if run is not None else None
+        direct = (
+            run.find(qn("w:rPr"))
+            if run is not None
+            else paragraph.find("./" + qn("w:pPr") + "/" + qn("w:rPr"))
+        )
         node = direct.find(qn("w:" + tag)) if direct is not None else None
         if node is not None:
             return node.get(qn("w:val"), "1") not in {"0", "false", "off"}

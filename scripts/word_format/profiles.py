@@ -125,22 +125,9 @@ def requirements_profile(path, *, document_kind="thesis"):
 
 
 def _template_document(path):
-    if path.suffix.lower() == ".docx":
-        return Document(path)
-    # python-docx does not accept DOTX main content types. Read a converted
-    # in-memory package; the user's template is never rewritten.
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(path) as source, zipfile.ZipFile(buffer, "w") as target:
-        for item in source.infolist():
-            blob = source.read(item.filename)
-            if item.filename == "[Content_Types].xml":
-                blob = blob.replace(
-                    b"application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
-                    b"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
-                )
-            target.writestr(item, blob)
-    buffer.seek(0)
-    return Document(buffer)
+    from .doc_loader import open_word_document
+
+    return open_word_document(path)
 
 
 def _selector(record):
@@ -153,15 +140,29 @@ def _selector(record):
         "cover_advisor",
         "cover_student_id",
         "cover_date",
+        "declaration_heading",
+        "declaration_salutation",
+        "declaration_body",
+        "declaration_signature",
         "abstract_title",
         "abstract_heading",
+        "abstract_inline",
         "abstract_body",
         "keywords",
+        "toc_heading",
+        "symbols_heading",
+        "symbols_body",
         "reference_heading",
+        "acknowledgements_heading",
+        "acknowledgements_body",
+        "appendix_heading",
+        "appendix_body",
     }:
         target = {"type": "paragraph", "semantic_role": record["semantic_role"], "all": True}
         if record.get("language"):
             target["language"] = record["language"]
+        if not record.get("top_level") and record.get("part") == "word/document.xml":
+            target["part"] = "word/document.xml"
         return target
     target = {"type": "paragraph", "role": record["role"], "all": True}
     if record.get("module"):
@@ -171,7 +172,9 @@ def _selector(record):
     for field in ("semantic_role", "language"):
         if record.get(field):
             target[field] = record[field]
-    if record["role"] == "table_text":
+    if record["role"] == "table_text" or (
+        not record.get("top_level") and record.get("part") == "word/document.xml"
+    ):
         target["part"] = "word/document.xml"
     if record["role"] == "caption":
         match = re.match(r"\s*(图|表|Figure|Fig\.|Table)", record["text"], re.I)
@@ -199,9 +202,13 @@ def _atomic_candidate(target, name, value, evidence):
 def template_profile(path):
     from analyze_docx import analyze_docx
 
+    from .doc_loader import SUPPORTED_WORD_SUFFIXES
+
     source = Path(path).resolve()
-    if source.suffix.lower() not in {".docx", ".dotx"}:
-        raise FormatError("Formatting samples must be DOCX or DOTX", "unsupported")
+    if source.suffix.lower() not in SUPPORTED_WORD_SUFFIXES:
+        raise FormatError(
+            "Formatting samples must be DOCX, DOTX, DOC, DOT, or WPS", "unsupported"
+        )
     analysis = analyze_docx(source)
     if analysis["package"]["ooxml_conformance"] == "strict":
         raise FormatError(
@@ -286,19 +293,18 @@ def template_profile(path):
             continue
         selected = _selector(record)
         groups[json_hash(selected)].append((selected, record, values))
-        if record.get("semantic_role") == "keywords":
-            from .spec import keyword_text_ranges
+        if record.get("semantic_role") in {"keywords", "abstract_inline"}:
+            from .spec import semantic_text_ranges
 
-            ranges = keyword_text_ranges(record["text"])
+            ranges = semantic_text_ranges(record["text"], record.get("semantic_role"))
             if ranges:
                 # Character formats of the label and content have independent
-                # evidence. In particular a bold English label says nothing
-                # about Chinese labels or keyword values.
+                # evidence. In particular a bold label says nothing about values.
                 for segment, (start, end) in ranges.items():
                     if start == end:
                         _issue(
                             profile,
-                            "Empty keyword segment has no sample font evidence",
+                            f"Empty {record['semantic_role']} segment has no sample font evidence",
                             target={**selected, "type": "text_range", "segment": segment},
                         )
                         continue
@@ -321,7 +327,7 @@ def template_profile(path):
             if target["type"] == "text_range" and name not in FONT_TAGS:
                 continue
             if (
-                target.get("semantic_role") == "keywords"
+                target.get("semantic_role") in {"keywords", "abstract_inline"}
                 and target["type"] == "paragraph"
                 and name in FONT_TAGS
             ):

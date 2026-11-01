@@ -15,9 +15,9 @@ from .properties import outline_level, paragraph_style_name, read_paragraph
 
 
 def _variant(kind, text):
-    compact = re.sub(r"\s+", "", text).lower()
+    compact = re.sub(r"\s+", "", text).lower().lstrip("【[（(")
     if kind in {"abstract", "keywords"}:
-        return "en" if compact.startswith(("abstract", "keyword", "英文")) else "zh"
+        return "en" if compact.startswith(("abstract", "keyword", "indexterm", "英文", "外文")) else "zh"
     if kind == "declaration":
         if "声明与授权" in compact or "授权声明" in compact:
             return "combined"

@@ -28,6 +28,7 @@ displayName: 论文排版大师 (Word/DOCX)
 | 按明确要求做局部修改 | `plan INPUT.docx OUTPUT.docx --request request.json`，再 `apply`、`verify` | `--request`、`--profile`、`--template` 三者互斥。 |
 | 只检查格式，不生成 DOCX | 已编译模板用 `audit INPUT.docx --template template.json`；局部规则用 `--request request.json` | Audit 不接收 `--profile`；按要求文件检查时先提取并编译模板。模板审查须报告 coverage、limitations、execution_status 和 compliance。 |
 | 按样例结构起草新论文 | 提取样例 profile；完成草稿后先 `check-structure`，再用 `plan ... --profile profile.json --match-structure` | 仅在结构与规则有明确映射或决策时添加 `--mapping`、`--resolutions`。 |
+| 克隆或替换官方模板封面 | `cover TEMPLATE OUTPUT.docx --fields fields.json`（注入现有草稿加 `--into DRAFT.docx`，替换草稿旧封面加 `--replace-existing-cover`） | 保留校徽图片、表格边框/`vMerge`、VML 文本框与下划线槽宽；样例无封面或用户要求保留原封面时不得调用。 |
 | 做页面视觉验收 | 渲染输出的每一页并逐页检查，再运行 `verify` | `--visual-report` 必须与对应的 `--render-manifest` 一起传入；证据缺失或未检查完要报告 `skipped` / `pending`。 |
 
 所有路径应使用绝对路径。不要把自然语言直接传给 `--request`；该参数接收结构化 JSON 文件。若规则来源或目标文档变化，重新提取或检查并生成计划，不复用旧计划。
@@ -67,6 +68,7 @@ inspect 和页面渲染不能代替逐项格式验收。目录须核对实际条
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" inspect INPUT.docx --output inspect.json
 ```
 
+- `profile requirements`、`profile template` 与 `cover` 原生支持 `.docx`/`.dotx`，并在本机装有 Word、WPS 或 LibreOffice 时支持只读隔离解析 `.doc`/`.dot`/`.wps`（通过临时副本转换，绝不触碰原件）；待直接写入排版的论文目标文档仍须为 `.docx`。行内摘要（`abstract_inline`，如 `摘 要：正文…` / `Abstract: ...`）与关键词均按 `segment: label` / `segment: value` 拆分提取和应用，互不污染。
 - 语言限定属于目标范围：英文摘要或关键词不得扩展到中文区域，反之亦然。模板有效格式须按实际默认样式与继承读取，不能假定默认样式名为 Normal。
 - 规则优先级：用户明确指定 > 学校/期刊样例模板 > 书面要求文档 > 指定标准 > 用户主动选择的预设 > 原稿现有格式（参见 [references/standards-registry.md](references/standards-registry.md)）。
 - 存在未决冲突或模糊规则时，先以通俗中文向用户列出候选项及推荐建议，确认后在 `resolutions.json` 中记录 `choose`、`replace` 或 `ignore` 决策及理由；多节样例需在 `mapping.sections` 中显式映射节号。

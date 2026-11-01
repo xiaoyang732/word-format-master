@@ -1251,7 +1251,13 @@ def fuse_dual_track_spec(
 
 def analyze_docx(path: str | Path, semantic_spec: dict[str, Any] | None = None) -> dict[str, Any]:
     source = Path(path).resolve()
-    package, inventory = package_inventory(source)
+    if source.suffix.lower() in {".doc", ".dot", ".wps"}:
+        from word_format.doc_loader import ensure_readable_docx_path
+
+        package_path = ensure_readable_docx_path(source)
+    else:
+        package_path = source
+    package, inventory = package_inventory(package_path)
     try:
         conformance = detect_conformance(package)
         styles_root = read_xml(package, "word/styles.xml")

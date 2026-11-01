@@ -7,7 +7,12 @@ import json
 import re
 
 from config import LIST_NUMBERING_STYLES
-from document_structure import validate_module_order
+from document_structure import (
+    abstract_label_ranges,
+    is_inline_abstract,
+    keyword_label_ranges,
+    validate_module_order,
+)
 
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .namespaces import qn
@@ -156,18 +161,23 @@ def validate_keyword_tokens(tokens):
 
 def keyword_text_ranges(text):
     """Return the label and value character ranges for a conventional keyword line."""
-    match = re.match(r"^\s*(?P<label>关\s*键\s*词|key\s*words?)\s*(?P<colon>[:：])?", text, re.I)
-    if not match:
+    return keyword_label_ranges(text)
+
+
+def abstract_text_ranges(text):
+    """Return the label and value character ranges for an inline abstract paragraph."""
+    if not is_inline_abstract(text):
         return None
-    label_start = match.start("label")
-    label_end = match.end("colon") if match.group("colon") else match.end("label")
-    value_start = match.end()
-    while value_start < len(text) and text[value_start].isspace():
-        value_start += 1
-    return {
-        "label": (label_start, label_end),
-        "value": (value_start, len(text)),
-    }
+    return abstract_label_ranges(text)
+
+
+def semantic_text_ranges(text, semantic_role=None):
+    """Return label/value character ranges for keywords or inline abstract lines."""
+    if semantic_role == "abstract_inline":
+        return abstract_text_ranges(text)
+    if semantic_role == "keywords":
+        return keyword_text_ranges(text)
+    return keyword_text_ranges(text) or abstract_text_ranges(text)
 
 
 def validate_section(section, data):
@@ -414,6 +424,7 @@ def validate_spec(spec):
             "table_of_contents",
             "references",
             "document_structure",
+            "semantic_roles",
             "citations",
             "authority",
             "notes",
@@ -431,6 +442,24 @@ def validate_spec(spec):
         validate_tokens(spec["title"])
     if "keywords" in spec:
         validate_keyword_tokens(spec["keywords"])
+    if "semantic_roles" in spec:
+        if not isinstance(spec["semantic_roles"], dict):
+            raise FormatError("semantic_roles must be an object")
+        for role_key, role_tokens in spec["semantic_roles"].items():
+            text_value(role_key, "semantic role key")
+            if not isinstance(role_tokens, dict):
+                raise FormatError("semantic_roles entries must be token objects")
+            validate_tokens(role_tokens, {"outline_level", "numbering_suppressed"})
+            if "outline_level" in role_tokens and role_tokens["outline_level"] is not None:
+                number(role_tokens["outline_level"], 0, 9, f"semantic_roles.{role_key}.outline_level", True)
+            if (
+                "numbering_suppressed" in role_tokens
+                and role_tokens["numbering_suppressed"] is not None
+            ):
+                boolean(
+                    role_tokens["numbering_suppressed"],
+                    f"semantic_roles.{role_key}.numbering_suppressed",
+                )
     for section in (
         "page",
         "body",
@@ -574,9 +603,21 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
             tokens = module.get("style_roles", {}).get(role, {}).get("tokens", {})
             effective[oid] = dict(tokens)
         role = r.get("role")
+        sem_role = r.get("semantic_role")
         tokens = {}
         style_name = None
-        if role == "body" or (
+        extra_outline = None
+        suppress_num = False
+        if role == "title" and spec.get("title"):
+            tokens = spec.get("title", {})
+            extra_outline = 9
+        elif sem_role == "abstract_title":
+            h1 = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
+            if h1:
+                tokens = {k: v for k, v in h1.items() if k not in {"level", "page_break_before"}}
+                style_name = "WFM Abstract Title"
+                extra_outline = 9
+        elif role == "body" or (
             role == "module_body"
             and r.get("module") in {"abstract", "appendix", "acknowledgements"}
         ):
@@ -584,15 +625,27 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
         elif role == "title":
             tokens = spec.get("title", {})
         elif role == "heading":
-            tokens = next(
-                (h for h in spec.get("headings", []) if h["level"] == r.get("heading_level")), {}
-            )
-            if tokens:
-                style_name = f"Heading {tokens['level']}"
-            elif r.get("heading_level") is None:
-                tokens = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
+            if r.get("module") in {None, "chapters"}:
+                tokens = next(
+                    (h for h in spec.get("headings", []) if h["level"] == r.get("heading_level")),
+                    {},
+                )
                 if tokens:
-                    style_name = "WFM Module Heading"
+                    style_name = f"Heading {tokens['level']}"
+                elif r.get("heading_level") is None:
+                    tokens = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
+                    if tokens:
+                        style_name = "WFM Module Heading"
+            else:
+                h1 = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
+                if h1:
+                    tokens = {k: v for k, v in h1.items() if k != "level"}
+                    style_name = f"WFM {r.get('module')} Heading"
+                    if r.get("module") in {"cover", "declaration", "abstract", "toc"}:
+                        tokens.pop("page_break_before", None)
+                        extra_outline = 9
+                    else:
+                        extra_outline = 0
         elif role == "keywords":
             tokens = spec.get("keywords", {})
             if tokens or effective.get(oid):
@@ -616,11 +669,40 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
                     style_name = cap.get("style_name") or (
                         "Figure Caption" if label_kind == "figure" else "Table Caption"
                     )
+        sem_map = spec.get("semantic_roles", {})
+        if sem_role and sem_map:
+            sem_override = {}
+            if sem_role in sem_map:
+                sem_override.update(sem_map[sem_role])
+            lang_key = f"{sem_role}:{r.get('language')}" if r.get("language") else None
+            if lang_key and lang_key in sem_map:
+                sem_override.update(sem_map[lang_key])
+            if sem_override:
+                tokens = dict(tokens)
+                for name in INDENTS:
+                    if any(k in sem_override for k in (name + "_mm", name + "_chars")):
+                        for unit in ("mm", "chars"):
+                            tokens.pop(name + "_" + unit, None)
+                if "outline_level" in sem_override:
+                    extra_outline = sem_override["outline_level"]
+                if "numbering_suppressed" in sem_override:
+                    suppress_num = bool(sem_override["numbering_suppressed"])
+                tokens.update(
+                    {
+                        k: v
+                        for k, v in sem_override.items()
+                        if k not in {"outline_level", "numbering_suppressed"}
+                    }
+                )
         style_name = (
             tokens.get("style_name") or effective.get(oid, {}).get("style_name") or style_name
         )
         if style_name:
             add("paragraph.style.assign", [oid], {"name": style_name})
+        if extra_outline is not None:
+            add("paragraph.outline_level.set", [oid], {"value": int(extra_outline)})
+        if suppress_num:
+            add("paragraph.numbering_suppressed.set", [oid], {"value": True})
         merged = effective.setdefault(oid, {})
         # Remove alternate unit representation when a higher priority source sets it.
         for name in INDENTS:

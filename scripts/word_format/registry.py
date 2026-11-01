@@ -12,7 +12,7 @@ from . import operations as op
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .inspect import _style_paragraph
 from .namespaces import qn
-from .properties import paragraph_style_name, read_paragraph
+from .properties import paragraph_style_name, read_font, read_paragraph
 
 
 @dataclass(frozen=True)
@@ -121,7 +121,20 @@ def color(params):
 
 def read_atomic(index, ref, cap):
     if cap.property in {"font_east_asia", "font_latin", "font_size_pt", "bold", "italic", "color"}:
-        return index.font_values(ref["id"], cap.property, ref.get("start"), ref.get("end"))
+        raw = index.font_values(ref["id"], cap.property, ref.get("start"), ref.get("end"))
+        if ref["kind"] != "paragraph":
+            return raw
+        values = list(raw)
+        p = index.elements[ref["id"]]
+        record = index.records.get(ref["id"], {})
+        if (
+            record.get("role") == "heading"
+            or template_numbering.effective_numbering(index.document, p) is not None
+        ):
+            mark = read_font(index.document, p, None, cap.property)
+            if mark not in values:
+                values.append(mark)
+        return values
     p = index.elements[ref["id"]]
     if ref["kind"] == "style":
         p = _style_paragraph(ref["id"][6:], index.document)

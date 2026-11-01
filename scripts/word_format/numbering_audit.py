@@ -12,6 +12,7 @@ _LIST = re.compile(
 )
 _CAPTION = re.compile(r"^\s*(?:图|表|Figure\s*|Table\s*)\s*\d", re.I)
 _CITATION = re.compile(r"[\[［]\s*\d+(?:\s*[,，、;；\-–]\s*\d+)*\s*[\]］]")
+_ISO_BRACKET_DATE = re.compile(r"[\[［]\s*\d{4}-\d{1,2}-\d{1,2}\s*[\]］]")
 
 
 def audit_numbering(document):
@@ -55,7 +56,7 @@ def audit_numbering(document):
                 kind = "heading"
             elif _CAPTION.match(text):
                 kind = "caption"
-            elif _CITATION.search(text):
+            elif _CITATION.search(_ISO_BRACKET_DATE.sub("", text)):
                 kind = "reference_or_citation"
             elif _LIST.match(text):
                 kind = "list"

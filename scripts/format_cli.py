@@ -18,6 +18,7 @@ from word_format import (
     verify_plan,
 )
 from word_format.contracts import FormatError
+from word_format.cover import apply_template_cover_file
 from word_format.profiles import (
     check_template_structure,
     profile_plan,
@@ -94,6 +95,26 @@ def main():
     p.add_argument("--plan", required=True)
     p.add_argument("--report")
     p.add_argument("--overwrite", action="store_true")
+    p = commands.add_parser(
+        "cover", help="Clone an official template cover into a new or existing DOCX safely"
+    )
+    p.add_argument("template", help="Template DOCX/DOTX/DOC/DOT/WPS containing the cover")
+    p.add_argument("destination", help="Output DOCX path (never overwrites template or input)")
+    p.add_argument("--into", help="Existing draft DOCX whose body content is preserved")
+    p.add_argument(
+        "--replace-existing-cover",
+        action="store_true",
+        help="Replace any existing front cover in --into before inserting the template cover",
+    )
+    p.add_argument(
+        "--no-section-break",
+        action="store_true",
+        help="Separate the cloned cover with a page break instead of a section break",
+    )
+    p.add_argument("--fields", help="JSON object mapping cover field labels/keys to values")
+    p.add_argument("--replacements", help="JSON object mapping literal placeholder strings")
+    p.add_argument("--report", help="Optional JSON report path")
+    p.add_argument("--overwrite", action="store_true")
     p = commands.add_parser("verify")
     p.add_argument("--plan", required=True)
     p.add_argument("--report", required=True)
@@ -107,7 +128,7 @@ def main():
     p.add_argument("--output")
     args = parser.parse_args()
     try:
-        destination = args.report if args.command == "apply" else args.output
+        destination = args.report if args.command in {"apply", "cover"} else args.output
         protected = [
             Path(v).resolve()
             for v in (
@@ -115,6 +136,9 @@ def main():
                 for name in (
                     "input",
                     "destination",
+                    "into",
+                    "fields",
+                    "replacements",
                     "request",
                     "plan",
                     "profile",
@@ -126,6 +150,8 @@ def main():
             )
             if v and not isinstance(v, list)
         ]
+        if args.command == "cover":
+            protected.append(Path(args.template).resolve())
         if args.command == "template" and args.profile:
             protected.extend(args.profile)
             protected.extend(read_json(p)["source"]["path"] for p in args.profile)
@@ -243,6 +269,17 @@ def main():
                 result = build_plan(args.input, args.destination, request)
         elif args.command == "apply":
             result = apply_plan(plan, overwrite=args.overwrite)
+        elif args.command == "cover":
+            result = apply_template_cover_file(
+                args.template,
+                args.destination,
+                into_path=args.into,
+                fields=read_json(args.fields) if args.fields else None,
+                replacements=read_json(args.replacements) if args.replacements else None,
+                replace_existing_cover=args.replace_existing_cover,
+                use_section_break=not args.no_section_break,
+                overwrite=args.overwrite,
+            )
         else:
             result = verify_plan(
                 plan,

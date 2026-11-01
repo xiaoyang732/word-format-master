@@ -48,7 +48,9 @@ def set_font_property(index, ref, params, name):
         # Empty runs may contain bookmarks/fields. Do not create formatting on them.
         if any(t.text for t in run.findall(qn("w:t"))):
             write_font(element(run, "rPr"), name, params["value"])
-    if not any(t.text for run in runs for t in run.findall(qn("w:t"))):
+    if ref["kind"] == "paragraph" or not any(
+        t.text for run in runs for t in run.findall(qn("w:t"))
+    ):
         write_font(element(element(p, "pPr"), "rPr"), name, params["value"])
 
 

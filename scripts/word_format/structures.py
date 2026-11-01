@@ -390,28 +390,16 @@ def apply_caption_positions(document: Document, captions: dict[str, Any]) -> lis
                 continue
             previous = _neighboring_content_element(document, paragraph._p, -1)
             following = _neighboring_content_element(document, paragraph._p, 1)
-            target = (
-                previous
-                if (
-                    previous is not None
-                    and (
-                        previous.tag == qn("w:tbl")
-                        if role == "table"
-                        else _is_figure_paragraph(previous)
-                    )
-                )
-                else None
+            matches_role = (
+                (lambda elem: elem.tag == qn("w:tbl"))
+                if role == "table"
+                else _is_figure_paragraph
             )
-            if (
-                target is None
-                and following is not None
-                and (
-                    following.tag == qn("w:tbl")
-                    if role == "table"
-                    else _is_figure_paragraph(following)
-                )
-            ):
-                target = following
+            primary = following if position == "above" else previous
+            secondary = previous if position == "above" else following
+            target = primary if (primary is not None and matches_role(primary)) else None
+            if target is None and secondary is not None and matches_role(secondary):
+                target = secondary
             if _move_caption_next_to_target(document, paragraph._p, target, position):
                 moved += 1
         if moved:
@@ -703,13 +691,33 @@ def _find_toc_insertion_anchor(document: Document):
     If the document contains an unmanaged placeholder TOC heading, that position is
     used and the redundant placeholder paragraph will be removed upon insertion.
     """
-    re_abstract_cn = re.compile(r"^\s*(?:摘\s*要|中文摘要|内容摘要)(?:\s*[:：].*)?$", re.I)
-    re_abstract_en = re.compile(r"^\s*(?:abstracts?|英文摘要)(?:\s*[:：].*)?$", re.I)
-    re_keywords_cn = re.compile(r"^\s*(?:关\s*键\s*词)(?:\s*[:：].*)?$", re.I)
-    re_keywords_en = re.compile(r"^\s*(?:key\s*words?)(?:\s*[:：].*)?$", re.I)
-    re_toc = re.compile(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", re.I)
+    re_abstract_cn = re.compile(
+        r"^\s*(?:[【\[]\s*(?:摘\s*要|中文摘要|内容摘要|提\s*要)\s*[】\]]\s*(?:[:：]\s*)?.*|"
+        r"(?:摘\s*要|中文摘要|内容摘要|提\s*要)(?:\s*[:：].*)?)$",
+        re.I,
+    )
+    re_abstract_en = re.compile(
+        r"^\s*(?:[【\[]\s*(?:abstracts?|英文摘要)\s*[】\]]\s*(?:[:：]\s*)?.*|"
+        r"(?:abstracts?|英文摘要)(?:\s*[:：].*)?)$",
+        re.I,
+    )
+    re_keywords_cn = re.compile(
+        r"^\s*(?:[【\[]\s*(?:关\s*键\s*词|主\s*题\s*词)\s*[】\]]\s*(?:[:：]\s*)?.*|"
+        r"(?:关\s*键\s*词|主\s*题\s*词)(?:\s*[:：].*)?)$",
+        re.I,
+    )
+    re_keywords_en = re.compile(
+        r"^\s*(?:[【\[]\s*(?:key\s*words?|index\s+terms?)\s*[】\]]\s*(?:[:：]\s*)?.*|"
+        r"(?:key\s*words?|index\s+terms?)(?:\s*[:：].*)?)$",
+        re.I,
+    )
+    re_toc = re.compile(r"^\s*(?:目\s*录|目\s*次|table\s+of\s+contents|contents)\s*$", re.I)
     re_next_module = re.compile(
-        r"^\s*(?:第\s*[一二三四五六七八九十0-9]+\s*章|\d+(?:[、.\s]|\s*)[^\s\d.]|符号说明|符号表|术语表|symbols?|glossary|参考文献|参考资料|致\s*谢|附\s*录|references|bibliography|acknowledg(?:e)?ments?|appendix)",
+        r"^\s*(?:第\s*[一二三四五六七八九十0-9]+\s*章|\d+(?:[、.\s]|\s*)[^\s\d.]|"
+        r"主要符号(?:对照)?表|符号(?:与|及)?缩略语说明|符号说明|缩略语(?:对照)?表|符号表|术语表|"
+        r"symbols?|abbreviations?|nomenclature|glossary|"
+        r"参考文献|参考资料|引用文献|致\s*谢|谢\s*辞|后\s*记|附\s*录|"
+        r"references|bibliography|works\s+cited|acknowledg(?:e)?ments?|appendix)",
         re.I,
     )
 
@@ -730,10 +738,40 @@ def _find_toc_insertion_anchor(document: Document):
     if placeholder_toc_p is not None:
         return placeholder_toc_p, placeholder_toc_p
 
+    def _upcoming_abstract_lang(start_idx: int) -> str | None:
+        """Look ahead across 1-2 short abstract_title lines for a following Abstract/摘要."""
+        limit = min(len(paragraphs), start_idx + 3)
+        for j in range(start_idx, limit):
+            cand = paragraphs[j]
+            if paragraph_style_name(document, cand._p) in TOC_MANAGED_STYLES:
+                continue
+            ct = cand.text.strip()
+            if not ct:
+                continue
+            if re_abstract_en.match(ct):
+                return "en"
+            if re_abstract_cn.match(ct):
+                return "zh"
+            c_style = paragraph_style_name(document, cand._p).lower()
+            c_h1 = (
+                c_style.startswith("heading 1")
+                or c_style.startswith("标题 1")
+                or c_style == "heading"
+            )
+            if (
+                len(ct) > 200
+                or c_h1
+                or re_toc.match(ct)
+                or re_next_module.match(ct)
+                or re.search(r"[。；;！？!?]", ct)
+            ):
+                return None
+        return None
+
     state = "SEEKING_ABSTRACT"
     anchor_p = None
 
-    for p in paragraphs:
+    for idx, p in enumerate(paragraphs):
         if paragraph_style_name(document, p._p) in TOC_MANAGED_STYLES:
             continue
         t = p.text.strip()
@@ -768,18 +806,27 @@ def _find_toc_insertion_anchor(document: Document):
         elif state == "IN_CHINESE_KEYWORDS":
             if re_abstract_en.match(t):
                 state = "IN_ENGLISH_ABSTRACT"
+            elif _upcoming_abstract_lang(idx) == "en":
+                continue
             else:
                 anchor_p = p
                 break
         elif state == "IN_ENGLISH_ABSTRACT":
             if re_keywords_en.match(t) or re_keywords_cn.match(t):
                 state = "IN_ENGLISH_KEYWORDS"
+            elif re_abstract_cn.match(t):
+                state = "IN_CHINESE_ABSTRACT"
             elif re_toc.match(t) or re_next_module.match(t) or is_h1:
                 anchor_p = p
                 break
         elif state == "IN_ENGLISH_KEYWORDS":
-            anchor_p = p
-            break
+            if re_abstract_cn.match(t):
+                state = "IN_CHINESE_ABSTRACT"
+            elif _upcoming_abstract_lang(idx) == "zh":
+                continue
+            else:
+                anchor_p = p
+                break
 
     if anchor_p is None and state == "SEEKING_ABSTRACT":
         anchor_p = paragraphs[0] if paragraphs else None
@@ -858,9 +905,20 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
 
     if placeholder_toc_p is not None:
         title_paragraph = placeholder_toc_p
+        saved_rpr = None
+        for r in title_paragraph.runs:
+            rpr = r._r.find(qn("w:rPr"))
+            if rpr is not None:
+                saved_rpr = copy.deepcopy(rpr)
+                break
         clear_paragraph_content(title_paragraph)
         title_paragraph.style = heading_style
-        title_paragraph.add_run(title)
+        title_run = title_paragraph.add_run(title)
+        if saved_rpr is not None:
+            title_run._r.insert(0, saved_rpr)
+        title_appearance = tokens.get("title_format", tokens.get("title_style", {}))
+        if title_appearance:
+            set_run_font(title_run, title_appearance)
         insert_target = title_paragraph._p.getnext()
         field_paragraph = _insert_body_paragraph_before(document, insert_target, field_style)
         append_field(
@@ -1179,7 +1237,12 @@ def normalize_heading_styles(
         if not text:
             continue
         current_style = paragraph_style_name(document, paragraph._p)
-        if current_style in TOC_MANAGED_STYLES or current_style.lower().startswith("wfm toc"):
+        lower_style = current_style.lower()
+        if (
+            current_style in TOC_MANAGED_STYLES
+            or lower_style.startswith("wfm toc")
+            or (lower_style.startswith("wfm ") and lower_style.endswith(" heading"))
+        ):
             continue
         from document_structure import heading_level, is_heading_candidate
 

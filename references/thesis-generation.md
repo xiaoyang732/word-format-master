@@ -29,7 +29,12 @@ each part, language, occurrence, sequence and chapter hierarchy. The sample wins
 over a preset's conventional outline, including declarations placed at the end.
 
 - A sample with a cover requires a cover using its layout and metadata fields.
-  Fill in the new thesis's title, author and other supplied details; missing
+  When drafting or migrating from a DOCX/DOTX/DOC/DOT/WPS sample cover that carries
+  school emblems, banners, metadata tables (`w:tbl` with borders/`vMerge`), VML
+  textboxes, underlines or fixed typography, clone the cover via
+  `python scripts/format_cli.py cover TEMPLATE OUTPUT.docx [--into DRAFT.docx] [--replace-existing-cover] --fields fields.json`
+  (or `word_format.cover.clone_template_cover`) rather than replacing it with plain text,
+  and fill in the new thesis's title, author and other supplied details; missing
   personal information stays a placeholder. Do not copy the sample's identity.
 - A sample without a cover must not acquire one. A title inside an article is
   not permission to invent a separate cover page; inspect the page layout.
