@@ -104,6 +104,7 @@ def read_complex_state(index, name):
             "odd_even": doc.settings.odd_and_even_pages_header_footer,
             "managed": managed,
             "starts": [n.get(qn("w:start")) if n is not None else None for n in starts],
+            "number_formats": [n.get(qn("w:fmt")) if n is not None else None for n in starts],
             "codes": field_codes(doc),
         }
     if name == "table_of_contents":
@@ -412,48 +413,38 @@ def verify_complex_state(actual, params, name):
             return actual["managed"] == 0
         kind = params.get("location", "footer")
         start_val = str(params.get("start", 1))
-        # 1. Standard check: all sections have page numbers and section 0 has start
-        keys = [f"{i}:{kind}" for i in range(len(actual["starts"]))]
-        for i, enabled in enumerate(actual["first_page"]):
+        count = len(actual["starts"])
+        start_idx = params.get("start_section", 1) - 1 if "start_section" in params else (
+            actual["body_index"] if params.get("scope", "all") == "body" else 0
+        )
+        if not 0 <= start_idx < count:
+            return False
+        reset_idx = start_idx or (actual["body_index"] if "show_on_body_first_page" in params else 0)
+        for i in range(count):
+            if i < start_idx:
+                if any(actual["parts"].get(f"{i}:{prefix}{kind}", 0)
+                       for prefix in ("", "first_page_", "even_page_")):
+                    return False
+                continue
+            expected_start = start_val if i in {start_idx, reset_idx} else None
+            if actual["starts"][i] != expected_start or actual["number_formats"][i] != "decimal":
+                return False
+            if actual["parts"].get(f"{i}:{kind}", 0) != 1:
+                return False
+            if actual["odd_even"] and actual["parts"].get(f"{i}:even_page_{kind}", 0) != 1:
+                return False
             show_first = params.get("show_on_first_page", True)
             if i >= actual["body_index"] and "show_on_body_first_page" in params:
                 show_first = params["show_on_body_first_page"]
-            first_key = f"{i}:first_page_{kind}"
+            first_count = actual["parts"].get(f"{i}:first_page_{kind}", 0)
             if not show_first:
-                if not enabled or actual["parts"].get(first_key, 0):
+                if not actual["first_page"][i] or first_count:
                     return False
-            elif enabled:
-                keys.append(first_key)
-        if actual["odd_even"]:
-            keys.extend(f"{i}:even_page_{kind}" for i in range(len(actual["starts"])))
-        counts = [actual["parts"].get(k, 0) for k in keys]
-        if bool(counts) and all(c == 1 for c in counts) and actual["starts"][0] == start_val:
-            return params.get("format") != "page-x-of-y" or any(
-                "NUMPAGES" in c for c in actual["codes"]
-            )
-        # 2. Multi-section thesis check: page numbers start at body section, front matter sections have none
-        body_sections = [i for i, s in enumerate(actual["starts"]) if s == start_val]
-        if body_sections:
-            b_idx = body_sections[0]
-            body_keys = [f"{i}:{kind}" for i in range(b_idx, len(actual["starts"]))]
-            if actual["odd_even"]:
-                body_keys.extend(
-                    f"{i}:even_page_{kind}" for i in range(b_idx, len(actual["starts"]))
-                )
-            body_counts = [actual["parts"].get(k, 0) for k in body_keys]
-            front_keys = [f"{i}:{kind}" for i in range(0, b_idx)]
-            if actual["odd_even"]:
-                front_keys.extend(f"{i}:even_page_{kind}" for i in range(0, b_idx))
-            front_counts = [actual["parts"].get(k, 0) for k in front_keys]
-            if (
-                bool(body_counts)
-                and all(c == 1 for c in body_counts)
-                and all(c == 0 for c in front_counts)
-            ):
-                return params.get("format") != "page-x-of-y" or any(
-                    "NUMPAGES" in c for c in actual["codes"]
-                )
-        return False
+            elif actual["first_page"][i] and first_count != 1:
+                return False
+        return params.get("format") != "page-x-of-y" or any(
+            "NUMPAGES" in c for c in actual["codes"]
+        )
     if name == "table_of_contents":
         if not params.get("enabled"):
             return not actual["titles"] and not actual["codes"]

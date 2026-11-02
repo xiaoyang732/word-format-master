@@ -291,6 +291,8 @@ def validate_section(section, data):
                 "show_on_body_first_page",
                 "prefix",
                 "total_separator",
+                "scope",
+                "start_section",
             },
         )
         for key in ("enabled", "show_on_first_page", "show_on_body_first_page"):
@@ -304,6 +306,10 @@ def validate_section(section, data):
                 raise FormatError(f"Invalid page_numbers.{key}")
         if "start" in data:
             number(data["start"], 0, 100000, "start", True)
+        if data.get("scope", "all") not in {"all", "body"}:
+            raise FormatError("page_numbers.scope must be all or body")
+        if "start_section" in data:
+            number(data["start_section"], 1, 100000, "start_section", True)
         for key in ("prefix", "total_separator"):
             if key in data:
                 text_value(data[key], key, True)

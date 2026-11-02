@@ -589,9 +589,24 @@ def _find_body_section_index(document: Document) -> int:
 def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     if not tokens:
         return []
-    cleared = clear_managed_header_footer_paragraphs(document, {"WFM Page Number"})
     if not tokens.get("enabled"):
+        cleared = clear_managed_header_footer_paragraphs(document, {"WFM Page Number"})
         return [f"Removed managed page-number fields from {cleared} part(s)"]
+    from .contracts import FormatError
+    from .fields import page_number_paragraphs
+    from .headers import detach
+    from .properties import element
+
+    sections = list(document.sections)
+    body_idx = _find_body_section_index(document)
+    start_idx = int(tokens["start_section"]) - 1 if "start_section" in tokens else (
+        body_idx if tokens.get("scope", "all") == "body" else 0
+    )
+    if not 0 <= start_idx < len(sections):
+        raise FormatError("start_section is outside the document")
+    if (tokens.get("scope") == "body" and "start_section" not in tokens
+            and body_idx == 0 and len(sections) > 1):
+        raise FormatError("Body section is ambiguous; specify start_section", "needs_clarification")
     location = tokens.get("location", "footer")
     style_name = "WFM Page Number"
     style = get_or_create_paragraph_style(document, style_name)
@@ -599,36 +614,41 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     set_paragraph_format(style, tokens)
     start = int(tokens.get("start", 1))
 
-    # Section/page-number scope must be explicit; do not erase front-matter footers.
-    body_idx = _find_body_section_index(document) if "show_on_body_first_page" in tokens else 0
-    if document.sections:
-        page_type = document.sections[0]._sectPr.find(qn("w:pgNumType"))
-        if page_type is None:
-            page_type = OxmlElement("w:pgNumType")
-            document.sections[0]._sectPr.append(page_type)
-        page_type.set(qn("w:start"), str(start))
-        if not tokens.get("show_on_first_page", True):
-            document.sections[0].different_first_page_header_footer = True
-    target_sections = list(document.sections)
-
+    # Freeze all variants before changing linked definitions, including explicit
+    # references sharing the same part. First/even front matter must stay blank.
+    variants = (location, f"first_page_{location}", f"even_page_{location}")
+    for section in reversed(sections):
+        for attr in variants:
+            detach(getattr(section, attr))
+    cleared = 0
+    for section in sections[:start_idx]:
+        for attr in variants:
+            container = getattr(section, attr)
+            for paragraph in page_number_paragraphs(container._element):
+                paragraph.getparent().remove(paragraph)
+                cleared += 1
+    reset_idx = start_idx or (body_idx if "show_on_body_first_page" in tokens else 0)
+    for i, section in enumerate(sections[start_idx:], start_idx):
+        page_type = element(section._sectPr, "pgNumType")
+        page_type.set(qn("w:fmt"), "decimal")
+        if i in {start_idx, reset_idx}:
+            page_type.set(qn("w:start"), str(start))
+        else:
+            page_type.attrib.pop(qn("w:start"), None)
     containers = []
-    for section in target_sections:
+    for section in sections[start_idx:]:
         containers.append(getattr(section, location))
         if document.settings.odd_and_even_pages_header_footer:
             containers.append(getattr(section, f"even_page_{location}"))
-    for i, section in enumerate(target_sections):
+    for i, section in enumerate(sections[start_idx:], start_idx):
         show_first = tokens.get("show_on_first_page", True)
         if i >= body_idx and "show_on_body_first_page" in tokens:
             show_first = tokens["show_on_body_first_page"]
         if not show_first:
-            from .fields import page_number_paragraphs
-            from .headers import detach
-
             section.different_first_page_header_footer = True
             container = getattr(section, f"first_page_{location}")
             # Freeze the inherited content before other variants receive PAGE
             # fields; retain images, relationships and unrelated footer text.
-            detach(container)
             for paragraph in page_number_paragraphs(container._element):
                 paragraph.getparent().remove(paragraph)
         elif section.different_first_page_header_footer:
@@ -640,6 +660,10 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
         if identity in seen:
             continue
         seen.add(identity)
+        owned = page_number_paragraphs(container._element)
+        # Collapse duplicate imported page-only paragraphs deterministically.
+        for extra in owned[1:]:
+            extra.getparent().remove(extra)
         paragraph = _standalone_page_number_paragraph(container)
         if paragraph is not None:
             clear_paragraph_content(paragraph)

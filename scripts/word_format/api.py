@@ -11,6 +11,7 @@ from pathlib import Path
 from docx import Document
 
 from .contracts import (
+    number,
     MAX_OPERATIONS,
     SCHEMA_VERSION,
     FormatError,
@@ -158,6 +159,8 @@ def build_plan(input_path, output, request, *, _document=None):
         if cap is None:
             raise FormatError(f"Unknown operation {item['action']!r}", "unsupported")
         params = cap.validator(item["params"])
+        if cap.property == "page_numbers" and "start_section" in params:
+            number(params["start_section"], 1, len(document.sections), "start_section", True)
         if (
             not cap.structural
             and item["target"].get("type") == "text_range"
