@@ -726,7 +726,7 @@ def _materialize_rpr(src_doc, p, r, rpr) -> None:
                 break
 
 
-def _materialize_cover_fonts(src_doc, nodes) -> None:
+def _materialize_cover_fonts(src_doc, nodes, target_doc) -> None:
     paragraphs = []
     for node in nodes:
         if node.tag == qn("w:p"):
@@ -734,15 +734,24 @@ def _materialize_cover_fonts(src_doc, nodes) -> None:
         paragraphs.extend(p for p in node.iter(qn("w:p")) if p is not node)
     for p in paragraphs:
         ppr = element(p, "pPr")
-        existing_spacing = ppr.find(qn("w:spacing")) is not None
         for prop in ("alignment", "space_before_pt", "space_after_pt", "line_spacing"):
-            if (prop == "alignment" and ppr.find(qn("w:jc")) is not None) or (
-                prop != "alignment" and existing_spacing
-            ):
-                continue
             val = read_paragraph(src_doc, p, prop)
+            if val == read_paragraph(target_doc, p, prop):
+                continue
             if val is not None and not (isinstance(val, dict) and val.get("kind") == "auto"):
-                write_paragraph(ppr, prop, val)
+                # Materialize only missing attributes: source direct spacing is
+                # authoritative, but omitted components must not inherit a
+                # colliding style definition from the destination document.
+                temporary = OxmlElement("w:pPr")
+                write_paragraph(temporary, prop, val)
+                for child in temporary:
+                    current = ppr.find(child.tag)
+                    if current is None:
+                        ppr.append(child)
+                    else:
+                        for attr, value in child.attrib.items():
+                            if attr not in current.attrib:
+                                current.set(attr, value)
         _materialize_rpr(src_doc, p, None, element(ppr, "rPr"))
         for r in p.findall(qn("w:r")):
             if not _is_opaque_run(r):
@@ -1025,7 +1034,7 @@ def clone_template_cover(
     cloned = _extract_cover_nodes(
         src_doc, use_section_break=use_section_break, include_declaration=include_declaration
     )
-    _materialize_cover_fonts(src_doc, cloned)
+    _materialize_cover_fonts(src_doc, cloned, target_doc)
     _remap_cover_relationships(src_doc.part, target_doc.part, cloned)
 
     fields = fields or {}

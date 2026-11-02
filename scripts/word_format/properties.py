@@ -325,8 +325,10 @@ def read_font(document, paragraph, run, name):
             ascii_font if ascii_font == hansi_font else {"ascii": ascii_font, "hAnsi": hansi_font}
         )
     if name == "font_size_pt":
+        from analyze_docx import half_points
+
         raw = _attr(sources, "sz")
-        return float(raw) / 2 if raw is not None else None
+        return half_points(raw)
     if name in {"bold", "italic"}:
         # OOXML style b/i are toggle properties; direct rPr values are absolute.
         tag = "b" if name == "bold" else "i"

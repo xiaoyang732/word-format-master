@@ -8,13 +8,14 @@ from pathlib import Path
 from docx import Document
 from docx.enum.section import WD_SECTION_START
 from docx.oxml.ns import qn
+from docx.shared import Pt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
 from word_format import apply_plan, verify_plan
 from word_format.cover import clone_template_cover
 from word_format.profiles import profile_plan, requirements_profile
-from word_format.properties import element
+from word_format.properties import element, read_paragraph
 
 
 def declaration_template(section_break):
@@ -110,6 +111,23 @@ class DeclarationPreservationTests(unittest.TestCase):
         result = Document(output)
         self.assertIsNone(result.paragraphs[0].runs[0].font.size)
         self.assertEqual(result.paragraphs[1].runs[0].font.size.pt, 12)
+
+    def test_partial_direct_spacing_keeps_source_inheritance_when_target_style_differs(self):
+        template = Document()
+        template.styles["Normal"].paragraph_format.line_spacing = Pt(18)
+        paragraph = template.add_paragraph("毕业设计封面")
+        paragraph.paragraph_format.space_after = Pt(0)
+        template.add_section(WD_SECTION_START.NEW_PAGE)
+        template.add_heading("摘要", 1)
+        path = self.root / "template.docx"
+        template.save(path)
+        target = Document()
+        target.styles["Normal"].paragraph_format.line_spacing = Pt(24)
+        target.add_paragraph("目标正文")
+        result = clone_template_cover(path, target)
+        cloned = result.paragraphs[0]._p
+        self.assertEqual(read_paragraph(result, cloned, "line_spacing"), {"kind": "exact", "value": 18.0, "unit": "pt"})
+        self.assertEqual(cloned.pPr.find(qn("w:spacing")).get(qn("w:after")), "0")
 
 
 if __name__ == "__main__":

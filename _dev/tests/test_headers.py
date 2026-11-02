@@ -5,6 +5,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+import zipfile
 from unittest.mock import patch
 
 from docx import Document
@@ -124,6 +125,23 @@ class HeaderTests(unittest.TestCase):
             with self.assertRaises(FormatError):
                 apply_plan(plan)
         self.assertFalse(self.output.exists())
+
+    def test_strict_header_universal_font_measure_remains_analyzable(self):
+        doc = Document(self.source)
+        doc.sections[0].header.paragraphs[0].runs[0].font.size = Pt(9)
+        doc.save(self.source)
+        strict = self.source.with_name("strict.docx")
+        with zipfile.ZipFile(self.source) as source, zipfile.ZipFile(strict, "w") as target:
+            for name in source.namelist():
+                blob = source.read(name)
+                if name.startswith("word/header"):
+                    blob = blob.replace(b'w:val="18"', b'w:val="9pt"')
+                if name.endswith(".xml"):
+                    blob = blob.replace(b"http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+                                        b"http://purl.oclc.org/ooxml/wordprocessingml/main")
+                target.writestr(name, blob)
+        parts = analyze_docx(strict)["document"]["headers_footers"]
+        self.assertEqual(next(part for part in parts if part["kind"] == "header")["paragraphs"][0]["font_size_pt"], [9.0])
 
     def test_section_content_isolates_following_inherited_header(self):
         doc, _ = self.execute([self.op("header.content.set", {"mode": "text", "text": "Chapter One"})])

@@ -20,6 +20,7 @@ from word_format.headers import effective_root
 from word_format.properties import element
 from word_format.registry import REGISTRY
 from word_format.structures import append_field
+from verify_output import verify_structure
 
 
 class ScopedPageNumberTests(unittest.TestCase):
@@ -109,6 +110,15 @@ class ScopedPageNumberTests(unittest.TestCase):
             with self.assertRaises(FormatError):
                 apply_plan(plan)
         self.assertFalse(self.output.exists())
+
+    def test_legacy_structure_verifier_obeys_explicit_scope_and_reset(self):
+        self.execute(start_section=4, start=5)
+        spec = {"page_numbers": {"enabled": True, "start_section": 4, "start": 5}}
+        self.assertEqual(verify_structure(self.output, spec)["status"], "passed")
+        doc = Document(self.output)
+        element(doc.sections[3]._sectPr, "pgNumType").set(qn("w:start"), "7")
+        doc.save(self.output)
+        self.assertEqual(verify_structure(self.output, spec)["status"], "failed")
 
 
 if __name__ == "__main__":

@@ -159,37 +159,17 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
 
     page_numbers = spec.get("page_numbers", {})
     if page_numbers.get("enabled"):
-        location = str(page_numbers.get("location") or "footer")
-        from word_format.structures import _find_body_section_index
-        body_idx = _find_body_section_index(document)
-        target_sections = document.sections[body_idx:] if body_idx > 0 else document.sections
-        containers = [getattr(section, location) for section in target_sections]
-        if document.settings.odd_and_even_pages_header_footer:
-            containers.extend(getattr(section, f"even_page_{location}") for section in target_sections)
-        if body_idx > 0:
-            show_first = page_numbers.get("show_on_body_first_page", True)
-        else:
-            show_first = page_numbers.get("show_on_first_page", True)
-        if show_first:
-            containers.extend(
-                getattr(section, f"first_page_{location}")
-                for section in target_sections
-                if section.different_first_page_header_footer
-            )
-        page_field_counts = []
-        seen_parts: set[int] = set()
-        for container in containers:
-            identity = id(container._element)
-            if identity in seen_parts:
-                continue
-            seen_parts.add(identity)
-            codes = [node.text or "" for node in container._element.iter(qn("w:instrText"))]
-            codes.extend(node.get(qn("w:instr"), "") for node in container._element.iter(qn("w:fldSimple")))
-            page_field_counts.append(sum(bool(re.search(r"\bPAGE\b", code, re.I)) for code in codes))
-        passed = bool(page_field_counts) and all(count == 1 for count in page_field_counts)
-        _check(checks, "page-numbers", passed, f"PAGE fields per target {location} part={page_field_counts}")
+        from word_format.inspect import DocumentIndex
+        from word_format.registry import REGISTRY
+
+        cap = REGISTRY["page_number.configure"]
+        params = cap.validator(page_numbers)
+        index = DocumentIndex(document)
+        actual = cap.reader(index, index.ref("document"), cap)
+        passed = cap.verifier(actual, params, cap)
+        _check(checks, "page-numbers", passed, f"scoped PAGE fields and section starts={actual['starts']}")
         if not passed:
-            errors.append(f"target {location} parts must contain exactly one PAGE field each")
+            errors.append("Page-number fields, variants or section numbering do not match the requested scope")
 
     placements = spec.get("citations", {}).get("placements", [])
     if placements:
