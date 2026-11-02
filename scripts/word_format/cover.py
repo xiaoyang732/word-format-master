@@ -139,9 +139,15 @@ _FIELD_LABEL_CORES = {
     "udc": r"udc",
     "security": rf"密{_SP}级",
     "date": rf"(?:提交|完成|答辩|写作)?{_SP}日{_SP}期|时{_SP}间",
+    "signature": rf"(?:本人)?{_SP}(?:签{_SP}名|签{_SP}字)|声{_SP}明{_SP}人",
 }
 
 _FIELD_ALIASES = {
+    "signature": "signature",
+    "本人签名": "signature",
+    "签名": "signature",
+    "签字": "signature",
+    "声明人": "signature",
     "title": "title",
     "subject": "title",
     "title_cn": "title",
@@ -361,6 +367,42 @@ def _is_opaque_run(run) -> bool:
     )
 
 
+def _replace_paragraph_text_pattern(p, pattern: str | re.Pattern[str], replacement: str) -> bool:
+    runs = [r for r in p.findall(qn("w:r")) if not _is_opaque_run(r)]
+    if not runs:
+        return False
+    spans = []
+    offset = 0
+    for r in runs:
+        t_nodes = r.findall(qn("w:t"))
+        r_text = "".join(t.text or "" for t in t_nodes)
+        spans.append((r, offset, offset + len(r_text), r_text))
+        offset += len(r_text)
+    full_text = "".join(s[3] for s in spans)
+    m = re.search(pattern, full_text) if isinstance(pattern, str) else pattern.search(full_text)
+    if not m:
+        return False
+    start, end = m.span()
+    target_runs = [item for item in spans if item[2] > start and item[1] < end]
+    if not target_runs:
+        return False
+    first_r, f_start, f_end, f_text = target_runs[0]
+    last_r, l_start, l_end, l_text = target_runs[-1]
+    prefix = f_text[: start - f_start]
+    suffix = l_text[end - l_start :]
+    for r, _, _, _ in target_runs[1:]:
+        p.remove(r)
+    for t in first_r.findall(qn("w:t")):
+        first_r.remove(t)
+    new_t = OxmlElement("w:t")
+    new_text = prefix + replacement + suffix
+    if new_text != new_text.strip() or "  " in new_text:
+        new_t.set(XML_SPACE, "preserve")
+    new_t.text = new_text
+    first_r.append(new_t)
+    return True
+
+
 def _set_labeled_paragraph_value(
     p,
     value: str,
@@ -394,6 +436,13 @@ def _set_labeled_paragraph_value(
         next_match = any_label_re.search(full_text[val_start:])
         if next_match:
             val_end = val_start + next_match.start()
+    if val_start < len(full_text):
+        inline_date = re.search(
+            r"[\s\u3000]{2,}(?=(?:(?:20\d\d|\d{2,4})\s*年|年\s*月\s*日))",
+            full_text[val_start:],
+        )
+        if inline_date:
+            val_end = min(val_end, val_start + inline_date.start())
 
     old_slot = full_text[val_start:val_end]
     val_rpr = None
@@ -718,7 +767,28 @@ def _is_empty_paragraph(p) -> bool:
     )
 
 
-def _is_cover_boundary_paragraph(doc, p, *, has_cover_content: bool, saw_page_break: bool) -> bool:
+def _has_declaration_module(doc) -> bool:
+    for p in doc.paragraphs[:60]:
+        text = p.text.strip()
+        if not text:
+            continue
+        style_name = p.style.name if p.style else ""
+        mod = classify_module(text, style_name, None)
+        if mod == "declaration":
+            return True
+        if mod in {"abstract", "toc", "chapters"}:
+            break
+    return False
+
+
+def _is_cover_boundary_paragraph(
+    doc,
+    p,
+    *,
+    has_cover_content: bool,
+    saw_page_break: bool,
+    include_declaration: bool = False,
+) -> bool:
     text = _paragraph_top_text(p).strip()
     if (
         not text
@@ -730,7 +800,12 @@ def _is_cover_boundary_paragraph(doc, p, *, has_cover_content: bool, saw_page_br
     style_name = style.name if style is not None else ""
     outline = outline_level(doc, p)
     mod = classify_module(text, style_name, outline)
-    if mod in _NON_COVER_MODULES:
+    non_cover = (
+        _NON_COVER_MODULES - {"declaration"}
+        if include_declaration
+        else _NON_COVER_MODULES
+    )
+    if mod in non_cover:
         return True
     if mod == "chapters":
         if _COVER_BANNER_RE.search(text) and not _EXPLICIT_CHAPTER_START_RE.match(text):
@@ -750,20 +825,26 @@ def _is_cover_boundary_paragraph(doc, p, *, has_cover_content: bool, saw_page_br
     return False
 
 
-def _extract_cover_nodes(src_doc, *, use_section_break: bool = True) -> list:
+def _extract_cover_nodes(
+    src_doc, *, use_section_break: bool = True, include_declaration: bool = True
+) -> list:
     cloned = []
     found_sect = False
     has_cover_content = False
     saw_page_break = False
+    src_has_decl = _has_declaration_module(src_doc) if include_declaration else False
+    in_declaration = False
 
     for child in src_doc.element.body:
         if child.tag == qn("w:sectPr"):
             break
+        text = _paragraph_top_text(child).strip() if child.tag == qn("w:p") else ""
         if child.tag == qn("w:p") and _is_cover_boundary_paragraph(
             src_doc,
             child,
             has_cover_content=has_cover_content,
             saw_page_break=saw_page_break,
+            include_declaration=src_has_decl,
         ):
             break
         node = copy.deepcopy(child)
@@ -771,15 +852,22 @@ def _extract_cover_nodes(src_doc, *, use_section_break: bool = True) -> list:
         if child.tag == qn("w:tbl"):
             has_cover_content = True
         elif child.tag == qn("w:p"):
-            if _paragraph_top_text(child).strip() or any(
+            if text or any(
                 n.tag in {qn("w:drawing"), qn("w:pict"), qn("w:object")} for n in child.iter()
             ):
                 has_cover_content = True
             if _has_top_level_page_break(child):
                 saw_page_break = True
             if child.find("./" + qn("w:pPr") + "/" + qn("w:sectPr")) is not None:
-                found_sect = True
-                break
+                if not src_has_decl:
+                    found_sect = True
+                    break
+                else:
+                    if in_declaration:
+                        found_sect = True
+                        break
+                    else:
+                        in_declaration = True
 
     if not cloned:
         raise FormatError("Cover template contains no cover elements")
@@ -822,13 +910,17 @@ def _has_top_level_page_breaks_in(p) -> bool:
     return _has_top_level_page_break(p)
 
 
-def _remove_existing_cover_from_target(target_doc) -> bool:
+def _remove_existing_cover_from_target(
+    target_doc, *, include_declaration: bool = True
+) -> bool:
     body = target_doc.element.body
     children = [c for c in body if c.tag != qn("w:sectPr")]
     if not children:
         return False
     has_cover_content = False
     saw_page_break = False
+    target_has_decl = _has_declaration_module(target_doc) if include_declaration else False
+    in_declaration = False
     cut_end = 0
     for idx, child in enumerate(children):
         if child.tag == qn("w:p") and _is_cover_boundary_paragraph(
@@ -836,13 +928,15 @@ def _remove_existing_cover_from_target(target_doc) -> bool:
             child,
             has_cover_content=has_cover_content,
             saw_page_break=saw_page_break,
+            include_declaration=target_has_decl,
         ):
             cut_end = idx
             break
         if child.tag == qn("w:tbl"):
             has_cover_content = True
         elif child.tag == qn("w:p"):
-            if _paragraph_top_text(child).strip() or any(
+            text = _paragraph_top_text(child).strip()
+            if text or any(
                 n.tag in {qn("w:drawing"), qn("w:pict"), qn("w:object")} for n in child.iter()
             ):
                 has_cover_content = True
@@ -852,8 +946,15 @@ def _remove_existing_cover_from_target(target_doc) -> bool:
                 child.find("./" + qn("w:pPr") + "/" + qn("w:sectPr")) is not None
                 and idx + 1 < len(children)
             ):
-                cut_end = idx + 1
-                break
+                if not target_has_decl:
+                    cut_end = idx + 1
+                    break
+                else:
+                    if in_declaration:
+                        cut_end = idx + 1
+                        break
+                    else:
+                        in_declaration = True
     if cut_end <= 0:
         return False
     for node in children[:cut_end]:
@@ -896,6 +997,7 @@ def clone_template_cover(
     replacements: dict[str, str] | None = None,
     replace_existing_cover: bool = False,
     use_section_break: bool = True,
+    include_declaration: bool = True,
 ) -> Document:
     """Clone the cover page (tables, VML textboxes, images, underlines, layout) from a template."""
     src_path = Path(template_path).resolve()
@@ -910,9 +1012,13 @@ def clone_template_cover(
             if child.tag != qn("w:sectPr"):
                 target_doc.element.body.remove(child)
     elif replace_existing_cover:
-        _remove_existing_cover_from_target(target_doc)
+        _remove_existing_cover_from_target(
+            target_doc, include_declaration=include_declaration
+        )
 
-    cloned = _extract_cover_nodes(src_doc, use_section_break=use_section_break)
+    cloned = _extract_cover_nodes(
+        src_doc, use_section_break=use_section_break, include_declaration=include_declaration
+    )
     _materialize_cover_fonts(src_doc, cloned)
     _remap_cover_relationships(src_doc.part, target_doc.part, cloned)
 
@@ -925,6 +1031,11 @@ def clone_template_cover(
             continue
         canonical, exact_cell_re, cell_re, inline_re = _field_patterns(key)
         compiled_fields.append((key, str(val), canonical, exact_cell_re, cell_re, inline_re))
+    if not any(item[2] == "signature" for item in compiled_fields):
+        student_val = next((item[1] for item in compiled_fields if item[2] == "student"), None)
+        if student_val:
+            canonical, exact_cell_re, cell_re, inline_re = _field_patterns("本人签名")
+            compiled_fields.append(("signature", student_val, canonical, exact_cell_re, cell_re, inline_re))
 
     replacements = replacements or {}
     if not isinstance(replacements, dict):
@@ -972,15 +1083,30 @@ def clone_template_cover(
                         p, val, inline_re=inline_re, any_label_re=any_inline_re
                     ):
                         matched_keys.add(key)
+        # If date is provided and paragraph has declaration signature with a date placeholder, update it.
+        date_val = next((item[1] for item in compiled_fields if item[2] == "date"), None)
+        if date_val:
+            cur_p_text = "".join(
+                t.text or "" for r in p.findall(qn("w:r")) if not _is_opaque_run(r) for t in r.findall(qn("w:t"))
+            )
+            if re.search(r"本人签名|声明人|签字|签名", cur_p_text):
+                _replace_paragraph_text_pattern(
+                    p,
+                    r"(?:20\d\d|\d{2,4})\s*年\s*月\s*日|(?:20\d\d|\d{2,4})\s*年月日|年\s*月\s*日",
+                    date_val,
+                )
         if replacements:
-            for r in p.findall(qn("w:r")):
-                if _is_opaque_run(r):
-                    continue
-                for t in r.findall(qn("w:t")):
-                    if t.text:
-                        for old, new in replacements.items():
-                            if old in t.text:
-                                t.text = t.text.replace(old, str(new))
+            for old, new in replacements.items():
+                replaced_in_single_run = False
+                for r in p.findall(qn("w:r")):
+                    if _is_opaque_run(r):
+                        continue
+                    for t in r.findall(qn("w:t")):
+                        if t.text and old in t.text:
+                            t.text = t.text.replace(old, str(new))
+                            replaced_in_single_run = True
+                if not replaced_in_single_run:
+                    _replace_paragraph_text_pattern(p, re.escape(old), str(new))
 
     # Fallback for standalone centered title placeholders (e.g. "论文题目" without colon or table).
     for key, val, canonical, *_ in compiled_fields:
@@ -1009,6 +1135,7 @@ def apply_template_cover_file(
     replacements: dict[str, str] | None = None,
     replace_existing_cover: bool = False,
     use_section_break: bool = True,
+    include_declaration: bool = True,
     overwrite: bool = False,
 ) -> dict:
     """Safely clone a template cover to ``destination`` while protecting all inputs."""
@@ -1049,6 +1176,7 @@ def apply_template_cover_file(
         replacements=replacements,
         replace_existing_cover=replace_existing_cover,
         use_section_break=use_section_break,
+        include_declaration=include_declaration,
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = out_path.with_name(f".{out_path.stem}.{uuid.uuid4().hex}.docx")

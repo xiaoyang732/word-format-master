@@ -306,14 +306,20 @@ class DocumentIndex:
                 None,
                 name,
             )
+        runs = list(text_runs(p))
+        non_empty = [
+            r for r in runs if any(t.text and t.text.strip() for t in r.findall(qn("w:t")))
+        ]
+        target_runs = set(non_empty if non_empty else runs)
         values = []
         offset = 0
-        for r in text_runs(p):
+        for r in runs:
             length = sum(len(t.text or "") for t in r.findall(qn("w:t")))
             if length and (start is None or (offset < end and offset + length > start)):
-                value = read_font(self.document, p, r, name)
-                if value not in values:
-                    values.append(value)
+                if r in target_runs:
+                    value = read_font(self.document, p, r, name)
+                    if value not in values:
+                        values.append(value)
             offset += length
         return values or [read_font(self.document, p, None, name)]
 

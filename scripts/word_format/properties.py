@@ -181,6 +181,28 @@ def rpr_sources(document, paragraph, run=None):
 def ppr_sources(document, paragraph):
     pr = paragraph.find(qn("w:pPr"))
     yield pr
+    num_pr = pr.find(qn("w:numPr")) if pr is not None else None
+    if num_pr is not None:
+        num_id_node = num_pr.find(qn("w:numId"))
+        if num_id_node is not None and num_id_node.get(qn("w:val")) not in (None, "0"):
+            num_id = num_id_node.get(qn("w:val"))
+            ilvl_node = num_pr.find(qn("w:ilvl"))
+            ilvl = ilvl_node.get(qn("w:val"), "0") if ilvl_node is not None else "0"
+            try:
+                npart = document.part.numbering_part
+                if npart is not None:
+                    for num in npart.element.findall(qn("w:num")):
+                        if num.get(qn("w:numId")) == num_id:
+                            abs_id_node = num.find(qn("w:abstractNumId"))
+                            if abs_id_node is not None:
+                                abs_id = abs_id_node.get(qn("w:val"))
+                                for ab in npart.element.findall(qn("w:abstractNum")):
+                                    if ab.get(qn("w:abstractNumId")) == abs_id:
+                                        for lvl in ab.findall(qn("w:lvl")):
+                                            if lvl.get(qn("w:ilvl")) == ilvl:
+                                                yield lvl.find(qn("w:pPr"))
+            except Exception:
+                pass
     style = paragraph_style(document, paragraph)
     seen = set()
     while style is not None and style.style_id not in seen:
@@ -422,11 +444,15 @@ def read_paragraph(document, paragraph, name):
                 if has_opposite and not has_own:
                     chars = ind.get(qn("w:firstLineChars"))
                     raw = ind.get(qn("w:firstLine"))
+                    if chars == "0" and raw is None:
+                        continue
                     if chars is not None:
                         return {"value": -float(chars) / 100, "unit": "chars"}
                     return {"value": -float(raw or 0) * 25.4 / 1440, "unit": "mm"}
             chars = ind.get(qn("w:" + base + "Chars"))
             raw = ind.get(qn("w:" + base))
+            if chars == "0" and raw is None:
+                continue
             if chars is not None:
                 return {"value": float(chars) / 100, "unit": "chars"}
             if raw is not None:

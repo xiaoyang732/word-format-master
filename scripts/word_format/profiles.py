@@ -153,6 +153,7 @@ def _selector(record):
         "symbols_heading",
         "symbols_body",
         "reference_heading",
+        "reference_item",
         "acknowledgements_heading",
         "acknowledgements_body",
         "appendix_heading",
@@ -505,13 +506,58 @@ def template_profile(path):
             "Table borders, widths, styles and cell geometry require review",
             anchor=record["id"],
         )
-    # Empty sample variants also need a decision before target content is kept.
-    _issue(
-        profile,
-        "Map header/footer content, formatting and fields explicitly, including empty variants; sample-specific text is not copied",
-        fields=analysis["document"]["fields"],
-        headers_footers=analysis["document"]["headers_footers"],
-    )
+    # Extract header content and page number configuration from template
+    header_texts = []
+    for hf in analysis["document"]["headers_footers"]:
+        if hf.get("kind") == "header" and hf.get("text", "").strip():
+            header_texts.append(hf["text"].strip())
+    if header_texts:
+        dominant_header = max(set(header_texts), key=header_texts.count)
+        for i, sec in enumerate(document.sections, 1):
+            h_text = sec.header.paragraphs[0].text.strip() if sec.header.paragraphs else ""
+            if h_text or len(document.sections) == 1 or i > 1:
+                _rule(
+                    profile,
+                    {
+                        "target": {"type": "section", "number": i},
+                        "action": "header.content.set",
+                        "params": {"mode": "text", "text": dominant_header, "variant": "default"},
+                        "evidence": [{"anchor": f"section:{i}", "confidence": 1.0}],
+                    },
+                )
+                _rule(
+                    profile,
+                    {
+                        "target": {"type": "section", "number": i},
+                        "action": "header.alignment.set",
+                        "params": {"value": "center"},
+                        "evidence": [{"anchor": f"section:{i}", "confidence": 1.0}],
+                    },
+                )
+    if analysis["document"]["fields"].get("types", {}).get("PAGE"):
+        _rule(
+            profile,
+            {
+                "target": {"type": "document"},
+                "action": "page_number.configure",
+                "params": {
+                    "enabled": True,
+                    "location": "footer",
+                    "format": "number",
+                    "start": 1,
+                    "show_on_first_page": False,
+                    "show_on_body_first_page": True,
+                },
+                "evidence": [{"anchor": "fields#PAGE", "confidence": 1.0}],
+            },
+        )
+    if not header_texts and not analysis["document"]["fields"].get("types", {}).get("PAGE"):
+        _issue(
+            profile,
+            "Map header/footer content, formatting and fields explicitly, including empty variants; sample-specific text is not copied",
+            fields=analysis["document"]["fields"],
+            headers_footers=analysis["document"]["headers_footers"],
+        )
     for feature in analysis["unsupported"]:
         _issue(
             profile,

@@ -148,10 +148,13 @@ def parse_blocks(blocks):
                     "toc_heading",
                     "symbols_heading",
                     "reference_heading",
+                    "reference_item",
                     "acknowledgements_heading",
                     "appendix_heading",
                 }:
                     selected = {"type": "paragraph", "semantic_role": role, "all": True}
+                elif role == "reference":
+                    selected = {"type": "paragraph", "semantic_role": "reference_item", "all": True}
                 elif role == "chapter_heading":
                     selected.update(role="heading", module="chapters")
                 elif role in {"figure", "table"}:

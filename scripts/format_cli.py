@@ -111,6 +111,13 @@ def main():
         action="store_true",
         help="Separate the cloned cover with a page break instead of a section break",
     )
+    p.add_argument(
+        "--no-declaration",
+        dest="include_declaration",
+        action="store_false",
+        default=True,
+        help="Do not include declaration section from template",
+    )
     p.add_argument("--fields", help="JSON object mapping cover field labels/keys to values")
     p.add_argument("--replacements", help="JSON object mapping literal placeholder strings")
     p.add_argument("--report", help="Optional JSON report path")
@@ -278,6 +285,7 @@ def main():
                 replacements=read_json(args.replacements) if args.replacements else None,
                 replace_existing_cover=args.replace_existing_cover,
                 use_section_break=not args.no_section_break,
+                include_declaration=args.include_declaration,
                 overwrite=args.overwrite,
             )
         else:

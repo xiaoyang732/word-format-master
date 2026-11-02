@@ -132,6 +132,11 @@ def annotate(index):
                 record["semantic_role"] = "declaration_salutation"
             elif re.search(r"(?:签名|签字|日期)[:：]|\d{4}年.*月", compact):
                 record["semantic_role"] = "declaration_signature"
+        elif record.get("module") == "references":
+            if MODULE_MARKERS["references"].fullmatch(text):
+                record["semantic_role"] = "reference_heading"
+            elif record.get("role") in {"list", "body", "module_body"}:
+                record["semantic_role"] = "reference_item"
         elif MODULE_MARKERS["references"].fullmatch(text):
             record["semantic_role"] = "reference_heading"
         elif MODULE_MARKERS["declaration"].fullmatch(text):
