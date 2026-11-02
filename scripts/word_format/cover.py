@@ -140,9 +140,14 @@ _FIELD_LABEL_CORES = {
     "security": rf"密{_SP}级",
     "date": rf"(?:提交|完成|答辩|写作)?{_SP}日{_SP}期|时{_SP}间",
     "signature": rf"(?:本人)?{_SP}(?:签{_SP}名|签{_SP}字)|声{_SP}明{_SP}人",
+    "signature_date": rf"(?:声{_SP}明|签{_SP}名|签{_SP}字)?{_SP}日{_SP}期",
 }
 
 _FIELD_ALIASES = {
+    "signature_date": "signature_date",
+    "declaration_date": "signature_date",
+    "签名日期": "signature_date",
+    "声明日期": "signature_date",
     "signature": "signature",
     "本人签名": "signature",
     "签名": "signature",
@@ -1084,8 +1089,11 @@ def clone_template_cover(
                     ):
                         matched_keys.add(key)
         # If date is provided and paragraph has declaration signature with a date placeholder, update it.
-        date_val = next((item[1] for item in compiled_fields if item[2] == "date"), None)
-        if date_val:
+        has_repl_for_date = any("年" in old and "月" in old for old in (replacements or {}))
+        sig_date_val = next((item[1] for item in compiled_fields if item[2] == "signature_date"), None)
+        if not sig_date_val and not has_repl_for_date:
+            sig_date_val = next((item[1] for item in compiled_fields if item[2] == "date"), None)
+        if sig_date_val and not has_repl_for_date:
             cur_p_text = "".join(
                 t.text or "" for r in p.findall(qn("w:r")) if not _is_opaque_run(r) for t in r.findall(qn("w:t"))
             )
@@ -1093,7 +1101,7 @@ def clone_template_cover(
                 _replace_paragraph_text_pattern(
                     p,
                     r"(?:20\d\d|\d{2,4})\s*年\s*月\s*日|(?:20\d\d|\d{2,4})\s*年月日|年\s*月\s*日",
-                    date_val,
+                    sig_date_val,
                 )
         if replacements:
             for old, new in replacements.items():
