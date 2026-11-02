@@ -178,40 +178,49 @@ def rpr_sources(document, paragraph, run=None):
         yield defaults.find("./" + qn("w:rPrDefault") + "/" + qn("w:rPr"))
 
 
-def ppr_sources(document, paragraph):
+def _iter_ppr_sources_with_origin(document, paragraph):
     pr = paragraph.find(qn("w:pPr"))
-    yield pr
-    num_pr = pr.find(qn("w:numPr")) if pr is not None else None
-    if num_pr is not None:
-        num_id_node = num_pr.find(qn("w:numId"))
-        if num_id_node is not None and num_id_node.get(qn("w:val")) not in (None, "0"):
-            num_id = num_id_node.get(qn("w:val"))
-            ilvl_node = num_pr.find(qn("w:ilvl"))
-            ilvl = ilvl_node.get(qn("w:val"), "0") if ilvl_node is not None else "0"
-            try:
-                npart = document.part.numbering_part
-                if npart is not None:
-                    for num in npart.element.findall(qn("w:num")):
-                        if num.get(qn("w:numId")) == num_id:
-                            abs_id_node = num.find(qn("w:abstractNumId"))
-                            if abs_id_node is not None:
-                                abs_id = abs_id_node.get(qn("w:val"))
-                                for ab in npart.element.findall(qn("w:abstractNum")):
-                                    if ab.get(qn("w:abstractNumId")) == abs_id:
-                                        for lvl in ab.findall(qn("w:lvl")):
-                                            if lvl.get(qn("w:ilvl")) == ilvl:
-                                                yield lvl.find(qn("w:pPr"))
-            except Exception:
-                pass
+    yield "direct", pr
+    style_sources = []
     style = paragraph_style(document, paragraph)
     seen = set()
     while style is not None and style.style_id not in seen:
         seen.add(style.style_id)
-        yield style.element.find(qn("w:pPr"))
+        style_sources.append(style.element.find(qn("w:pPr")))
         style = style.base_style
+    # numPr children inherit independently (a paragraph may specify only ilvl).
+    num_sources = [p.find(qn("w:numPr")) for p in [pr, *style_sources] if p is not None]
+    num_id = _attr(num_sources, "numId")
+    ilvl = _attr(num_sources, "ilvl") or "0"
+    if num_id not in (None, "0"):
+        try:
+            root = document.part.numbering_part.element
+            num = next((n for n in root.findall(qn("w:num")) if n.get(qn("w:numId")) == num_id), None)
+            if num is not None:
+                override = next((n.find(qn("w:lvl")) for n in num.findall(qn("w:lvlOverride"))
+                                 if n.get(qn("w:ilvl")) == ilvl and n.find(qn("w:lvl")) is not None), None)
+                if override is not None:
+                    yield "numbering", override.find(qn("w:pPr"))
+                else:
+                    abstract_id = num.find(qn("w:abstractNumId"))
+                    abstract_id = abstract_id.get(qn("w:val")) if abstract_id is not None else None
+                    for abstract in root.findall(qn("w:abstractNum")):
+                        if abstract.get(qn("w:abstractNumId")) == abstract_id:
+                            for level in abstract.findall(qn("w:lvl")):
+                                if level.get(qn("w:ilvl")) == ilvl:
+                                    yield "numbering", level.find(qn("w:pPr"))
+        except (KeyError, AttributeError, NotImplementedError):
+            pass
+    for style_pr in style_sources:
+        yield "style", style_pr
     defaults = document.styles.element.find(qn("w:docDefaults"))
     if defaults is not None:
-        yield defaults.find("./" + qn("w:pPrDefault") + "/" + qn("w:pPr"))
+        yield "default", defaults.find("./" + qn("w:pPrDefault") + "/" + qn("w:pPr"))
+
+
+def ppr_sources(document, paragraph):
+    for _, pr in _iter_ppr_sources_with_origin(document, paragraph):
+        yield pr
 
 
 def _attr(sources, tag, attr="val"):
@@ -372,7 +381,8 @@ def write_style_font(document, style, name, value):
 
 
 def read_paragraph(document, paragraph, name):
-    sources = list(ppr_sources(document, paragraph))
+    origin_sources = list(_iter_ppr_sources_with_origin(document, paragraph))
+    sources = [pr for _, pr in origin_sources]
     if name == "outline_level":
         return int(_attr(sources, "outlineLvl") or 9)
     if name == "numbering_suppressed":
@@ -418,9 +428,22 @@ def read_paragraph(document, paragraph, name):
             "right_indent": "right",
             "hanging_indent": "hanging",
         }[name]
-        for pr in sources:
+        numbering_hanging = any(
+            origin == "numbering" and pr is not None
+            and pr.find(qn("w:ind")) is not None
+            and any(float(pr.find(qn("w:ind")).get(qn("w:" + attr), "0")) > 0
+                    for attr in ("hanging", "hangingChars"))
+            for origin, pr in origin_sources
+        )
+        for origin, pr in origin_sources:
             ind = pr.find(qn("w:ind")) if pr is not None else None
             if ind is None:
+                continue
+            if (origin == "direct" and base in {"firstLine", "hanging"}
+                    and ind.get(qn("w:firstLineChars")) == "0"
+                    and all(ind.get(qn("w:" + attr)) is None
+                            for attr in ("firstLine", "hanging", "hangingChars"))
+                    and numbering_hanging):
                 continue
             # A direct first-line/hanging declaration replaces the mutually
             # exclusive property inherited from a style. Hanging wins when a
@@ -444,15 +467,11 @@ def read_paragraph(document, paragraph, name):
                 if has_opposite and not has_own:
                     chars = ind.get(qn("w:firstLineChars"))
                     raw = ind.get(qn("w:firstLine"))
-                    if chars == "0" and raw is None:
-                        continue
                     if chars is not None:
                         return {"value": -float(chars) / 100, "unit": "chars"}
                     return {"value": -float(raw or 0) * 25.4 / 1440, "unit": "mm"}
             chars = ind.get(qn("w:" + base + "Chars"))
             raw = ind.get(qn("w:" + base))
-            if chars == "0" and raw is None:
-                continue
             if chars is not None:
                 return {"value": float(chars) / 100, "unit": "chars"}
             if raw is not None:

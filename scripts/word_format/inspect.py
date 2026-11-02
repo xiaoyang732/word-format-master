@@ -310,7 +310,7 @@ class DocumentIndex:
         non_empty = [
             r for r in runs if any(t.text and t.text.strip() for t in r.findall(qn("w:t")))
         ]
-        target_runs = set(non_empty if non_empty else runs)
+        target_runs = set(non_empty if start is None and non_empty else runs)
         values = []
         offset = 0
         for r in runs:
