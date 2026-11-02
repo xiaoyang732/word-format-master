@@ -819,7 +819,7 @@ def profile_plan(
                 }
             )
             continue
-        if target["type"] in {"paragraph", "text_range"}:
+        if target["type"] in {"paragraph", "text_range"} and any(ref["id"] in preserve for ref in refs):
             refs = [ref for ref in refs if ref["id"] not in preserve]
             if not refs:
                 preserved_rules.append({"rule": rule, "reason": "All matched paragraphs are explicitly preserved"})

@@ -94,6 +94,23 @@ class DeclarationPreservationTests(unittest.TestCase):
         self.assertEqual(result.paragraphs[2].runs[0].font.size.pt, 12)
         self.assertFalse(any(oid in {"p0", "p1"} for m in report["profile_context"]["mapping"] for oid in m["target_ids"]))
 
+    def test_unpreserved_ordinal_selector_is_not_applied_twice(self):
+        path, output = self.root / "target.docx", self.root / "output.docx"
+        doc = Document()
+        doc.add_paragraph("第一段")
+        doc.add_paragraph("第二段")
+        doc.save(path)
+        requirements = self.root / "requirements.txt"
+        requirements.write_text("正文小四。", encoding="utf-8")
+        profile = requirements_profile(requirements)
+        for rule in profile["rules"]:
+            rule["target"] = {"type": "paragraph", "ordinal": 2}
+        report = apply_plan(profile_plan(path, output, profile))
+        self.assertEqual(report["status"], "passed")
+        result = Document(output)
+        self.assertIsNone(result.paragraphs[0].runs[0].font.size)
+        self.assertEqual(result.paragraphs[1].runs[0].font.size.pt, 12)
+
 
 if __name__ == "__main__":
     unittest.main()

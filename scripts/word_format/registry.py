@@ -532,7 +532,7 @@ for action, prop, handler, section, effects in (
         "page_numbers",
         op.configure_page_numbers,
         "page_numbers",
-        ("managed/reused PAGE fields", "first-page flag", "page numbering start"),
+        ("managed/reused PAGE fields", "scoped standalone front-matter PAGE removal", "first-page flag", "decimal page numbering start and continuation"),
     ),
     (
         "toc.configure",
@@ -593,6 +593,8 @@ for action, prop, handler, section, effects in (
         {
             "contract": section,
             "scope": "document; use atomic properties for local formatting",
+            **({"scope": ["all", "body"], "start_section": "optional one-based section index"}
+               if prop == "page_numbers" else {}),
             **(
                 {
                     "level1": ["keep", "chinese", "arabic", "arabic-space"],

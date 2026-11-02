@@ -1025,7 +1025,7 @@ def legacy_paths():
         ),
         (
             "page_numbers",
-            ("enabled", "location", "format", "start", "show_on_first_page"),
+            ("enabled", "location", "format", "start", "show_on_first_page", "scope", "start_section"),
             "page_number.configure",
         ),
         (
