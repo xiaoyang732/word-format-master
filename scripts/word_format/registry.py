@@ -655,6 +655,14 @@ def header_variant(validator):
 
 for action, prop, targets, handler, validator, parameters in (
     (
+        "header.border_bottom.set",
+        "border_bottom",
+        {"section"},
+        headers.set_border_bottom,
+        header_variant(scalar("boolean")),
+        {"value": "boolean"},
+    ),
+    (
         "header.content.set",
         "content",
         {"section"},

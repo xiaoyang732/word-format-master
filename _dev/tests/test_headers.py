@@ -24,6 +24,8 @@ from analyze_docx import analyze_docx, _paragraph_text_outside_fields
 from verify_output import verify_structure
 from parse_requirements import parse_requirements
 from word_format.spec import legacy_paths
+from word_format.profiles import template_profile
+from word_format.properties import element, read_font
 
 
 class HeaderTests(unittest.TestCase):
@@ -61,6 +63,67 @@ class HeaderTests(unittest.TestCase):
     def text(self, header):
         root = effective_root(header)
         return "".join(n.text or "" for n in root.iter(qn("w:t"))) if root is not None else ""
+
+    def test_border_cancels_style_inheritance_and_isolates_variant_and_section(self):
+        doc = Document(self.source)
+        style = doc.styles["Header"]
+        style.font.size = Pt(9)
+        bottom = element(element(style.element.get_or_add_pPr(), "pBdr"), "bottom")
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "6")
+        p = doc.sections[0].header.paragraphs[0]
+        p.style = style
+        doc.save(self.source)
+        result, _ = self.execute([
+            self.op("header.content.set", {"mode": "text", "text": "新页眉"}),
+            self.op("header.border_bottom.set", {"value": False}),
+            self.op("header.content.set", {"mode": "text", "text": "首页页眉", "variant": "first"}),
+            self.op("header.border_bottom.set", {"value": True, "variant": "first"}),
+        ])
+        p = result.sections[1].header.paragraphs[0]
+        self.assertEqual(p.style.name, "Header")
+        self.assertEqual(read_font(result, p._p, p.runs[0]._r, "font_size_pt"), 9)
+        self.assertEqual(p._p.find(".//" + qn("w:bottom")).get(qn("w:val")), "none")
+        cap = REGISTRY["header.border_bottom.set"]
+        index = DocumentIndex(result)
+        self.assertEqual(cap.reader(index, index.ref("s1"), cap)["default"], [False])
+        self.assertEqual(cap.reader(index, index.ref("s0"), cap)["default"], [True])
+        self.assertEqual(cap.reader(index, index.ref("s2"), cap)["default"], [True])
+        border = result.sections[1].first_page_header._element.find(".//" + qn("w:bottom"))
+        self.assertEqual({k.split("}")[-1]: v for k, v in border.attrib.items()},
+                         {"val": "single", "color": "auto", "sz": "6", "space": "1"})
+
+    def test_profile_requires_explicit_header_and_records_effective_style_evidence(self):
+        doc = Document(self.source)
+        doc.styles["Header"].font.size = Pt(9)
+        doc.styles["Header"].font.name = "Times New Roman"
+        bottom = element(element(doc.styles["Header"].element.get_or_add_pPr(), "pBdr"), "bottom")
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "6")
+        doc.sections[0].header.paragraphs[0].style = "Header"
+        doc.save(self.source)
+        profile = template_profile(self.source)
+        self.assertFalse(any(r["action"] in {"header.content.set", "header.alignment.set", "page_number.configure"}
+                             for r in profile["rules"]))
+        self.assertTrue(any("Map header/footer" in i["reason"] for i in profile["issues"]))
+        parts = analyze_docx(self.source)["document"]["headers_footers"]
+        paragraph = next(p for part in parts if part["kind"] == "header" for p in part["paragraphs"]
+                         if p["text"] == "original")
+        self.assertEqual(paragraph["font_size_pt"], [9.0])
+        self.assertEqual(paragraph["font_latin"], ["Times New Roman"])
+        self.assertEqual(paragraph["bottom_border"]["sz"], "6")
+
+    def test_border_wrong_writer_is_rejected(self):
+        operation = self.op("header.border_bottom.set", {"value": True})
+        plan = build_plan(self.source, self.output, {"operations": [operation]})
+        cap = REGISTRY[operation["action"]]
+        def bad(index, ref, params):
+            cap.handler(index, ref, params)
+            element(element(index.document.sections[1].header.paragraphs[0]._p, "pPr"), "jc").set(qn("w:val"), "right")
+        with patch.dict(REGISTRY, {cap.action: type(cap)(**{**cap.__dict__, "handler": bad})}):
+            with self.assertRaises(FormatError):
+                apply_plan(plan)
+        self.assertFalse(self.output.exists())
 
     def test_section_content_isolates_following_inherited_header(self):
         doc, _ = self.execute([self.op("header.content.set", {"mode": "text", "text": "Chapter One"})])
