@@ -152,6 +152,10 @@ python scripts/format_cli.py verify --plan plan.json --report report.json --outp
 `profile_context.coverage.target_properties` 列出每个目标实际检查的属性；
 一个段落有任意规则命中不代表全部格式已经覆盖。
 
+`mapping.preserve` 中的段落会在规则展开前排除，既包括非空段落，也包括显式登记的空行。克隆模板声明后，应从 inspect 结果登记整个声明范围（标题、正文、签名、日期和空行），并把不再需要重排的声明规则映射为 `{"preserve":"声明已按模板克隆"}`。不要只登记可见文字而让空行继续命中正文规则。此保护针对段落/字符规则；页码、节布局及共享样式等结构变更须独立明确配置并验收。
+
+页眉页脚的 `headers_footers[].paragraphs` 记录有效字号、中文/西文字体、对齐及底边框属性，保留不同部件与空页型。profile 不自动选取多数页眉文字或硬编码页码策略；须通过 resolutions 为每节和 default/first/even 页型显式配置，包括空白页眉与前置无页码要求。
+
 段前/段后若使用行单位，以 `{"value": {"value": 0.5, "unit": "lines"}}`
 写入对应 spacing 操作；保留 `beforeLines/afterLines`，不按固定字号换算成磅。
 点单位仍用数值 `value`。模板中超过可用页宽的首行缩进会产生问题项，

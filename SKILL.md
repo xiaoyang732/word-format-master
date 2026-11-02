@@ -61,6 +61,8 @@ inspect 和页面渲染不能代替逐项格式验收。目录须核对实际条
 
 详见 [references/format-profile.md](references/format-profile.md) 与 [references/direct-format-api.md](references/direct-format-api.md)。
 
+页眉文字、字号、底边框和 default/first/even 页型须按每节证据显式映射，不用众数复制学校文字或推断页码规则。页眉横线用 `header.border_bottom.set`。正文单独起算页码时用 `page_number.configure` 的 `scope: body` 或明确的一基 `start_section`，核对前置多页摘要各页型无页码、正文起始页码与后续连续编号；目录是否计入由实际节边界和明确要求决定。克隆声明后，将标题、正文、签名及空行的全部段落登记到 `mapping.preserve`，避免再次套正文格式。
+
 ```powershell
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" capabilities --output capabilities.json
 & $PYTHON_BIN "$SKILL_DIR/scripts/format_cli.py" profile requirements REQUIREMENTS.docx --output profile.json

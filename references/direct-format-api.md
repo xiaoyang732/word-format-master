@@ -103,6 +103,8 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 
 整篇旧规范可用 `{"spec": {...}}` 替代 `operations`；两者不能同时提供。旧规范会展开成同一注册表的操作。`apply_spec.py INPUT.docx OUTPUT.docx --spec spec.json` 也委托同一核心，无需额外会话。要求文档和样例使用 [Format Profile](format-profile.md) 提取证据，再通过 `plan --profile` 编译。
 
+页眉横线使用 `header.border_bottom.set`，节 target 与 `value: boolean`，可选 `variant: default|first|even`；关闭会显式取消样式继承。页码使用 `page_number.configure` 的 `scope: all|body`（缺省 all）和可选一基 `start_section`；body 模式隔离前置各页型页码，在起始节写入 decimal/start，后续节连续计页。前置罗马页码与正文阿拉伯页码的独立双制式配置暂不支持，详见 [页眉与页码契约](header-requirements.md)。
+
 ## 保护与验收
 
 计划包含源 SHA-256、已解析对象指纹、输出路径和计划摘要。它用于检测过期和误改，并非签名或身份认证。
