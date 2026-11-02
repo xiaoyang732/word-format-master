@@ -765,6 +765,13 @@ def profile_plan(
                 "target_sections": len(document.sections),
             }
         )
+    preserve = mapping.get("preserve", {})
+    if not isinstance(preserve, dict):
+        raise FormatError("mapping.preserve must map target paragraph IDs to reasons")
+    for oid, reason in preserve.items():
+        if index.records.get(oid, {}).get("kind") != "paragraph":
+            raise FormatError("Unknown preserved target paragraph ID")
+        text_value(reason, "preserved paragraph reason")
     operations, matched = [], []
     preserved_rules = []
     rule_mapping = mapping.get("rules", {})
@@ -812,6 +819,12 @@ def profile_plan(
                 }
             )
             continue
+        if target["type"] in {"paragraph", "text_range"}:
+            refs = [ref for ref in refs if ref["id"] not in preserve]
+            if not refs:
+                preserved_rules.append({"rule": rule, "reason": "All matched paragraphs are explicitly preserved"})
+                continue
+            target = {**target, "ids": list(dict.fromkeys(ref["id"] for ref in refs))}
         operations.append(
             {"id": rule["id"], "action": cap.action, "target": target, "params": params}
         )
@@ -822,13 +835,6 @@ def profile_plan(
                 "evidence": rule.get("evidence", []),
             }
         )
-    preserve = mapping.get("preserve", {})
-    if not isinstance(preserve, dict):
-        raise FormatError("mapping.preserve must map target paragraph IDs to reasons")
-    for oid, reason in preserve.items():
-        if index.records.get(oid, {}).get("kind") != "paragraph":
-            raise FormatError("Unknown preserved target paragraph ID")
-        text_value(reason, "preserved paragraph reason")
     if profile["source"]["kind"] == "template":
         covered = {oid for m in matched for oid in m["target_ids"]}
         uncovered = [

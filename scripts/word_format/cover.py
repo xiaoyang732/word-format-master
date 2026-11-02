@@ -734,7 +734,12 @@ def _materialize_cover_fonts(src_doc, nodes) -> None:
         paragraphs.extend(p for p in node.iter(qn("w:p")) if p is not node)
     for p in paragraphs:
         ppr = element(p, "pPr")
+        existing_spacing = ppr.find(qn("w:spacing")) is not None
         for prop in ("alignment", "space_before_pt", "space_after_pt", "line_spacing"):
+            if (prop == "alignment" and ppr.find(qn("w:jc")) is not None) or (
+                prop != "alignment" and existing_spacing
+            ):
+                continue
             val = read_paragraph(src_doc, p, prop)
             if val is not None and not (isinstance(val, dict) and val.get("kind") == "auto"):
                 write_paragraph(ppr, prop, val)
@@ -773,7 +778,7 @@ def _is_empty_paragraph(p) -> bool:
 
 
 def _has_declaration_module(doc) -> bool:
-    for p in doc.paragraphs[:60]:
+    for p in doc.paragraphs:
         text = p.text.strip()
         if not text:
             continue
@@ -838,7 +843,7 @@ def _extract_cover_nodes(
     has_cover_content = False
     saw_page_break = False
     src_has_decl = _has_declaration_module(src_doc) if include_declaration else False
-    in_declaration = False
+    seen_declaration = False
 
     for child in src_doc.element.body:
         if child.tag == qn("w:sectPr"):
@@ -857,6 +862,10 @@ def _extract_cover_nodes(
         if child.tag == qn("w:tbl"):
             has_cover_content = True
         elif child.tag == qn("w:p"):
+            style = paragraph_style(src_doc, child)
+            if classify_module(text, style.name if style is not None else "",
+                               outline_level(src_doc, child)) == "declaration":
+                seen_declaration = True
             if text or any(
                 n.tag in {qn("w:drawing"), qn("w:pict"), qn("w:object")} for n in child.iter()
             ):
@@ -864,15 +873,9 @@ def _extract_cover_nodes(
             if _has_top_level_page_break(child):
                 saw_page_break = True
             if child.find("./" + qn("w:pPr") + "/" + qn("w:sectPr")) is not None:
-                if not src_has_decl:
+                if not src_has_decl or seen_declaration:
                     found_sect = True
                     break
-                else:
-                    if in_declaration:
-                        found_sect = True
-                        break
-                    else:
-                        in_declaration = True
 
     if not cloned:
         raise FormatError("Cover template contains no cover elements")
@@ -925,7 +928,7 @@ def _remove_existing_cover_from_target(
     has_cover_content = False
     saw_page_break = False
     target_has_decl = _has_declaration_module(target_doc) if include_declaration else False
-    in_declaration = False
+    seen_declaration = False
     cut_end = 0
     for idx, child in enumerate(children):
         if child.tag == qn("w:p") and _is_cover_boundary_paragraph(
@@ -941,6 +944,10 @@ def _remove_existing_cover_from_target(
             has_cover_content = True
         elif child.tag == qn("w:p"):
             text = _paragraph_top_text(child).strip()
+            style = paragraph_style(target_doc, child)
+            if classify_module(text, style.name if style is not None else "",
+                               outline_level(target_doc, child)) == "declaration":
+                seen_declaration = True
             if text or any(
                 n.tag in {qn("w:drawing"), qn("w:pict"), qn("w:object")} for n in child.iter()
             ):
@@ -951,15 +958,9 @@ def _remove_existing_cover_from_target(
                 child.find("./" + qn("w:pPr") + "/" + qn("w:sectPr")) is not None
                 and idx + 1 < len(children)
             ):
-                if not target_has_decl:
+                if not target_has_decl or seen_declaration:
                     cut_end = idx + 1
                     break
-                else:
-                    if in_declaration:
-                        cut_end = idx + 1
-                        break
-                    else:
-                        in_declaration = True
     if cut_end <= 0:
         return False
     for node in children[:cut_end]:
