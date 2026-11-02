@@ -508,6 +508,28 @@ def field_inventory(roots: list[ET.Element]) -> dict[str, Any]:
 
 
 def summarize_header_footer_parts(package: zipfile.ZipFile, names: set[str]) -> list[dict[str, Any]]:
+    import io
+
+    from docx import Document
+    from docx.oxml import parse_xml
+    from docx.oxml.ns import qn
+
+    from word_format.headers import bottom_border
+    from word_format.properties import read_font, read_paragraph
+
+    # Reuse the central effective-value readers rather than another style resolver.
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as normalized:
+        for part_name in package.namelist():
+            blob = package.read(part_name)
+            if part_name.endswith((".xml", ".rels")):
+                for old, new in STRICT_NAMESPACE_MAP.items():
+                    blob = blob.replace(old.encode(), new.encode())
+            if part_name == "[Content_Types].xml":
+                blob = blob.replace(b"application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
+                                    b"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml")
+            normalized.writestr(part_name, blob)
+    document = Document(buffer)
     result = []
     for name in sorted(names):
         if not name.endswith(".xml") or not name.startswith(CONTENT_PART_PREFIXES):
@@ -517,11 +539,29 @@ def summarize_header_footer_parts(package: zipfile.ZipFile, names: set[str]) -> 
             continue
         text = "".join(node.text or "" for node in root.findall(".//w:t", NS)).strip()
         fields = field_inventory([root])
+        paragraphs = []
+        for p in parse_xml(ET.tostring(root)).iter(qn("w:p")):
+            runs = list(p.iter(qn("w:r"))) or [None]
+            values = {}
+            for prop in ("font_size_pt", "font_east_asia", "font_latin"):
+                values[prop] = []
+                for run in runs:
+                    value = read_font(document, p, run, prop)
+                    if value not in values[prop]:
+                        values[prop].append(value)
+            paragraphs.append({
+                "text": "".join(n.text or "" for n in p.iter(qn("w:t"))),
+                "style_id": w_attr(p.find("./w:pPr/w:pStyle", NS), "val"),
+                **values,
+                "alignment": read_paragraph(document, p, "alignment"),
+                "bottom_border": bottom_border(document, p),
+            })
         result.append({
             "part": name,
             "kind": "header" if name.startswith("word/header") else "footer",
             "text": text,
             "field_types": fields["types"],
+            "paragraphs": paragraphs,
         })
     return result
 
@@ -1251,7 +1291,13 @@ def fuse_dual_track_spec(
 
 def analyze_docx(path: str | Path, semantic_spec: dict[str, Any] | None = None) -> dict[str, Any]:
     source = Path(path).resolve()
-    package, inventory = package_inventory(source)
+    if source.suffix.lower() in {".doc", ".dot", ".wps"}:
+        from word_format.doc_loader import ensure_readable_docx_path
+
+        package_path = ensure_readable_docx_path(source)
+    else:
+        package_path = source
+    package, inventory = package_inventory(package_path)
     try:
         conformance = detect_conformance(package)
         styles_root = read_xml(package, "word/styles.xml")

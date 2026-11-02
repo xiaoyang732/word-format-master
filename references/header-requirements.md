@@ -36,6 +36,7 @@
 | 斜体，`value: boolean` | `header.font.italic.set` | `set_italic` | 每个 run 的有效斜体 |
 | 颜色，`value: RGB hex / auto` | `header.font.color.set` | `set_color` | 每个 run 的有效颜色 |
 | 左/中/右对齐 | `header.alignment.set` | `set_alignment` | 每个页眉段落的有效对齐 |
+| 底边框横线，`value: boolean` | `header.border_bottom.set` | `set_border_bottom` | 直接格式及样式链中最近的底边框；`none`/`nil` 为关闭 |
 | 段前，`value: 0–500, unit: pt` | `header.spacing_before.set` | `set_spacing_before` | 指定磅值；段后不变 |
 | 段后，`value: 0–500, unit: pt` | `header.spacing_after.set` | `set_spacing_after` | 指定磅值；段前不变 |
 | 行距，`kind: multiple / exact / at_least` | `header.line_spacing.set` | `set_line_spacing` | 倍数 0.1–20；固定/最小值 1–500 pt |
@@ -107,6 +108,8 @@
 
 ## 页码与验收边界
 
-文章建议前置部分罗马页码、正文阿拉伯页码、后置部分续编号。该规则是页码要求，与页眉独立；本次页眉操作不修改编号制式、起始页码或页脚内容。当前页码配置仍按已有文档级契约工作，不声称已支持逐节罗马/阿拉伯自动转换。
+页码与页眉独立。`page_number.configure` 的 `scope` 默认 `all`；`scope: body` 从可识别的正文节开始，也可用一基 `start_section` 明确指定开始节。前置节的所选位置（默认页脚）的普通、首页、偶数页独立页码段落会被清理，其他文字与关系保留。实际起始节写入 `decimal` 与 `start`，后续节连续编号；旧 `all` 模式带 `show_on_body_first_page` 时也在正文节重新起算。正文未另行分节时须先明确插入节边界。暂不支持前置罗马/正文阿拉伯的独立双制式配置。
+
+`header.border_bottom.set` 开启时写入单实线、0.75pt、自动颜色、1pt 间距；关闭时写入 `none` 以取消样式继承。保留其他边框与独立页码段落。模板分析在 `headers_footers[].paragraphs` 中记录有效字体、字号、对齐和 `bottom_border` 原始属性；profile 仍要求显式映射每节每页型（包括空页眉），不会自动复制学校文字或推断页码策略。
 
 测试位于 `tests/test_headers.py`：节间隔离、奇偶/首页、字段、局部属性保留、超链接关系、规范经同一核心展开、显式分节、错误参数和越界写入。结构通过不能替代真实 Word/LibreOffice 全页视觉验收。

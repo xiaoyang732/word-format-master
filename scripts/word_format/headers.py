@@ -12,6 +12,7 @@ from .namespaces import qn
 from .properties import (
     FONT_TAGS,
     element,
+    ppr_sources,
     read_font,
     read_paragraph,
     write_font,
@@ -232,6 +233,28 @@ def set_alignment(index, ref, params):
     set_format(index, ref, params, "alignment")
 
 
+def bottom_border(document, paragraph):
+    """Read the nearest bottom edge, including an explicit inherited cancellation."""
+    for pr in ppr_sources(document, paragraph):
+        border = pr.find("./" + qn("w:pBdr") + "/" + qn("w:bottom")) if pr is not None else None
+        if border is not None:
+            return {k.split("}")[-1]: v for k, v in border.attrib.items()}
+    return None
+
+
+def set_border_bottom(index, ref, params):
+    container = editable_header(index, ref, params["variant"])
+    protected = set(page_number_paragraphs(container._element))
+    for p in container._element.iter(qn("w:p")):
+        if p in protected:
+            continue
+        border = element(element(element(p, "pPr"), "pBdr"), "bottom")
+        border.attrib.clear()
+        for name, value in ({"val": "single", "color": "auto", "sz": "6", "space": "1"}
+                            if params["value"] else {"val": "none"}).items():
+            border.set(qn("w:" + name), value)
+
+
 def set_bold(index, ref, params):
     set_format(index, ref, params, "bold")
 
@@ -345,6 +368,10 @@ def read_header(index, ref, cap):
                 for p in root.iter(qn("w:p")):
                     if p in page_paragraphs:
                         continue
+                    if name == "border_bottom":
+                        border = bottom_border(index.document, p)
+                        variants[variant].append(bool(border and border.get("val") not in {"none", "nil"}))
+                        continue
                     values = (
                         [read_font(index.document, p, r, name) for r in p.iter(qn("w:r"))]
                         if name in FONT_TAGS
@@ -436,6 +463,14 @@ def header_projection(index, cap, params, refs):
                     ]
                     for pr in properties:
                         from .properties import ATTRIBUTES, FONT_TAGS, PARAGRAPH_TAGS
+
+                        if name == "border_bottom":
+                            borders = pr.find(qn("w:pBdr"))
+                            if borders is not None:
+                                for border in borders.findall(qn("w:bottom")):
+                                    borders.remove(border)
+                                if not len(borders) and not borders.attrib:
+                                    pr.remove(borders)
 
                         for tag in FONT_TAGS.get(name, PARAGRAPH_TAGS.get(name, ())):
                             node = pr.find(qn("w:" + tag))

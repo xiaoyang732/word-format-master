@@ -27,10 +27,13 @@ def extract_requirements(path):
     if suffix in {".txt", ".md"}:
         for i, line in enumerate(source.read_text(encoding="utf-8-sig").splitlines(), 1):
             add(f"line:{i}", line)
-    elif suffix in {".docx", ".dotx"}:
+    elif suffix in {".docx", ".dotx", ".doc", ".dot", ".wps"}:
         from analyze_docx import package_inventory, read_xml
 
-        package, _ = package_inventory(source)
+        from .doc_loader import ensure_readable_docx_path
+
+        readable = ensure_readable_docx_path(source)
+        package, _ = package_inventory(readable)
         try:
             names = ["word/document.xml"] + sorted(
                 n
@@ -150,7 +153,7 @@ def extract_requirements(path):
             pdf.close()
     else:
         raise FormatError(
-            "Requirements support UTF-8 TXT/MD, DOCX/DOTX and text PDF", "unsupported"
+            "Requirements support UTF-8 TXT/MD, DOCX/DOTX/DOC/DOT/WPS and text PDF", "unsupported"
         )
     if not blocks and not issues:
         issues.append({"anchor": "document", "reason": "No readable requirements found"})

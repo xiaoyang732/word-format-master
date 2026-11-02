@@ -7,6 +7,7 @@ import copy
 from functools import lru_cache
 from xml.etree import ElementTree
 
+from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import OxmlElement
 
 from .contracts import FormatError
@@ -21,6 +22,8 @@ FONT_TAGS = {
     "color": ("color",),
 }
 PARAGRAPH_TAGS = {
+    "outline_level": ("outlineLvl",),
+    "numbering_suppressed": ("numPr",),
     "alignment": ("jc",),
     "space_before_pt": ("spacing",),
     "space_after_pt": ("spacing",),
@@ -95,12 +98,19 @@ def style_map(document):
     return cached[2]
 
 
-def paragraph_style_name(document, paragraph):
+def paragraph_style(document, paragraph):
+    """Resolve an explicit paragraph style or the package's actual default."""
     pr = paragraph.find(qn("w:pPr"))
     node = pr.find(qn("w:pStyle")) if pr is not None else None
-    sid = node.get(qn("w:val")) if node is not None else "Normal"
-    style = style_map(document).get(sid)
-    return style.name if style is not None else sid
+    style = style_map(document).get(node.get(qn("w:val"))) if node is not None else None
+    if style is not None and style.type == WD_STYLE_TYPE.PARAGRAPH:
+        return style
+    return document.styles.default(WD_STYLE_TYPE.PARAGRAPH)
+
+
+def paragraph_style_name(document, paragraph):
+    style = paragraph_style(document, paragraph)
+    return style.name if style is not None else ""
 
 
 @lru_cache(maxsize=16)
@@ -109,12 +119,16 @@ def _theme_root(blob):
 
 
 @lru_cache(maxsize=16)
-def _theme_fonts(blob):
+def _theme_fonts(blob, settings=None):
     from analyze_docx import parse_theme_fonts
 
     class Parts:
         def read(self, path):
-            return blob
+            if path == "word/theme/theme1.xml":
+                return blob
+            if path == "word/settings.xml" and settings is not None:
+                return settings
+            raise KeyError(path)
 
     return parse_theme_fonts(Parts())
 
@@ -126,6 +140,13 @@ def theme_blob(document):
         theme = next(p for p in part.package.parts if str(p.partname) == "/word/theme/theme1.xml")
         part._wfm_theme_part = theme
     return theme.blob
+
+
+def settings_blob(document):
+    try:
+        return document.settings.element.xml.encode("utf-8")
+    except AttributeError:
+        return None
 
 
 def rpr_sources(document, paragraph, run=None):
@@ -142,14 +163,11 @@ def rpr_sources(document, paragraph, run=None):
                     seen.add(style.style_id)
                     yield style.element.find(qn("w:rPr"))
                     style = style.base_style
-    style_id = None
     ppr = paragraph.find(qn("w:pPr"))
     if ppr is not None:
         if run is None:
             yield ppr.find(qn("w:rPr"))
-        pstyle = ppr.find(qn("w:pStyle"))
-        style_id = pstyle.get(qn("w:val")) if pstyle is not None else None
-    style = style_map(document).get(style_id or "Normal")
+    style = paragraph_style(document, paragraph)
     seen = set()
     while style is not None and style.style_id not in seen:
         seen.add(style.style_id)
@@ -160,20 +178,49 @@ def rpr_sources(document, paragraph, run=None):
         yield defaults.find("./" + qn("w:rPrDefault") + "/" + qn("w:rPr"))
 
 
-def ppr_sources(document, paragraph):
+def _iter_ppr_sources_with_origin(document, paragraph):
     pr = paragraph.find(qn("w:pPr"))
-    yield pr
-    pstyle = pr.find(qn("w:pStyle")) if pr is not None else None
-    style_id = pstyle.get(qn("w:val")) if pstyle is not None else "Normal"
-    style = style_map(document).get(style_id or "Normal")
+    yield "direct", pr
+    style_sources = []
+    style = paragraph_style(document, paragraph)
     seen = set()
     while style is not None and style.style_id not in seen:
         seen.add(style.style_id)
-        yield style.element.find(qn("w:pPr"))
+        style_sources.append(style.element.find(qn("w:pPr")))
         style = style.base_style
+    # numPr children inherit independently (a paragraph may specify only ilvl).
+    num_sources = [p.find(qn("w:numPr")) for p in [pr, *style_sources] if p is not None]
+    num_id = _attr(num_sources, "numId")
+    ilvl = _attr(num_sources, "ilvl") or "0"
+    if num_id not in (None, "0"):
+        try:
+            root = document.part.numbering_part.element
+            num = next((n for n in root.findall(qn("w:num")) if n.get(qn("w:numId")) == num_id), None)
+            if num is not None:
+                override = next((n.find(qn("w:lvl")) for n in num.findall(qn("w:lvlOverride"))
+                                 if n.get(qn("w:ilvl")) == ilvl and n.find(qn("w:lvl")) is not None), None)
+                if override is not None:
+                    yield "numbering", override.find(qn("w:pPr"))
+                else:
+                    abstract_id = num.find(qn("w:abstractNumId"))
+                    abstract_id = abstract_id.get(qn("w:val")) if abstract_id is not None else None
+                    for abstract in root.findall(qn("w:abstractNum")):
+                        if abstract.get(qn("w:abstractNumId")) == abstract_id:
+                            for level in abstract.findall(qn("w:lvl")):
+                                if level.get(qn("w:ilvl")) == ilvl:
+                                    yield "numbering", level.find(qn("w:pPr"))
+        except (KeyError, AttributeError, NotImplementedError):
+            pass
+    for style_pr in style_sources:
+        yield "style", style_pr
     defaults = document.styles.element.find(qn("w:docDefaults"))
     if defaults is not None:
-        yield defaults.find("./" + qn("w:pPrDefault") + "/" + qn("w:pPr"))
+        yield "default", defaults.find("./" + qn("w:pPrDefault") + "/" + qn("w:pPr"))
+
+
+def ppr_sources(document, paragraph):
+    for _, pr in _iter_ppr_sources_with_origin(document, paragraph):
+        yield pr
 
 
 def _attr(sources, tag, attr="val"):
@@ -239,6 +286,15 @@ def resolved_color(document, node):
         return "theme:" + theme
 
 
+def _toggle_value(sources, tag):
+    state = False
+    for pr in reversed(sources):
+        node = pr.find(qn("w:" + tag)) if pr is not None else None
+        if node is not None and node.get(qn("w:val"), "1") not in {"0", "false", "off"}:
+            state = not state
+    return state
+
+
 def read_font(document, paragraph, run, name):
     sources = list(rpr_sources(document, paragraph, run))
     if name in {"font_east_asia", "font_latin"}:
@@ -252,7 +308,9 @@ def read_font(document, paragraph, run, name):
                 theme = node.get(qn("w:" + attr + "Theme"))
                 if theme:
                     try:
-                        return _theme_fonts(theme_blob(document)).get(theme, "theme:" + theme)
+                        return _theme_fonts(theme_blob(document), settings_blob(document)).get(
+                            theme, "theme:" + theme
+                        )
                     except (StopIteration, KeyError):
                         return "theme:" + theme
                 value = node.get(qn("w:" + attr))
@@ -267,21 +325,22 @@ def read_font(document, paragraph, run, name):
             ascii_font if ascii_font == hansi_font else {"ascii": ascii_font, "hAnsi": hansi_font}
         )
     if name == "font_size_pt":
+        from analyze_docx import half_points
+
         raw = _attr(sources, "sz")
-        return float(raw) / 2 if raw is not None else None
+        return half_points(raw)
     if name in {"bold", "italic"}:
         # OOXML style b/i are toggle properties; direct rPr values are absolute.
         tag = "b" if name == "bold" else "i"
-        direct = run.find(qn("w:rPr")) if run is not None else None
+        direct = (
+            run.find(qn("w:rPr"))
+            if run is not None
+            else paragraph.find("./" + qn("w:pPr") + "/" + qn("w:rPr"))
+        )
         node = direct.find(qn("w:" + tag)) if direct is not None else None
         if node is not None:
             return node.get(qn("w:val"), "1") not in {"0", "false", "off"}
-        state = False
-        for pr in reversed(sources):
-            node = pr.find(qn("w:" + tag)) if pr is not None else None
-            if node is not None and node.get(qn("w:val"), "1") not in {"0", "false", "off"}:
-                state = not state
-        return state
+        return _toggle_value(sources, tag)
     for pr in sources:
         node = pr.find(qn("w:color")) if pr is not None else None
         if node is not None:
@@ -309,8 +368,31 @@ def write_font(pr, name, value):
             node.attrib.pop(qn("w:" + attr), None)
 
 
+def write_style_font(document, style, name, value):
+    """Set an effective style value; b/i in styles are relative toggles."""
+    pr = element(style.element, "rPr")
+    if name not in {"bold", "italic"}:
+        write_font(pr, name, value)
+        return
+    paragraph = OxmlElement("w:p")
+    element(element(paragraph, "pPr"), "pStyle").set(qn("w:val"), style.style_id)
+    inherited = [source for source in rpr_sources(document, paragraph) if source is not pr]
+    for tag in ("b", "bCs") if name == "bold" else ("i", "iCs"):
+        toggle = value != _toggle_value(inherited, tag)
+        element(pr, tag).set(qn("w:val"), "1" if toggle else "0")
+
+
 def read_paragraph(document, paragraph, name):
-    sources = list(ppr_sources(document, paragraph))
+    origin_sources = list(_iter_ppr_sources_with_origin(document, paragraph))
+    sources = [pr for _, pr in origin_sources]
+    if name == "outline_level":
+        return int(_attr(sources, "outlineLvl") or 9)
+    if name == "numbering_suppressed":
+        for pr in sources:
+            node = pr.find("./" + qn("w:numPr") + "/" + qn("w:numId")) if pr is not None else None
+            if node is not None:
+                return node.get(qn("w:val")) == "0"
+        return False
     if name == "alignment":
         value = _attr(sources, "jc") or "left"
         return "justify" if value == "both" else value
@@ -348,9 +430,22 @@ def read_paragraph(document, paragraph, name):
             "right_indent": "right",
             "hanging_indent": "hanging",
         }[name]
-        for pr in sources:
+        numbering_hanging = any(
+            origin == "numbering" and pr is not None
+            and pr.find(qn("w:ind")) is not None
+            and any(float(pr.find(qn("w:ind")).get(qn("w:" + attr), "0")) > 0
+                    for attr in ("hanging", "hangingChars"))
+            for origin, pr in origin_sources
+        )
+        for origin, pr in origin_sources:
             ind = pr.find(qn("w:ind")) if pr is not None else None
             if ind is None:
+                continue
+            if (origin == "direct" and base in {"firstLine", "hanging"}
+                    and ind.get(qn("w:firstLineChars")) == "0"
+                    and all(ind.get(qn("w:" + attr)) is None
+                            for attr in ("firstLine", "hanging", "hangingChars"))
+                    and numbering_hanging):
                 continue
             # A direct first-line/hanging declaration replaces the mutually
             # exclusive property inherited from a style. Hanging wins when a
@@ -393,14 +488,29 @@ def read_paragraph(document, paragraph, name):
 
 
 def write_paragraph(pr, name, value):
-    if name == "alignment":
+    if name == "outline_level":
+        element(pr, "outlineLvl").set(qn("w:val"), str(int(value)))
+    elif name == "numbering_suppressed":
+        node = pr.find(qn("w:numPr"))
+        if value:
+            node = element(pr, "numPr")
+            for child in list(node):
+                node.remove(child)
+            element(node, "numId").set(qn("w:val"), "0")
+        elif node is not None:
+            pr.remove(node)
+    elif name == "alignment":
         element(pr, "jc").set(qn("w:val"), "both" if value == "justify" else value)
     elif name in {"space_before_pt", "space_after_pt"}:
         attr = "before" if name == "space_before_pt" else "after"
         spacing = element(pr, "spacing")
         for key in (attr + "Lines", attr + "Autospacing"):
             spacing.attrib.pop(qn("w:" + key), None)
-        spacing.set(qn("w:" + attr), str(int(round(value * 20))))
+        if isinstance(value, dict):
+            spacing.attrib.pop(qn("w:" + attr), None)
+            spacing.set(qn("w:" + attr + "Lines"), str(int(round(value["value"] * 100))))
+        else:
+            spacing.set(qn("w:" + attr), str(int(round(value * 20))))
         # Explicitly disable automatic spacing inherited from a style.
         spacing.set(qn("w:" + attr + "Autospacing"), "0")
     elif name == "line_spacing":

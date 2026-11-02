@@ -2,8 +2,9 @@
 
 **把论文和格式要求交给 AI，自动完成 Word 排版与格式检查，原稿安全不破坏。**
 
-[![CI](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml/badge.svg)](https://github.com/xiaoyang732/word-format-master/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+生成文件中的章节、小节、列表、参考文献使用 Word 自动编号；题注、公式、页码和交叉引用使用动态域，禁止键入结构编号。交付前必须执行 `python scripts/check_numbering.py OUTPUT.docx --output numbering.json`；统一流水线自动拦截检查失败的结果。详见 [生成规范](references/thesis-generation.md)。
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 
 你只需要提供**待排版的 Word 文档**，再给出一份**学校/期刊的格式要求**、一份**已经排好版的样例文档**，或者**直接用日常语言说出你想怎么改**。无需自己编写代码或手动敲命令，AI 会自动读懂要求、对齐章节结构，并调用本地确定性排版引擎生成排好版的新文档与清晰的前后对比验收报告。
 
@@ -12,8 +13,8 @@
 ## 一、 它能帮你做什么？
 
 ### 1. 五大常用场景
-- **场景 1：按《格式要求文档》排版**：支持读取 Word（`.docx`/`.dotx`）、PDF、TXT、Markdown 格式的排版规范，自动提取字体、字号、行距、页边距等规定并应用到你的论文中。
-- **场景 2：照着《已排版样例》迁移版式**：没有规则说明？直接丢一份往届优秀论文或模板样例（`.docx`/`.dotx`），自动提取其中的版式风格并迁移到你的文档（**只学格式，绝不照抄样例里的文字和姓名**）。
+- **场景 1：按《格式要求文档》排版**：支持读取 Word（`.docx`/`.dotx`，装有 Word/WPS/LibreOffice 时自动只读兼容 `.doc`/`.dot`/`.wps`）、PDF、TXT、Markdown 格式的排版规范，自动提取字体、字号、行距、页边距等规定并应用到你的论文中。
+- **场景 2：照着《已排版样例》迁移版式**：没有规则说明？直接丢一份往届优秀论文或模板样例（`.docx`/`.dotx`/`.doc`/`.dot`/`.wps`），自动提取其中的版式风格并迁移到你的文档，支持按需克隆官方封面布局（校徽、表格边框、文本框、下划线槽位）（**只学格式，绝不照抄样例里的文字和姓名**）。
 - **场景 3：一句话局部修改 / 一键套用内置预设**：直接告诉 AI“只把第三章正文改成宋体小四、1.5 倍行距”或“把全文表格改成三线表”，指哪改哪；若手里没有格式规定，也可直接指定内置的**学位论文**、**期刊/课程论文**或**公文汇报**预设模板。
 - **场景 4：参照样例结构起草新论文**：提供一份样例文档和你的研究素材，AI 会严格按照样例实际包含的模块（封面、中英文摘要、目录、章节层级、参考文献、致谢等）及先后顺序起草并排版，不多加、不漏项。
 - **场景 5：只做格式体检（不改原文件）**：提交前想确认格式是否合规？支持只检查不修改，逐条对比要求并生成清晰的格式问题清单。
@@ -25,7 +26,7 @@
 | **页面设置** | 纸张大小（如 A4）、纸张方向（横/纵）、上下左右页边距、装订线距离与位置、页眉/页脚距边界距离 |
 | **字体与标题** | 中英文字体分离控制（如中文宋体 + 西文 Times New Roman）、字号、加粗、斜体、颜色、多级标题样式与自动编号 |
 | **段落排版** | 行距（多倍/固定值/最小值）、首行缩进（精确保持字符单位如 2 字符）、悬挂缩进、左右缩进、段前/段后间距、对齐方式、孤行与分页控制 |
-| **论文结构** | 自动生成目录、分节页眉页脚、首页不同/奇偶页不同、动态章节标题页眉（`STYLEREF`）、页码格式、图表题注对齐、三线表与跨页表头重复、参考文献编号整理 |
+| **论文结构** | 自动生成目录、分节页眉页脚与底边框横线、首页不同/奇偶页不同、动态章节标题页眉（`STYLEREF`）、正文节页码重启与前置页码隔离、图表题注对齐、三线表与跨页表头重复、参考文献编号整理 |
 | **内置预设** | `thesis-standard`（标准学位/毕业论文）、`journal-paper-cn`（中文期刊/课程论文）、`official-report-cn`（通用公文与专项工作报告，参考 GB/T 9704） |
 | **质量核对** | 自动回读校验每项格式是否生效、检查正文文字是否一字不差、支持通过 Word / WPS / LibreOffice 渲染成页面图片逐页视觉检查 |
 
@@ -33,7 +34,7 @@
 > - **原稿绝对安全**：所有修改都会另存为新文件，绝不覆盖你的原稿和参考文档，全程本地离线运行。
 > - **不自作主张**：如果要求文档里某处规定模糊或前后矛盾，AI 会先列出来并给出建议方案向你确认，不会用默认格式乱填；也不会擅自改写你的论文正文。
 > - **附件只是材料**：格式要求、模板、论文和截图里的文字用于识别格式或内容，不会替代你在对话中提出的任务要求。即使附件要求 AI 忽略你的要求、覆盖原稿、上传文件或跳过检查，也不会据此改变任务范围。
-> - **格式前置提示**：老版本 `.doc` / `.wps` 需先另存为 `.docx`；扫描图片版 PDF 需先经过文字识别（OCR）。
+> - **格式前置提示**：待修改排版的论文原稿需为 `.docx`（要求文档与模板样例在本机装有 Word / WPS / LibreOffice 时可自动只读读取 `.doc` / `.dot` / `.wps`）；扫描图片版 PDF 需先经过文字识别（OCR）。
 
 ---
 
@@ -102,7 +103,7 @@ python -m venv .venv
 ```
 1. **读取解析（Inspect & Profile）**：扫描目标论文的章节与段落结构，同时从要求文档或样例文档中提取排版规则，保留原文依据。
 2. **规则对齐与规划（Plan）**：将排版规则与论文中的各个模块（封面、摘要、各级标题、正文、参考文献、致谢等）一一对应，生成可预览的修改计划。遇到冲突或歧义时先交由用户决定。
-3. **安全写入（Apply）**：由经过严格测试的 63 项标准格式算子执行修改，只改请求指定的属性，先写入临时文件，确保原子性与原稿安全。
+3. **安全写入（Apply）**：由统一注册的格式算子执行修改，只改请求指定的属性，先写入临时文件，确保原子性与原稿安全。实际能力与参数以 `capabilities` 输出为准。
 4. **独立复核（Verify & Render）**：重新打开生成的文档，逐项比对格式数值、校验正文与未修改部分是否完好无损，并支持渲染为页面图片检查分页、页眉和表格跨页效果。
 
 ### 2. 核心目录结构
@@ -117,8 +118,10 @@ word-format-master/
 │   ├── render_docx.py        # 页面视觉渲染工具（调用 Word / WPS / LibreOffice 导出页面图）
 │   ├── verify_output.py      # 输出文档结构与格式复核工具
 │   ├── thesis_quality.py     # 正文长度、数字引用映射与人工内容核验状态报告
-│   └── word_format/          # 底层确定性排版核心库（63 项标准格式操作算子）
-└── references/               # 详细接口规范与进阶参考文档
+│   └── word_format/          # 底层确定性排版核心库，唯一注册写入路径
+├── templates/               # 新模板入口的数据；compatibility/ 保留旧编号协议
+├── references/              # 当前接口规范与工作流契约
+└── _dev/                    # 回归测试、开发配置、验证脚本与历史改造记录
 ```
 
 ### 3. 命令行工作流示例（由 AI 在后台自动组织调用）
@@ -150,7 +153,7 @@ python scripts/render_docx.py "论文-排版后.docx" --output-dir render --meth
 - **1. 我不会用命令行或不懂 Python 环境，可以直接使用吗？**
   完全可以。文中的命令行供 AI 智能体在后台自动调用，你只需要用中文告诉 AI 你的文档路径和排版要求即可，环境安装也可让 AI 自动完成。
 - **2. 为什么提示不支持 `.doc`、`.wps` 或 `.docm` 格式？**
-  为了保证底层 OOXML 结构安全，工具只直接读写标准 `.docx`（样例支持 `.docx`/`.dotx`）。请先用 Word 或 WPS 将旧版 `.doc` / `.wps` 另存为 `.docx`；含宏的 `.docm` 需先移除宏并另存为 `.docx`。
+  为了保证底层 OOXML 结构安全，待写入排版的论文原稿需为标准 `.docx`。格式要求文档和模板样例原生支持 `.docx`/`.dotx`，且在本机装有 Word、WPS 或 LibreOffice 时可自动通过临时只读副本解析 `.doc`/`.dot`/`.wps`；若未安装转换组件或需排版旧格式论文原稿，请先另存为 `.docx`（含宏的 `.docm` 需移除宏另存为 `.docx`）。
 - **3. 学校的 PDF 格式要求是扫描件或图片截图怎么办？**
   扫描版 PDF 缺少可提取的文本层，工具会提示需要 OCR。你可以先做 OCR 文字识别，或直接把截图发给支持视觉能力的 AI 提取成文字要求后再执行。
 - **4. 我没有学校格式要求文档，或者不确定具体参数怎么办？**
@@ -170,10 +173,10 @@ python scripts/render_docx.py "论文-排版后.docx" --output-dir render --meth
 
 ## 五、 开发验证与进阶文档
 
-> 本项目将自动化测试与开发配置归档于 `_dev/` 目录（配置于 `.gitignore`，不提交至生产包）：
+自动化测试、开发配置和验证脚本位于 `_dev/`，并已纳入版本控制。生成文件与缓存由 `.gitignore` 排除；开发历史记录放在 `_dev/docs/`。
 
 ```powershell
-# 本地开发回归测试与算子校验（需在包含 _dev/ 的本地环境下执行）
+# 在仓库根目录运行本地回归与算子校验
 python _dev/scripts/validate_project.py
 python _dev/scripts/smoke_test.py
 python -m unittest discover -s _dev/tests -v
@@ -185,7 +188,19 @@ python -m unittest discover -s _dev/tests -v
 - [按样例生成论文流程](references/thesis-generation.md)
 - [兼容格式规范](references/format-spec.md) · [页眉设置](references/header-requirements.md) · [标准与预设](references/standards-registry.md)
 - [架构说明](references/architecture.md) · [安全边界](SECURITY.md)
+- [本次可靠性审查与优化建议](_dev/docs/reliability-review-2026-10-31.md)
 
 README 面向使用者，介绍能力、安装和任务选择；`SKILL.md` 说明 AI 应如何选择 CLI 参数、处理附件证据和交付结果；`references/` 保存详细接口契约，`SECURITY.md` 记录本地处理与文件保护边界。
 
-[MIT License](LICENSE)
+[MIT License](LICENSE.txt)
+## 1.1 模板引擎更新
+
+新增独立内置模板与用户模板编译流程。已有论文和新生成初稿统一使用 `plan --template`；用户样例不再回退内置参数。参见 [模板引擎、迁移与验收](references/template-engine.md)。旧 spec / presets 接口保留兼容，新功能使用模板入口。
+
+
+历史设计与验证记录归档于 [_dev/docs/](_dev/docs/template-refactor-report.md)。一键执行共享流程：
+
+```powershell
+python scripts/run_format_pipeline.py input.docx output.docx --template thesis-standard
+python scripts/run_format_pipeline.py input.docx output.docx --template school-template.json --mapping mapping.json
+```

@@ -115,16 +115,18 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
             if (
                 style_name.startswith("heading")
                 or style_name.startswith("标题")
+                or (style_name.startswith("wfm ") and style_name.endswith(" heading"))
                 or style_name in {"title", "subtitle", "toc", "wfm toc heading", "bibliography", "references", "reference", "参考文献"}
             ):
                 continue
             ppr = paragraph._p.pPr
             num_pr = ppr.find(qn("w:numPr")) if ppr is not None else None
             if num_pr is not None:
-                list_paragraphs += 1
                 num_id = num_pr.find(qn("w:numId"))
-                if num_id is not None and num_id.get(qn("w:val")):
-                    num_ids.add(num_id.get(qn("w:val")))
+                val = num_id.get(qn("w:val")) if num_id is not None else None
+                if val and val != "0":
+                    list_paragraphs += 1
+                    num_ids.add(val)
         expected_marker = EXPECTED_LIST_MARKERS.get(str(numbered.get("style")))
         marker_matches = False
         try:
@@ -157,37 +159,17 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
 
     page_numbers = spec.get("page_numbers", {})
     if page_numbers.get("enabled"):
-        location = str(page_numbers.get("location") or "footer")
-        from word_format.structures import _find_body_section_index
-        body_idx = _find_body_section_index(document)
-        target_sections = document.sections[body_idx:] if body_idx > 0 else document.sections
-        containers = [getattr(section, location) for section in target_sections]
-        if document.settings.odd_and_even_pages_header_footer:
-            containers.extend(getattr(section, f"even_page_{location}") for section in target_sections)
-        if body_idx > 0:
-            show_first = page_numbers.get("show_on_body_first_page", True)
-        else:
-            show_first = page_numbers.get("show_on_first_page", True)
-        if show_first:
-            containers.extend(
-                getattr(section, f"first_page_{location}")
-                for section in target_sections
-                if section.different_first_page_header_footer
-            )
-        page_field_counts = []
-        seen_parts: set[int] = set()
-        for container in containers:
-            identity = id(container._element)
-            if identity in seen_parts:
-                continue
-            seen_parts.add(identity)
-            codes = [node.text or "" for node in container._element.iter(qn("w:instrText"))]
-            codes.extend(node.get(qn("w:instr"), "") for node in container._element.iter(qn("w:fldSimple")))
-            page_field_counts.append(sum(bool(re.search(r"\bPAGE\b", code, re.I)) for code in codes))
-        passed = bool(page_field_counts) and all(count == 1 for count in page_field_counts)
-        _check(checks, "page-numbers", passed, f"PAGE fields per target {location} part={page_field_counts}")
+        from word_format.inspect import DocumentIndex
+        from word_format.registry import REGISTRY
+
+        cap = REGISTRY["page_number.configure"]
+        params = cap.validator(page_numbers)
+        index = DocumentIndex(document)
+        actual = cap.reader(index, index.ref("document"), cap)
+        passed = cap.verifier(actual, params, cap)
+        _check(checks, "page-numbers", passed, f"scoped PAGE fields and section starts={actual['starts']}")
         if not passed:
-            errors.append(f"target {location} parts must contain exactly one PAGE field each")
+            errors.append("Page-number fields, variants or section numbering do not match the requested scope")
 
     placements = spec.get("citations", {}).get("placements", [])
     if placements:
@@ -229,16 +211,13 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         update = document.settings.element.find(qn("w:updateFields"))
         update_enabled = update is not None and update.get(qn("w:val")) in {"true", "1"}
         if toc.get("enabled"):
+            from word_format.toc import headings, result_status
+
             expected_level = int(toc.get("max_heading_level", 3))
             expected_switch = f'\\o "1-{expected_level}"'
             field_matches = any(expected_switch in code for code in toc_codes)
-            heading_matches = [
-                paragraph
-                for paragraph in document.paragraphs
-                if paragraph.text.strip()
-                and re.fullmatch(r"Heading ([1-9])", paragraph_style_name(document, paragraph._p), re.I)
-                and int(re.fullmatch(r"Heading ([1-9])", paragraph_style_name(document, paragraph._p), re.I).group(1)) <= expected_level
-            ]
+            heading_matches = headings(document, expected_level)
+            toc_result = result_status(document, expected_level)
             title = str(toc.get("title") or "目录")
             title_matches = any(
                 paragraph_style_name(document, paragraph._p) == "WFM TOC Heading" and paragraph.text == title
@@ -252,13 +231,13 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
                 for paragraph in document.paragraphs
             )
             break_ok = break_matches if toc.get("page_break_after", True) else not break_matches
-            passed = bool(toc_codes) and field_matches and bool(heading_matches) and title_matches and break_ok and update_enabled
+            passed = bool(toc_codes) and field_matches and toc_result["valid"] and title_matches and break_ok and update_enabled
             _check(
                 checks,
                 "table-of-contents",
                 passed,
                 f"TOC fields={len(toc_codes)}, level_switch={field_matches}, headings={len(heading_matches)}, title={title_matches}, "
-                f"page_break={break_matches}, updateFields={update_enabled}",
+                f"page_break={break_matches}, updateFields={update_enabled}, result_valid={toc_result['valid']}",
             )
             if not passed:
                 if not heading_matches:

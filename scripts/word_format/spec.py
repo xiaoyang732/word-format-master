@@ -7,7 +7,12 @@ import json
 import re
 
 from config import LIST_NUMBERING_STYLES
-from document_structure import validate_module_order
+from document_structure import (
+    abstract_label_ranges,
+    is_inline_abstract,
+    keyword_label_ranges,
+    validate_module_order,
+)
 
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .namespaces import qn
@@ -34,14 +39,6 @@ INDENTS = ("first_line_indent", "left_indent", "right_indent", "hanging_indent")
 META = {"style_name", "source_style_id", "numbering"}
 TOKENS = set(FONT) | set(PARA) | {f"{n}_{unit}" for n in INDENTS for unit in ("mm", "chars")}
 KEYWORD_STYLE_TOKENS = {"label_bold", "value_bold"}
-DEFAULT_TOC_TITLE_STYLE = {
-    "bold": True,
-    "font_size_pt": 14,
-    "alignment": "center",
-    "space_before_pt": 0,
-    "space_after_pt": 8,
-    "keep_with_next": True,
-}
 PAGE = {
     "width_mm": "page.width.set",
     "height_mm": "page.height.set",
@@ -109,7 +106,11 @@ def token_operations(tokens):
         if chars is not None and mm is not None:
             number(chars, 0, 500, name + "_chars")
             number(mm, -500 if name == "first_line_indent" else 0, 500, name + "_mm")
-            pt = tokens.get("font_size_pt", 12)
+            if "font_size_pt" not in tokens:
+                raise FormatError(
+                    f"Cannot compare character and mm units for {name} without an explicit font size"
+                )
+            pt = tokens["font_size_pt"]
             if abs(chars * pt * 25.4 / 72 - mm) > 0.1:
                 raise FormatError(f"Conflicting units for {name}; supply only chars or mm")
         value = chars if chars is not None else mm
@@ -155,25 +156,28 @@ def validate_keyword_tokens(tokens):
         if tokens[key] is not None:
             boolean(tokens[key], f"keywords.{key}")
     if "bold" in tokens and any(key in tokens for key in KEYWORD_STYLE_TOKENS):
-        raise FormatError(
-            "Choose whole-line keywords.bold or label/value bold controls, not both"
-        )
+        raise FormatError("Choose whole-line keywords.bold or label/value bold controls, not both")
 
 
 def keyword_text_ranges(text):
     """Return the label and value character ranges for a conventional keyword line."""
-    match = re.match(r"^\s*(?P<label>关键词|key\s*words?)\s*(?P<colon>[:：])?", text, re.I)
-    if not match:
+    return keyword_label_ranges(text)
+
+
+def abstract_text_ranges(text):
+    """Return the label and value character ranges for an inline abstract paragraph."""
+    if not is_inline_abstract(text):
         return None
-    label_start = match.start("label")
-    label_end = match.end("colon") if match.group("colon") else match.end("label")
-    value_start = match.end()
-    while value_start < len(text) and text[value_start].isspace():
-        value_start += 1
-    return {
-        "label": (label_start, label_end),
-        "value": (value_start, len(text)),
-    }
+    return abstract_label_ranges(text)
+
+
+def semantic_text_ranges(text, semantic_role=None):
+    """Return label/value character ranges for keywords or inline abstract lines."""
+    if semantic_role == "abstract_inline":
+        return abstract_text_ranges(text)
+    if semantic_role == "keywords":
+        return keyword_text_ranges(text)
+    return keyword_text_ranges(text) or abstract_text_ranges(text)
 
 
 def validate_section(section, data):
@@ -287,6 +291,8 @@ def validate_section(section, data):
                 "show_on_body_first_page",
                 "prefix",
                 "total_separator",
+                "scope",
+                "start_section",
             },
         )
         for key in ("enabled", "show_on_first_page", "show_on_body_first_page"):
@@ -300,15 +306,31 @@ def validate_section(section, data):
                 raise FormatError(f"Invalid page_numbers.{key}")
         if "start" in data:
             number(data["start"], 0, 100000, "start", True)
+        if data.get("scope", "all") not in {"all", "body"}:
+            raise FormatError("page_numbers.scope must be all or body")
+        if "start_section" in data:
+            number(data["start_section"], 1, 100000, "start_section", True)
         for key in ("prefix", "total_separator"):
             if key in data:
                 text_value(data[key], key, True)
     elif section == "table_of_contents":
         require_keys(
             data,
-            {"enabled", "title", "max_heading_level", "page_break_after", "title_style"},
+            {
+                "enabled",
+                "title",
+                "max_heading_level",
+                "page_break_after",
+                "title_format",
+                "title_style",
+                "field_format",
+                "break_format",
+            },
             label=section,
         )
+        for key in ("title_format", "field_format", "break_format"):
+            if key in data:
+                validate_tokens(data[key])
         for key in ("enabled", "page_break_after"):
             if key in data:
                 boolean(data[key], key)
@@ -318,6 +340,12 @@ def validate_section(section, data):
             number(data["max_heading_level"], 1, 9, "max_heading_level", True)
         if "title_style" in data:
             validate_tokens(data["title_style"])
+        if (
+            "title_style" in data
+            and "title_format" in data
+            and data["title_style"] != data["title_format"]
+        ):
+            raise FormatError("Conflicting TOC title_style and title_format; choose one appearance")
     elif section == "numbered":
         require_keys(data, {"style", "start", "left_indent_mm", "hanging_indent_mm"}, label=section)
         if "style" in data and data["style"] not in LIST_NUMBERING_STYLES:
@@ -402,6 +430,7 @@ def validate_spec(spec):
             "table_of_contents",
             "references",
             "document_structure",
+            "semantic_roles",
             "citations",
             "authority",
             "notes",
@@ -419,6 +448,24 @@ def validate_spec(spec):
         validate_tokens(spec["title"])
     if "keywords" in spec:
         validate_keyword_tokens(spec["keywords"])
+    if "semantic_roles" in spec:
+        if not isinstance(spec["semantic_roles"], dict):
+            raise FormatError("semantic_roles must be an object")
+        for role_key, role_tokens in spec["semantic_roles"].items():
+            text_value(role_key, "semantic role key")
+            if not isinstance(role_tokens, dict):
+                raise FormatError("semantic_roles entries must be token objects")
+            validate_tokens(role_tokens, {"outline_level", "numbering_suppressed"})
+            if "outline_level" in role_tokens and role_tokens["outline_level"] is not None:
+                number(role_tokens["outline_level"], 0, 9, f"semantic_roles.{role_key}.outline_level", True)
+            if (
+                "numbering_suppressed" in role_tokens
+                and role_tokens["numbering_suppressed"] is not None
+            ):
+                boolean(
+                    role_tokens["numbering_suppressed"],
+                    f"semantic_roles.{role_key}.numbering_suppressed",
+                )
     for section in (
         "page",
         "body",
@@ -503,7 +550,7 @@ def validate_spec(spec):
                 validate_tokens(tokens)
 
 
-def spec_request(index, spec, clear_direct=False):
+def spec_request(index, spec, clear_direct=False, *, isolated=False):
     """Expand a full legacy spec once; execution always uses REGISTRY."""
     validate_spec(spec)
     from .registry import REGISTRY
@@ -542,6 +589,10 @@ def spec_request(index, spec, clear_direct=False):
             # The TOC operation owns both placeholder and generated title styling.
             # Assigning a generic Heading style first creates competing writes.
             continue
+        if r.get("object_kind") not in {None, "text"}:
+            continue
+        if isolated and r.get("unsupported_container"):
+            continue
         matching = [m for m in modules if m.get("kind") == r.get("module")]
         occurrence = max(0, r.get("module_occurrence", 1) - 1)
         module = matching[min(occurrence, len(matching) - 1)] if matching else None
@@ -558,9 +609,21 @@ def spec_request(index, spec, clear_direct=False):
             tokens = module.get("style_roles", {}).get(role, {}).get("tokens", {})
             effective[oid] = dict(tokens)
         role = r.get("role")
+        sem_role = r.get("semantic_role")
         tokens = {}
         style_name = None
-        if role == "body" or (
+        extra_outline = None
+        suppress_num = False
+        if role == "title" and spec.get("title"):
+            tokens = spec.get("title", {})
+            extra_outline = 9
+        elif sem_role == "abstract_title":
+            h1 = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
+            if h1:
+                tokens = {k: v for k, v in h1.items() if k not in {"level", "page_break_before"}}
+                style_name = "WFM Abstract Title"
+                extra_outline = 9
+        elif role == "body" or (
             role == "module_body"
             and r.get("module") in {"abstract", "appendix", "acknowledgements"}
         ):
@@ -568,15 +631,27 @@ def spec_request(index, spec, clear_direct=False):
         elif role == "title":
             tokens = spec.get("title", {})
         elif role == "heading":
-            tokens = next(
-                (h for h in spec.get("headings", []) if h["level"] == r.get("heading_level")), {}
-            )
-            if tokens:
-                style_name = f"Heading {tokens['level']}"
-            elif r.get("heading_level") is None:
-                tokens = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
+            if r.get("module") in {None, "chapters"}:
+                tokens = next(
+                    (h for h in spec.get("headings", []) if h["level"] == r.get("heading_level")),
+                    {},
+                )
                 if tokens:
-                    style_name = "WFM Module Heading"
+                    style_name = f"Heading {tokens['level']}"
+                elif r.get("heading_level") is None:
+                    tokens = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
+                    if tokens:
+                        style_name = "WFM Module Heading"
+            else:
+                h1 = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
+                if h1:
+                    tokens = {k: v for k, v in h1.items() if k != "level"}
+                    style_name = f"WFM {r.get('module')} Heading"
+                    if r.get("module") in {"cover", "declaration", "abstract", "toc"}:
+                        tokens.pop("page_break_before", None)
+                        extra_outline = 9
+                    else:
+                        extra_outline = 0
         elif role == "keywords":
             tokens = spec.get("keywords", {})
             if tokens or effective.get(oid):
@@ -600,24 +675,60 @@ def spec_request(index, spec, clear_direct=False):
                     style_name = cap.get("style_name") or (
                         "Figure Caption" if label_kind == "figure" else "Table Caption"
                     )
+        sem_map = spec.get("semantic_roles", {})
+        if sem_role and sem_map:
+            sem_override = {}
+            if sem_role in sem_map:
+                sem_override.update(sem_map[sem_role])
+            lang_key = f"{sem_role}:{r.get('language')}" if r.get("language") else None
+            if lang_key and lang_key in sem_map:
+                sem_override.update(sem_map[lang_key])
+            if sem_override:
+                tokens = dict(tokens)
+                for name in INDENTS:
+                    if any(k in sem_override for k in (name + "_mm", name + "_chars")):
+                        for unit in ("mm", "chars"):
+                            tokens.pop(name + "_" + unit, None)
+                if "outline_level" in sem_override:
+                    extra_outline = sem_override["outline_level"]
+                if "numbering_suppressed" in sem_override:
+                    suppress_num = bool(sem_override["numbering_suppressed"])
+                tokens.update(
+                    {
+                        k: v
+                        for k, v in sem_override.items()
+                        if k not in {"outline_level", "numbering_suppressed"}
+                    }
+                )
         style_name = (
             tokens.get("style_name") or effective.get(oid, {}).get("style_name") or style_name
         )
         if style_name:
             add("paragraph.style.assign", [oid], {"name": style_name})
+        if extra_outline is not None:
+            add("paragraph.outline_level.set", [oid], {"value": int(extra_outline)})
+        if suppress_num:
+            add("paragraph.numbering_suppressed.set", [oid], {"value": True})
         merged = effective.setdefault(oid, {})
         # Remove alternate unit representation when a higher priority source sets it.
         for name in INDENTS:
             if any(k in tokens for k in (name + "_mm", name + "_chars")):
                 for unit in ("mm", "chars"):
                     merged.pop(name + "_" + unit, None)
-        merged.update(tokens)
+        if isolated:
+            # A module rule is more specific than the global role baseline.
+            specific = dict(merged)
+            merged.clear()
+            merged.update(tokens)
+            merged.update(specific)
+        else:
+            merged.update(tokens)
     for oid, tokens in effective.items():
         for action, params in token_operations(tokens):
             # Word/WPS stretches every non-final line when a justified
             # paragraph contains manual line breaks. Preserve the requested
             # body formatting while making this exceptional case render safely.
-            if (
+            if not isolated and (
                 action == "paragraph.alignment.set"
                 and params.get("value") == "justify"
                 and _has_soft_break(index.elements[oid])
@@ -654,8 +765,9 @@ def spec_request(index, spec, clear_direct=False):
         + [(f"Heading {h['level']}", h) for h in spec.get("headings", [])]
         + [("Bibliography", spec.get("references", {}))]
     ):
-        for action, params in token_operations(tokens):
-            add(action, ["style:" + name], params)
+        if not isolated:
+            for action, params in token_operations(tokens):
+                add(action, ["style:" + name], params)
     page = spec.get("page", {})
     dims = {"A4": (210, 297), "Letter": (215.9, 279.4)}.get(page.get("size"))
     values = {k: v for k, v in page.items() if k in PAGE and v is not None}
@@ -675,6 +787,8 @@ def spec_request(index, spec, clear_direct=False):
         add(PAGE[key], ids, {"value": value})
     tables = spec.get("tables", {})
     for oid, r in index.records.items():
+        if isolated and r.get("unsupported_container"):
+            continue
         if r["kind"] == "table":
             if r.get("module") == "cover":
                 continue
@@ -911,7 +1025,7 @@ def legacy_paths():
         ),
         (
             "page_numbers",
-            ("enabled", "location", "format", "start", "show_on_first_page"),
+            ("enabled", "location", "format", "start", "show_on_first_page", "scope", "start_section"),
             "page_number.configure",
         ),
         (

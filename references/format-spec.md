@@ -202,9 +202,12 @@ Managed footer text uses `WFM Footer`; header content has an explicit managed ma
 
 - `enabled`, `location`: `header` or `footer`
 - `alignment`, `start`, `show_on_first_page`
+- `scope`: `all` (default) or `body`; optional one-based `start_section` overrides the inferred start section
+- `show_on_body_first_page`: controls the first-page variant at/after the detected body section
 - `format`: `number`, `page-number`, or `page-x-of-y`
 
 Generate actual `PAGE` and optional `NUMPAGES` fields, keep cached display text, and set `w:updateFields=true`. Never write a fixed page number as ordinary text.
+Body scope removes standalone PAGE paragraphs in every front-matter variant at the selected location, retaining unrelated content and relationships. It restarts decimal numbering at the actual selected section; later sections continue numbering. `all` with `show_on_body_first_page` also restarts at a distinct detected body section. Mixed content/PAGE paragraphs require explicit separation. In multi-section documents, an ambiguous body requires `start_section`; numbering does not create a body section or assign separate Roman front-matter numbering.
 When the target header/footer already contains a standalone PAGE-field paragraph, reuse and rebuild that paragraph rather than appending a second page number. Structural verification requires exactly one PAGE field in each selected target part.
 Disabling page numbers clears managed `WFM Page Number` paragraphs. For a distilled uploaded template, `headers_footers.preserve_existing: false` also removes pre-existing PAGE fields before any explicitly enabled template header, footer, or page number is rebuilt.
 

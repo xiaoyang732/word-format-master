@@ -11,6 +11,7 @@ from pathlib import Path
 from docx import Document
 
 from .contracts import (
+    number,
     MAX_OPERATIONS,
     SCHEMA_VERSION,
     FormatError,
@@ -50,6 +51,7 @@ def build_plan(input_path, output, request, *, _document=None):
             "clear_direct_font_formatting",
             "verification",
             "profile_context",
+            "template_context",
         },
         label="request",
     )
@@ -102,6 +104,10 @@ def build_plan(input_path, output, request, *, _document=None):
         raise FormatError("Choose operations or legacy spec, not both")
     document = _document or Document(source)
     index = DocumentIndex(document)
+    if "template_context" in request:
+        from .templates import validate_context
+
+        validate_context(index, request["template_context"], request.get("operations"), destination)
     if "spec" in request:
         from .spec import spec_request
 
@@ -153,6 +159,8 @@ def build_plan(input_path, output, request, *, _document=None):
         if cap is None:
             raise FormatError(f"Unknown operation {item['action']!r}", "unsupported")
         params = cap.validator(item["params"])
+        if cap.property == "page_numbers" and "start_section" in params:
+            number(params["start_section"], 1, len(document.sections), "start_section", True)
         if (
             not cap.structural
             and item["target"].get("type") == "text_range"
@@ -300,6 +308,12 @@ def _format_verification(document, checks):
             continue
         actual = _read(cap, index, ref)
         passed = cap.verifier(actual, check["params"], cap)
+        if cap.property == "numbered":
+            # Recheck the original scope as well as the surviving list items.
+            # Dropping numPr must not turn a failed operation into all([]).
+            expected = Counter(r["text"] for r in check["before"] if r["numbered_target"])
+            observed = Counter(r["text"] for r in actual if r["numbered_target"])
+            passed = passed and expected == observed
         output.append({**check, "after": actual, "status": "passed" if passed else "failed"})
         if not passed:
             failures.append(
@@ -425,6 +439,16 @@ def apply_plan(plan, *, overwrite=False):
             from .profiles import validate_profile_source
 
             validate_profile_source(plan["request"]["profile_context"]["source"])
+        if "template_context" in plan["request"]:
+            from .templates import validate_template
+
+            context = plan["request"]["template_context"]
+            validate_template(context["definition"])
+            if (
+                context["source"]
+                and sha256(context["source"]["path"]) != context["source"]["sha256"]
+            ):
+                raise FormatError("Template changed during execution; output not published")
         if destination.exists() and not overwrite:
             raise FormatError("Output appeared during execution; output not replaced")
         os.replace(temporary, destination)
@@ -462,6 +486,14 @@ def apply_plan(plan, *, overwrite=False):
     }
     if "profile_context" in plan["request"]:
         result["profile_context"] = copy.deepcopy(plan["request"]["profile_context"])
+    if "template_context" in plan["request"]:
+        from .templates import compliance
+
+        result["compliance"] = compliance(
+            plan["request"]["template_context"],
+            format_status="passed",
+            visual_status=result["verification"]["visual"]["status"],
+        )
     return result
 
 
@@ -504,6 +536,16 @@ def _validate_report_checks(plan, report):
                 "Each report check must identify its operation, action, source target and parameters"
             )
         actual[json_hash({field: check[field] for field in fields})] += 1
+        if check["action"] == "list.numbering.configure" and (
+            not isinstance(check.get("before"), list)
+            or any(
+                not isinstance(record, dict)
+                or not isinstance(record.get("text"), str)
+                or not isinstance(record.get("numbered_target"), bool)
+                for record in check["before"]
+            )
+        ):
+            raise FormatError("Report lacks source list coverage; apply the plan again")
         ref = check.get("output_target")
         target = check["target"]
         if (
@@ -554,7 +596,7 @@ def verify_plan(plan, report, *, visual_report=None, render_manifest=None, rende
     status = "passed" if result["status"] == structure["status"] == "passed" else "failed"
     if visual["status"] == "failed":
         status = "failed"
-    return {
+    response = {
         "schema_version": SCHEMA_VERSION,
         "status": status,
         "format": result,
@@ -562,6 +604,17 @@ def verify_plan(plan, report, *, visual_report=None, render_manifest=None, rende
         "visual": visual,
         "output": str(output),
     }
+    if "template_context" in plan["request"]:
+        from .templates import compliance
+
+        response["compliance"] = compliance(
+            plan["request"]["template_context"],
+            format_status=status,
+            visual_status=visual["status"],
+        )
+        response["execution_status"] = status
+        response["status"] = response["compliance"]["status"]
+    return response
 
 
 def audit_document(input_path, request):
@@ -608,7 +661,7 @@ def audit_document(input_path, request):
         if checks
         else "no_change"
     )
-    return {
+    response = {
         "schema_version": SCHEMA_VERSION,
         "kind": "word-format-audit",
         "status": status,
@@ -621,6 +674,17 @@ def audit_document(input_path, request):
             "Only explicitly requested properties are checked; structural agreement does not prove pagination."
         ],
     }
+    if "template_context" in plan["request"]:
+        from .templates import compliance
+
+        response["compliance"] = compliance(
+            plan["request"]["template_context"],
+            format_status=status,
+            visual_status=response["visual"]["status"],
+        )
+        response["execution_status"] = status
+        response["status"] = response["compliance"]["status"]
+    return response
 
 
 def apply_spec(

@@ -50,6 +50,9 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 | 某章所有正文 | `{"type":"paragraph","chapter_text":"第三章 实验","role":"body","all":true}` |
 | 某章第 2 个正文段落 | `{"type":"paragraph","chapter_id":"p10","role":"body","ordinal":2}` |
 | 整篇正文 | `{"type":"paragraph","role":"body","all":true}` |
+| 封面大标题 | `{"type":"paragraph","semantic_role":"cover_title","all":true}` |
+| 中文摘要标题 | `{"type":"paragraph","semantic_role":"abstract_heading","language":"zh","all":true}` |
+| 英文关键词标签 | `{"type":"text_range","semantic_role":"keywords","language":"en","segment":"label","all":true}` |
 | 所有顶层段落 | `{"type":"paragraph","all":true}` |
 | 表格第 1 行第 2 格文字 | `{"type":"paragraph","table_id":"t0","row":1,"cell":2,"all":true}` |
 | 第 1 节页面 | `{"type":"section","number":1}` |
@@ -82,6 +85,7 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 ## 能力与代码对应
 
 `capabilities` 返回每项操作的 action、handler、validator、reader、verifier、参数、允许范围和测试文件。注册表位于 `registry.py`，入口只能执行已登记 action。
+测试文件链接是回归入口，不代表每个参数组合或渲染器均有覆盖。
 
 | 格式 | 操作 | 唯一写入职责 |
 |---|---|---|
@@ -98,6 +102,8 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 | 页眉页脚、页码、目录、编号、题注位置、引用 | 登记的 configure / convert / insert 操作 | 明确列出结构影响，独立验收 |
 
 整篇旧规范可用 `{"spec": {...}}` 替代 `operations`；两者不能同时提供。旧规范会展开成同一注册表的操作。`apply_spec.py INPUT.docx OUTPUT.docx --spec spec.json` 也委托同一核心，无需额外会话。要求文档和样例使用 [Format Profile](format-profile.md) 提取证据，再通过 `plan --profile` 编译。
+
+页眉横线使用 `header.border_bottom.set`，节 target 与 `value: boolean`，可选 `variant: default|first|even`；关闭会显式取消样式继承。页码使用 `page_number.configure` 的 `scope: all|body`（缺省 all）和可选一基 `start_section`；body 模式隔离前置各页型页码，在起始节写入 decimal/start，后续节连续计页。前置罗马页码与正文阿拉伯页码的独立双制式配置暂不支持，详见 [页眉与页码契约](header-requirements.md)。
 
 ## 保护与验收
 

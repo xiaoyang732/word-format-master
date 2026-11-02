@@ -29,7 +29,12 @@ each part, language, occurrence, sequence and chapter hierarchy. The sample wins
 over a preset's conventional outline, including declarations placed at the end.
 
 - A sample with a cover requires a cover using its layout and metadata fields.
-  Fill in the new thesis's title, author and other supplied details; missing
+  When drafting or migrating from a DOCX/DOTX/DOC/DOT/WPS sample cover that carries
+  school emblems, banners, metadata tables (`w:tbl` with borders/`vMerge`), VML
+  textboxes, underlines or fixed typography, clone the cover via
+  `python scripts/format_cli.py cover TEMPLATE OUTPUT.docx [--into DRAFT.docx] [--replace-existing-cover] --fields fields.json`
+  (or `word_format.cover.clone_template_cover`) rather than replacing it with plain text,
+  and fill in the new thesis's title, author and other supplied details; missing
   personal information stays a placeholder. Do not copy the sample's identity.
 - A sample without a cover must not acquire one. A title inside an article is
   not permission to invent a separate cover page; inspect the page layout.
@@ -77,6 +82,33 @@ the sample's structure; retain those instructions and the resulting outline.
 
 ## Semantic authoring
 
+### Mandatory dynamic numbering
+
+Never type structural numbers into generated content. Write only heading titles
+and bind chapter/section styles to native multilevel Word numbering. Ordered lists
+and bibliography entries require native numbering definitions; captions and
+equation labels require SEQ fields (with STYLEREF for chapter prefixes), page
+numbers require PAGE/NUMPAGES, and citations/cross-references require bookmarks
+and REF/PAGEREF fields. Preserve visible formats through numbering definitions
+and field formatting, never literal prefixes or duplicate typed labels. Ordinary
+data, years, measurements and identifiers remain content.
+
+This requirement also applies when the sample uses typed numbers: infer its
+display scheme and implement it dynamically. Resolve an unknown scheme before
+delivery rather than falling back to typed numbers. Do not treat the caption
+`numbering_mode: seq` configuration alone as proof that a SEQ field was inserted;
+the current caption operation only controls position/formatting. Author the
+actual fields in the draft and inspect them after formatting.
+
+Run `python scripts/check_numbering.py OUTPUT.docx --output numbering.json`
+after plan/apply/verify; a failure blocks delivery. The shared pipeline runs this
+guard automatically. It checks common typed labels in body/table/header/footer
+paragraphs and excludes real field results. Also review equations, custom
+enumerations, appendix labels and cross-references explicitly: the conservative
+detector cannot establish all numbering intent from arbitrary prose. Confirm
+that inserting/removing an item and updating fields renumbers dependent labels
+in Word/WPS. Report structural and visual validation separately.
+
 Build a new draft with semantic styles: Title for a cover title when present, Heading 1–3
 for actual chapters/sections, Normal for prose, and separate caption/reference
 styles. Use paragraph/page/section break properties deliberately. Blank cover
@@ -100,6 +132,16 @@ title cannot be inferred, assign its Heading style explicitly before formatting.
 ## Formatting and verification
 
 Apply the selected template/preset through `format_cli.py plan/apply/verify`.
+An authoring script's `doc.save()` creates a draft, never an accepted final
+document. Inspecting or rendering that draft does not replace the plan, apply
+report and independent verification bound to the delivered output's hash.
+Before applying, record effective font channels, size, bold and paragraph
+properties separately for the cover title, each metadata field/date, each
+abstract title/label/body and keyword label/value in each language. Read style
+inheritance; do not guess a heading font from its name or translate “加黑” to
+the 黑体 font family. Empty placeholders require interpretation against the
+written requirements, and separate-document specifications need a scope decision.
+See [format-profile.md](format-profile.md) for semantic selectors and coverage.
 Do not repair draft formatting with an independent editing script or patch an
 installed skill mid-run. Fix the repository implementation, validate it, then
 sync the changed skill files without replacing unrelated local modifications.

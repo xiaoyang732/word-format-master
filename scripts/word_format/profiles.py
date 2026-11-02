@@ -61,10 +61,27 @@ def _rule(profile, candidate):
     profile["rules"].append(candidate)
 
 
-def requirements_profile(path):
+def requirements_profile(path, *, document_kind="thesis"):
     extracted = extract_requirements(path)
+    if document_kind not in {"thesis", "summary", "all"}:
+        raise FormatError("Requirement document_kind must be thesis, summary or all")
+    # Retain all evidence, but never combine a paper with its separately specified synopsis.
+    active_kind = "thesis"
+    active_scope = None
+    selected, excluded = [], []
+    for block in extracted["blocks"]:
+        scope = block.get("scope")
+        if scope != active_scope:
+            active_kind, active_scope = "thesis", scope
+        text = block["text"]
+        if len(text) < 150 and "简介" in text and any(w in text for w in ("规格", "撰写要求")):
+            active_kind = "summary"
+        block["document_kind"] = active_kind
+        (selected if document_kind == "all" or active_kind == document_kind else excluded).append(
+            block
+        )
     profile = _profile(extracted["source"])
-    candidates, unresolved = parse_blocks(extracted["blocks"])
+    candidates, unresolved = parse_blocks(selected)
     grouped = defaultdict(list)
     for candidate in candidates:
         grouped[(json_hash(candidate["target"]), candidate["action"])].append(candidate)
@@ -82,10 +99,25 @@ def requirements_profile(path):
     for item in extracted["issues"] + unresolved:
         reason = item.pop("reason")
         _issue(profile, reason, **item)
-    profile["snapshot"] = {"blocks": extracted["blocks"]}
+    for block in excluded:
+        _issue(
+            profile,
+            "Separate document specification excluded from the selected document kind",
+            anchor=block["anchor"],
+            quote=block["text"],
+            applicability=block["document_kind"],
+            document_kind=document_kind,
+        )
+    profile["snapshot"] = {
+        "blocks": extracted["blocks"],
+        "document_kind": document_kind,
+        "excluded_blocks": excluded,
+    }
     profile["coverage"] = {
         "represented_rules": len(profile["rules"]),
         "read_blocks": len(extracted["blocks"]),
+        "applicable_blocks": len(selected),
+        "excluded_blocks": len(excluded),
         "unresolved": len(profile["issues"]),
         "policy": "No preset defaults; every unparsed phrase requires an explicit resolution",
     }
@@ -93,31 +125,57 @@ def requirements_profile(path):
 
 
 def _template_document(path):
-    if path.suffix.lower() == ".docx":
-        return Document(path)
-    # python-docx does not accept DOTX main content types. Read a converted
-    # in-memory package; the user's template is never rewritten.
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(path) as source, zipfile.ZipFile(buffer, "w") as target:
-        for item in source.infolist():
-            blob = source.read(item.filename)
-            if item.filename == "[Content_Types].xml":
-                blob = blob.replace(
-                    b"application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml",
-                    b"application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml",
-                )
-            target.writestr(item, blob)
-    buffer.seek(0)
-    return Document(buffer)
+    from .doc_loader import open_word_document
+
+    return open_word_document(path)
 
 
 def _selector(record):
+    if record.get("semantic_role") in {
+        "cover_title",
+        "cover_subject",
+        "cover_student",
+        "cover_college",
+        "cover_major",
+        "cover_advisor",
+        "cover_student_id",
+        "cover_date",
+        "declaration_heading",
+        "declaration_salutation",
+        "declaration_body",
+        "declaration_signature",
+        "abstract_title",
+        "abstract_heading",
+        "abstract_inline",
+        "abstract_body",
+        "keywords",
+        "toc_heading",
+        "symbols_heading",
+        "symbols_body",
+        "reference_heading",
+        "reference_item",
+        "acknowledgements_heading",
+        "acknowledgements_body",
+        "appendix_heading",
+        "appendix_body",
+    }:
+        target = {"type": "paragraph", "semantic_role": record["semantic_role"], "all": True}
+        if record.get("language"):
+            target["language"] = record["language"]
+        if not record.get("top_level") and record.get("part") == "word/document.xml":
+            target["part"] = "word/document.xml"
+        return target
     target = {"type": "paragraph", "role": record["role"], "all": True}
     if record.get("module"):
         target["module"] = record["module"]
     if record.get("heading_level"):
         target["level"] = record["heading_level"]
-    if record["role"] == "table_text":
+    for field in ("semantic_role", "language"):
+        if record.get(field):
+            target[field] = record[field]
+    if record["role"] == "table_text" or (
+        not record.get("top_level") and record.get("part") == "word/document.xml"
+    ):
         target["part"] = "word/document.xml"
     if record["role"] == "caption":
         match = re.match(r"\s*(图|表|Figure|Fig\.|Table)", record["text"], re.I)
@@ -145,9 +203,13 @@ def _atomic_candidate(target, name, value, evidence):
 def template_profile(path):
     from analyze_docx import analyze_docx
 
+    from .doc_loader import SUPPORTED_WORD_SUFFIXES
+
     source = Path(path).resolve()
-    if source.suffix.lower() not in {".docx", ".dotx"}:
-        raise FormatError("Formatting samples must be DOCX or DOTX", "unsupported")
+    if source.suffix.lower() not in SUPPORTED_WORD_SUFFIXES:
+        raise FormatError(
+            "Formatting samples must be DOCX, DOTX, DOC, DOT, or WPS", "unsupported"
+        )
     analysis = analyze_docx(source)
     if analysis["package"]["ooxml_conformance"] == "strict":
         raise FormatError(
@@ -162,6 +224,9 @@ def template_profile(path):
     # Use the same effective readers as inspect, rather than inferred_spec's
     # representative paragraph or first-section heuristics.
     records = index.public()
+    usable_width_mm = min(
+        s.page_width.mm - s.left_margin.mm - s.right_margin.mm for s in document.sections
+    )
     groups = defaultdict(list)
     snapshot = []
     unknown = set()
@@ -211,13 +276,63 @@ def template_profile(path):
                 "rPr",
             }
             unknown.update(n.tag.split("}")[-1] for n in pr if n.tag.split("}")[-1] not in known)
-        if record.get("unsupported_container") or not record.get("text", "").strip():
+        if record.get("unsupported_container"):
+            continue
+        if not record.get("text", "").strip():
+            # Empty abstract placeholders often retain the preceding title's
+            # formatting. Record it, but require a decision before treating it
+            # as evidence for actual abstract prose.
+            if record.get("semantic_role") != "abstract_body":
+                continue
+            _issue(
+                profile,
+                "Empty abstract placeholder requires body-format interpretation",
+                target=_selector(record),
+                anchor=record["id"],
+                observed=values,
+            )
             continue
         selected = _selector(record)
         groups[json_hash(selected)].append((selected, record, values))
+        if record.get("semantic_role") in {"keywords", "abstract_inline"}:
+            from .spec import semantic_text_ranges
+
+            ranges = semantic_text_ranges(record["text"], record.get("semantic_role"))
+            if ranges:
+                # Character formats of the label and content have independent
+                # evidence. In particular a bold label says nothing about values.
+                for segment, (start, end) in ranges.items():
+                    if start == end:
+                        _issue(
+                            profile,
+                            f"Empty {record['semantic_role']} segment has no sample font evidence",
+                            target={**selected, "type": "text_range", "segment": segment},
+                        )
+                        continue
+                    segment_target = {**selected, "type": "text_range", "segment": segment}
+                    segment_values = {
+                        name: index.font_values(record["id"], name, start, end)
+                        for name in FONT_TAGS
+                    }
+                    groups[json_hash(segment_target)].append(
+                        (segment_target, record, segment_values)
+                    )
     for group in groups.values():
         target = group[0][0]
         for name in list(FONT_TAGS) + list(PARAGRAPH_TAGS):
+            # Absence of numId=0 is not an instruction to delete target numbering.
+            if name == "numbering_suppressed":
+                continue
+            if name == "outline_level" and target.get("role") == "heading":
+                continue
+            if target["type"] == "text_range" and name not in FONT_TAGS:
+                continue
+            if (
+                target.get("semantic_role") in {"keywords", "abstract_inline"}
+                and target["type"] == "paragraph"
+                and name in FONT_TAGS
+            ):
+                continue
             # first-line is the signed offset; the opposite zero is redundant.
             if name == "hanging_indent":
                 continue
@@ -237,6 +352,19 @@ def template_profile(path):
                 )
             choices = []
             unrepresentable = []
+            overflow = False
+            if name == "first_line_indent":
+                for _, _, values in group:
+                    indent = values[name]
+                    if indent and indent.get("value", 0) > 0:
+                        if indent.get("unit") == "mm":
+                            extent = indent["value"]
+                        else:
+                            sizes = [
+                                v for v in values["font_size_pt"] if isinstance(v, (int, float))
+                            ]
+                            extent = indent["value"] * max(sizes, default=0) * 25.4 / 72
+                        overflow = overflow or extent >= usable_width_mm
             for key, evidence in variants.items():
                 value = raw[key]
                 if value is None:
@@ -250,7 +378,16 @@ def template_profile(path):
                     choices.append(candidate)
                 except (FormatError, TypeError, KeyError):
                     unrepresentable.append({"value": value, "evidence": evidence})
-            if len(choices) == 1 and not unrepresentable:
+            if overflow:
+                _issue(
+                    profile,
+                    "Sample indent exceeds usable page width; review before migration",
+                    target=target,
+                    property=name,
+                    candidates=choices,
+                    observed=unrepresentable,
+                )
+            elif len(choices) == 1 and not unrepresentable:
                 _rule(profile, choices[0])
             else:
                 _issue(
@@ -369,7 +506,6 @@ def template_profile(path):
             "Table borders, widths, styles and cell geometry require review",
             anchor=record["id"],
         )
-    # Empty sample variants also need a decision before target content is kept.
     _issue(
         profile,
         "Map header/footer content, formatting and fields explicitly, including empty variants; sample-specific text is not copied",
@@ -401,11 +537,38 @@ def template_profile(path):
         index.elements[r["id"]].find("./" + qn("w:pPr") + "/" + qn("w:numPr")) is not None
         for r in snapshot
     ):
-        _issue(
-            profile,
-            "Used Word numbering requires semantic mapping to target headings or lists",
-            numbering=analysis["document"]["numbering"],
-        )
+        from .numbering import effective_numbering, extract_heading_scheme
+
+        for record in snapshot:
+            if record.get("role") == "heading" and record.get("module") != "chapters":
+                if effective_numbering(document, index.elements[record["id"]]) is not None:
+                    _issue(
+                        profile,
+                        "Numbered module heading requires an explicit numbering rule or preservation decision",
+                        target_id=record["id"],
+                        text=record.get("text", ""),
+                    )
+
+        try:
+            scheme = extract_heading_scheme(index)
+            if scheme:
+                _rule(
+                    profile,
+                    {
+                        "target": {"type": "document"},
+                        "action": "heading.scheme.configure",
+                        "params": scheme,
+                        "evidence": [{"anchor": "word/numbering.xml", "confidence": 1.0}],
+                    },
+                )
+            # Other lists and level geometry are recorded, never presumed migrated.
+            _issue(
+                profile,
+                "Review non-heading numbering and level indentation/font properties",
+                numbering=analysis["document"]["numbering"],
+            )
+        except FormatError as exc:
+            _issue(profile, str(exc), numbering=analysis["document"]["numbering"])
     profile["snapshot"] = {
         "paragraphs": snapshot,
         "styles": analysis["styles"],
@@ -602,6 +765,13 @@ def profile_plan(
                 "target_sections": len(document.sections),
             }
         )
+    preserve = mapping.get("preserve", {})
+    if not isinstance(preserve, dict):
+        raise FormatError("mapping.preserve must map target paragraph IDs to reasons")
+    for oid, reason in preserve.items():
+        if index.records.get(oid, {}).get("kind") != "paragraph":
+            raise FormatError("Unknown preserved target paragraph ID")
+        text_value(reason, "preserved paragraph reason")
     operations, matched = [], []
     preserved_rules = []
     rule_mapping = mapping.get("rules", {})
@@ -649,6 +819,12 @@ def profile_plan(
                 }
             )
             continue
+        if target["type"] in {"paragraph", "text_range"} and any(ref["id"] in preserve for ref in refs):
+            refs = [ref for ref in refs if ref["id"] not in preserve]
+            if not refs:
+                preserved_rules.append({"rule": rule, "reason": "All matched paragraphs are explicitly preserved"})
+                continue
+            target = {**target, "ids": list(dict.fromkeys(ref["id"] for ref in refs))}
         operations.append(
             {"id": rule["id"], "action": cap.action, "target": target, "params": params}
         )
@@ -659,13 +835,6 @@ def profile_plan(
                 "evidence": rule.get("evidence", []),
             }
         )
-    preserve = mapping.get("preserve", {})
-    if not isinstance(preserve, dict):
-        raise FormatError("mapping.preserve must map target paragraph IDs to reasons")
-    for oid, reason in preserve.items():
-        if index.records.get(oid, {}).get("kind") != "paragraph":
-            raise FormatError("Unknown preserved target paragraph ID")
-        text_value(reason, "preserved paragraph reason")
     if profile["source"]["kind"] == "template":
         covered = {oid for m in matched for oid in m["target_ids"]}
         uncovered = [
@@ -693,6 +862,18 @@ def profile_plan(
         "decisions": decisions,
         "preserved_rules": preserved_rules,
         "preserved_targets": preserve,
+    }
+    # Object coverage alone is not proof that every font/paragraph property was
+    # specified. Expose exactly which actions the plan will check per object.
+    property_coverage = defaultdict(set)
+    for operation, match in zip(operations, matched):
+        for oid in match["target_ids"]:
+            segment = operation["target"].get("segment", "paragraph")
+            property_coverage[oid].add(segment + ":" + operation["action"])
+    context["coverage"] = {
+        **context["coverage"],
+        "target_properties": {oid: sorted(actions) for oid, actions in property_coverage.items()},
+        "target_property_policy": "Only listed properties are verified; unresolved evidence requires decisions",
     }
     if structure_contract is not None:
         context["structure_contract"] = structure_contract

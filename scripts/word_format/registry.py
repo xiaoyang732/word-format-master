@@ -7,11 +7,12 @@ from dataclasses import dataclass
 from typing import Callable
 
 from . import headers, section_breaks
+from . import numbering as template_numbering
 from . import operations as op
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .inspect import _style_paragraph
 from .namespaces import qn
-from .properties import paragraph_style_name, read_paragraph
+from .properties import paragraph_style_name, read_font, read_paragraph
 
 
 @dataclass(frozen=True)
@@ -39,9 +40,9 @@ class Capability:
             "parameters": self.parameters,
             "structural": self.structural,
             "effects": list(self.effects),
-            "test": "tests/test_headers.py"
+            "test": "_dev/tests/test_headers.py"
             if self.property.startswith("header:") or self.property == "section_break"
-            else "tests/test_format_core.py",
+            else "_dev/tests/test_format_core.py",
         }
 
 
@@ -84,6 +85,20 @@ def indent(params):
     return dict(params)
 
 
+def paragraph_spacing(params):
+    """Keep Word's line-based paragraph spacing without guessing a point size."""
+    require_keys(params, {"value", "unit"}, {"value"}, "paragraph spacing")
+    if isinstance(params.get("value"), dict):
+        require_keys(params, {"value"}, {"value"}, "paragraph spacing")
+        value = params["value"]
+        require_keys(value, {"value", "unit"}, {"value", "unit"}, "line-based spacing")
+        if value["unit"] != "lines":
+            raise FormatError("Nested paragraph spacing requires unit lines")
+        number(value["value"], 0, 100)
+        return {"value": dict(value)}
+    return scalar("number", 0, 500, "pt")(params)
+
+
 def line_spacing(params):
     require_keys(params, {"kind", "value", "unit"}, {"kind", "value"}, "line spacing")
     kind = params["kind"]
@@ -106,11 +121,26 @@ def color(params):
 
 def read_atomic(index, ref, cap):
     if cap.property in {"font_east_asia", "font_latin", "font_size_pt", "bold", "italic", "color"}:
-        return index.font_values(ref["id"], cap.property, ref.get("start"), ref.get("end"))
+        raw = index.font_values(ref["id"], cap.property, ref.get("start"), ref.get("end"))
+        if ref["kind"] != "paragraph":
+            return raw
+        values = list(raw)
+        p = index.elements[ref["id"]]
+        record = index.records.get(ref["id"], {})
+        if (
+            record.get("role") == "heading"
+            or template_numbering.effective_numbering(index.document, p) is not None
+        ):
+            mark = read_font(index.document, p, None, cap.property)
+            if mark not in values:
+                values.append(mark)
+        return values
     p = index.elements[ref["id"]]
     if ref["kind"] == "style":
         p = _style_paragraph(ref["id"][6:], index.document)
     if cap.property in {
+        "outline_level",
+        "numbering_suppressed",
         "alignment",
         "space_before_pt",
         "space_after_pt",
@@ -157,29 +187,51 @@ def read_atomic(index, ref, cap):
     if cap.property == "three_line":
         borders = p.find("./" + qn("w:tblPr") + "/" + qn("w:tblBorders"))
 
-        def val(tag, attr):
-            node = borders.find(qn("w:" + tag)) if borders is not None else None
-            return node.get(qn("w:" + attr)) if node is not None else None
+        def matches(owner, edge, size=None):
+            node = owner.find(qn("w:" + edge)) if owner is not None else None
+            if node is None:
+                return False
+            if size is None:
+                return node.get(qn("w:val")) in {"none", "nil"}
+            return node.get(qn("w:val")) == "single" and node.get(qn("w:sz")) == str(size)
 
-        header = p.find(
-            "./"
-            + qn("w:tr")
-            + "/"
-            + qn("w:tc")
-            + "/"
-            + qn("w:tcPr")
-            + "/"
-            + qn("w:tcBorders")
-            + "/"
-            + qn("w:bottom")
+        valid = all(
+            matches(borders, edge, 12 if edge in {"top", "bottom"} else None)
+            for edge in ("top", "bottom", "left", "right", "insideH", "insideV")
         )
-        return (
-            val("top", "sz") == "12"
-            and val("bottom", "sz") == "12"
-            and val("insideV", "val") == "none"
-            and header is not None
-            and header.get(qn("w:sz")) == "6"
-        )
+        rows = p.findall(qn("w:tr"))
+        valid = valid and bool(rows)
+        for i, row in enumerate(rows):
+            cells = row.findall(qn("w:tc"))
+            valid = valid and bool(cells)
+            for cell in cells:
+                cell_borders = cell.find("./" + qn("w:tcPr") + "/" + qn("w:tcBorders"))
+                for edge in (
+                    "top",
+                    "bottom",
+                    "left",
+                    "right",
+                    "start",
+                    "end",
+                    "insideH",
+                    "insideV",
+                    "tl2br",
+                    "tr2bl",
+                ):
+                    size = (
+                        12
+                        if (edge == "top" and i == 0) or (edge == "bottom" and i == len(rows) - 1)
+                        else 6
+                        if edge == "bottom" and i == 0
+                        else None
+                    )
+                    valid = valid and matches(cell_borders, edge, size)
+        tblpr = p.find(qn("w:tblPr"))
+        return {
+            "enabled": valid,
+            "saved": tblpr is not None
+            and "{urn:word-format-master:format}originalBorders" in tblpr.attrib,
+        }
     raise FormatError(f"No reader for {cap.property}")
 
 
@@ -196,6 +248,8 @@ def equal_value(actual, expected, tolerance=0.025):
 
 
 def verify_atomic(actual, params, cap):
+    if cap.property == "three_line":
+        return actual["enabled"] if params["value"] else not actual["saved"]
     expected = (
         params
         if cap.property == "line_spacing" or cap.property.endswith("indent")
@@ -263,15 +317,15 @@ for action, prop, handler, validator, params in (
         "paragraph.spacing_before.set",
         "space_before_pt",
         op.set_spacing_before,
-        scalar("number", 0, 500, "pt"),
-        {"value": "0..500", "unit": "pt"},
+        paragraph_spacing,
+        {"value": "0..500 pt, or {value: 0..100, unit: lines}", "unit": "pt (numeric only)"},
     ),
     (
         "paragraph.spacing_after.set",
         "space_after_pt",
         op.set_spacing_after,
-        scalar("number", 0, 500, "pt"),
-        {"value": "0..500", "unit": "pt"},
+        paragraph_spacing,
+        {"value": "0..500 pt, or {value: 0..100, unit: lines}", "unit": "pt (numeric only)"},
     ),
     (
         "paragraph.line_spacing.set",
@@ -375,6 +429,30 @@ def style_params(params):
     return {"name": text_value(params["name"], "style name")}
 
 
+def outline_params(params):
+    require_keys(params, {"value"}, {"value"}, "outline level")
+    number(params["value"], 0, 9, "outline level", True)
+    return {"value": int(params["value"])}
+
+
+add(
+    "paragraph.outline_level.set",
+    "outline_level",
+    {"paragraph", "style"},
+    op.set_outline_level,
+    outline_params,
+    {"value": "0..9 (9 is body text)"},
+)
+add(
+    "paragraph.numbering_suppressed.set",
+    "numbering_suppressed",
+    {"paragraph"},
+    op.suppress_numbering,
+    scalar("boolean"),
+    {"value": "boolean"},
+)
+
+
 add(
     "paragraph.style.assign",
     "style",
@@ -454,14 +532,19 @@ for action, prop, handler, section, effects in (
         "page_numbers",
         op.configure_page_numbers,
         "page_numbers",
-        ("managed/reused PAGE fields", "first-page flag", "page numbering start"),
+        ("managed/reused PAGE fields", "scoped standalone front-matter PAGE removal", "first-page flag", "decimal page numbering start and continuation"),
     ),
     (
         "toc.configure",
         "table_of_contents",
         op.configure_toc,
         "table_of_contents",
-        ("managed TOC paragraphs", "field update setting"),
+        (
+            "managed TOC paragraphs",
+            "standalone imported TOC fields",
+            "field update setting",
+            "confirmed heading outline levels",
+        ),
     ),
     (
         "heading.numbering.configure",
@@ -510,6 +593,8 @@ for action, prop, handler, section, effects in (
         {
             "contract": section,
             "scope": "document; use atomic properties for local formatting",
+            **({"scope": ["all", "body"], "start_section": "optional one-based section index"}
+               if prop == "page_numbers" else {}),
             **(
                 {
                     "level1": ["keep", "chinese", "arabic", "arabic-space"],
@@ -523,6 +608,20 @@ for action, prop, handler, section, effects in (
         True,
         effects,
     )
+
+
+REGISTRY["heading.scheme.configure"] = Capability(
+    "heading.scheme.configure",
+    "heading_numbering",
+    frozenset({"document"}),
+    template_numbering.apply_heading_scheme,
+    template_numbering.validate_scheme,
+    template_numbering.read_heading_scheme,
+    template_numbering.verify_heading_scheme,
+    {"levels": "explicit Word numbering level definitions"},
+    True,
+    ("chapter heading styles and numbering; established manual prefixes",),
+)
 
 
 def capabilities():
@@ -557,6 +656,14 @@ def header_variant(validator):
 
 
 for action, prop, targets, handler, validator, parameters in (
+    (
+        "header.border_bottom.set",
+        "border_bottom",
+        {"section"},
+        headers.set_border_bottom,
+        header_variant(scalar("boolean")),
+        {"value": "boolean"},
+    ),
     (
         "header.content.set",
         "content",

@@ -8,13 +8,12 @@ import json
 import re
 from typing import Any, Iterable
 
-from config import LIST_NUMBERING_STYLES
+from config import LIST_NUMBERING_STYLES, SKILL_DIR
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls
-from docx.shared import Mm
 from lxml import etree
 
 from .namespaces import qn
@@ -178,12 +177,13 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
             tblPr.append(parse_xml(f'<w:jc {nsdecls("w")} w:val="{alignment}"/>'))
 
         snapshot_key = "{urn:word-format-master:format}originalBorders"
+        cells = [tc for tr in table._tbl.findall(qn("w:tr")) for tc in tr.findall(qn("w:tc"))]
         if three_line and snapshot_key not in tblPr.attrib:
-            border_nodes = [tblPr] + [cell for row in table.rows for cell in row.cells]
+            border_nodes = [tblPr] + cells
             snapshot = []
             seen_cells = set()
             for node in border_nodes:
-                owner = node if node is tblPr else node._tc.get_or_add_tcPr()
+                owner = node if node is tblPr else node.get_or_add_tcPr()
                 if owner in seen_cells:
                     continue
                 seen_cells.add(owner)
@@ -196,12 +196,18 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
             tblPr.set(snapshot_key, json.dumps(snapshot))
         if "three_line_table" in tables and not three_line and snapshot_key in tblPr.attrib:
             snapshot = json.loads(tblPr.attrib.pop(snapshot_key))
-            owners = [tblPr]
-            for row in table.rows:
-                for cell in row.cells:
-                    owner = cell._tc.get_or_add_tcPr()
-                    if owner not in owners:
-                        owners.append(owner)
+            owners = [tblPr] + [tc.get_or_add_tcPr() for tc in cells]
+            if len(snapshot) != len(owners):
+                # Older snapshots used the grid view, which omits continuation
+                # cells of vertical merges. Those cells were never changed.
+                legacy = [tblPr]
+                for row in table.rows:
+                    for cell in row.cells:
+                        owner = cell._tc.get_or_add_tcPr()
+                        if owner not in legacy:
+                            legacy.append(owner)
+                if len(snapshot) == len(legacy):
+                    owners = legacy
             if len(snapshot) != len(owners):
                 raise ValueError("Table structure changed; saved borders cannot be restored")
             for index, (owner, saved) in enumerate(zip(owners, snapshot)):
@@ -226,18 +232,43 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
             )
             tblPr.append(three_line_xml)
 
-            if table.rows:
-                header_row = table.rows[0]
-                for cell in header_row.cells:
-                    tcPr = cell._tc.get_or_add_tcPr()
+            rows = table._tbl.findall(qn("w:tr"))
+            for row_index, row in enumerate(rows):
+                for cell in row.findall(qn("w:tc")):
+                    tcPr = cell.get_or_add_tcPr()
                     existing_tc_borders = tcPr.find(qn("w:tcBorders"))
                     if existing_tc_borders is not None:
                         tcPr.remove(existing_tc_borders)
-                    tc_border_xml = parse_xml(
-                        f"<w:tcBorders {nsdecls('w')}>"
-                        f'<w:bottom w:val="single" w:sz="6" w:space="0" w:color="auto"/>'
-                        f"</w:tcBorders>"
-                    )
+                    tc_border_xml = OxmlElement("w:tcBorders")
+                    # Direct cell borders override table and conditional-style
+                    # borders. Cover actual cells, including merge continuations.
+                    for edge in (
+                        "top",
+                        "bottom",
+                        "left",
+                        "right",
+                        "start",
+                        "end",
+                        "insideH",
+                        "insideV",
+                        "tl2br",
+                        "tr2bl",
+                    ):
+                        border = OxmlElement("w:" + edge)
+                        size = (
+                            12
+                            if (edge == "top" and row_index == 0)
+                            or (edge == "bottom" and row_index == len(rows) - 1)
+                            else 6
+                            if edge == "bottom" and row_index == 0
+                            else None
+                        )
+                        border.set(qn("w:val"), "single" if size else "nil")
+                        if size:
+                            border.set(qn("w:sz"), str(size))
+                            border.set(qn("w:space"), "0")
+                            border.set(qn("w:color"), "auto")
+                        tc_border_xml.append(border)
                     tcPr.append(tc_border_xml)
 
         if "repeat_header_row" in tables and not repeat_header and table.rows:
@@ -359,28 +390,16 @@ def apply_caption_positions(document: Document, captions: dict[str, Any]) -> lis
                 continue
             previous = _neighboring_content_element(document, paragraph._p, -1)
             following = _neighboring_content_element(document, paragraph._p, 1)
-            target = (
-                previous
-                if (
-                    previous is not None
-                    and (
-                        previous.tag == qn("w:tbl")
-                        if role == "table"
-                        else _is_figure_paragraph(previous)
-                    )
-                )
-                else None
+            matches_role = (
+                (lambda elem: elem.tag == qn("w:tbl"))
+                if role == "table"
+                else _is_figure_paragraph
             )
-            if (
-                target is None
-                and following is not None
-                and (
-                    following.tag == qn("w:tbl")
-                    if role == "table"
-                    else _is_figure_paragraph(following)
-                )
-            ):
-                target = following
+            primary = following if position == "above" else previous
+            secondary = previous if position == "above" else following
+            target = primary if (primary is not None and matches_role(primary)) else None
+            if target is None and secondary is not None and matches_role(secondary):
+                target = secondary
             if _move_caption_next_to_target(document, paragraph._p, target, position):
                 moved += 1
         if moved:
@@ -570,9 +589,24 @@ def _find_body_section_index(document: Document) -> int:
 def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     if not tokens:
         return []
-    cleared = clear_managed_header_footer_paragraphs(document, {"WFM Page Number"})
     if not tokens.get("enabled"):
+        cleared = clear_managed_header_footer_paragraphs(document, {"WFM Page Number"})
         return [f"Removed managed page-number fields from {cleared} part(s)"]
+    from .contracts import FormatError
+    from .fields import page_number_paragraphs
+    from .headers import detach
+    from .properties import element
+
+    sections = list(document.sections)
+    body_idx = _find_body_section_index(document)
+    start_idx = int(tokens["start_section"]) - 1 if "start_section" in tokens else (
+        body_idx if tokens.get("scope", "all") == "body" else 0
+    )
+    if not 0 <= start_idx < len(sections):
+        raise FormatError("start_section is outside the document")
+    if (tokens.get("scope") == "body" and "start_section" not in tokens
+            and body_idx == 0 and len(sections) > 1):
+        raise FormatError("Body section is ambiguous; specify start_section", "needs_clarification")
     location = tokens.get("location", "footer")
     style_name = "WFM Page Number"
     style = get_or_create_paragraph_style(document, style_name)
@@ -580,55 +614,45 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     set_paragraph_format(style, tokens)
     start = int(tokens.get("start", 1))
 
-    body_idx = _find_body_section_index(document)
-    if body_idx > 0:
-        for i in range(body_idx):
-            sec = document.sections[i]
-            for kind in ("footer", "first_page_footer", "even_page_footer"):
-                container = getattr(sec, kind)
-                container.is_linked_to_previous = False
-                for p in list(container.paragraphs):
-                    clear_paragraph_content(p)
-            sect_pr = sec._sectPr
-            page_type = sect_pr.find(qn("w:pgNumType"))
-            if page_type is not None:
-                sect_pr.remove(page_type)
-
-        sec_body = document.sections[body_idx]
-        for kind in ("footer", "first_page_footer", "even_page_footer"):
-            getattr(sec_body, kind).is_linked_to_previous = False
-        sect_pr = sec_body._sectPr
-        page_type = sect_pr.find(qn("w:pgNumType"))
-        if page_type is None:
-            page_type = OxmlElement("w:pgNumType")
-            sect_pr.append(page_type)
-        page_type.set(qn("w:start"), str(start))
-        target_sections = document.sections[body_idx:]
-    else:
-        if document.sections:
-            sect_pr = document.sections[0]._sectPr
-            page_type = sect_pr.find(qn("w:pgNumType"))
-            if page_type is None:
-                page_type = OxmlElement("w:pgNumType")
-                sect_pr.append(page_type)
+    # Freeze all variants before changing linked definitions, including explicit
+    # references sharing the same part. First/even front matter must stay blank.
+    variants = (location, f"first_page_{location}", f"even_page_{location}")
+    for section in reversed(sections):
+        for attr in variants:
+            detach(getattr(section, attr))
+    cleared = 0
+    for section in sections[:start_idx]:
+        for attr in variants:
+            container = getattr(section, attr)
+            for paragraph in page_number_paragraphs(container._element):
+                paragraph.getparent().remove(paragraph)
+                cleared += 1
+    reset_idx = start_idx or (body_idx if "show_on_body_first_page" in tokens else 0)
+    for i, section in enumerate(sections[start_idx:], start_idx):
+        page_type = element(section._sectPr, "pgNumType")
+        page_type.set(qn("w:fmt"), "decimal")
+        if i in {start_idx, reset_idx}:
             page_type.set(qn("w:start"), str(start))
-            if not tokens.get("show_on_first_page", True):
-                document.sections[0].different_first_page_header_footer = True
-        target_sections = list(document.sections)
-
+        else:
+            page_type.attrib.pop(qn("w:start"), None)
     containers = []
-    for section in target_sections:
+    for section in sections[start_idx:]:
         containers.append(getattr(section, location))
         if document.settings.odd_and_even_pages_header_footer:
             containers.append(getattr(section, f"even_page_{location}"))
-    if body_idx > 0:
-        show_first = tokens.get("show_on_body_first_page", True)
-    else:
+    for i, section in enumerate(sections[start_idx:], start_idx):
         show_first = tokens.get("show_on_first_page", True)
-    if show_first:
-        for section in target_sections:
-            if section.different_first_page_header_footer:
-                containers.append(getattr(section, f"first_page_{location}"))
+        if i >= body_idx and "show_on_body_first_page" in tokens:
+            show_first = tokens["show_on_body_first_page"]
+        if not show_first:
+            section.different_first_page_header_footer = True
+            container = getattr(section, f"first_page_{location}")
+            # Freeze the inherited content before other variants receive PAGE
+            # fields; retain images, relationships and unrelated footer text.
+            for paragraph in page_number_paragraphs(container._element):
+                paragraph.getparent().remove(paragraph)
+        elif section.different_first_page_header_footer:
+            containers.append(getattr(section, f"first_page_{location}"))
     seen: set[int] = set()
     reused = 0
     for container in containers:
@@ -636,6 +660,10 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
         if identity in seen:
             continue
         seen.add(identity)
+        owned = page_number_paragraphs(container._element)
+        # Collapse duplicate imported page-only paragraphs deterministically.
+        for extra in owned[1:]:
+            extra.getparent().remove(extra)
         paragraph = _standalone_page_number_paragraph(container)
         if paragraph is not None:
             clear_paragraph_content(paragraph)
@@ -687,13 +715,33 @@ def _find_toc_insertion_anchor(document: Document):
     If the document contains an unmanaged placeholder TOC heading, that position is
     used and the redundant placeholder paragraph will be removed upon insertion.
     """
-    re_abstract_cn = re.compile(r"^\s*(?:摘\s*要|中文摘要|内容摘要)(?:\s*[:：].*)?$", re.I)
-    re_abstract_en = re.compile(r"^\s*(?:abstracts?|英文摘要)(?:\s*[:：].*)?$", re.I)
-    re_keywords_cn = re.compile(r"^\s*(?:关\s*键\s*词)(?:\s*[:：].*)?$", re.I)
-    re_keywords_en = re.compile(r"^\s*(?:key\s*words?)(?:\s*[:：].*)?$", re.I)
-    re_toc = re.compile(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", re.I)
+    re_abstract_cn = re.compile(
+        r"^\s*(?:[【\[]\s*(?:摘\s*要|中文摘要|内容摘要|提\s*要)\s*[】\]]\s*(?:[:：]\s*)?.*|"
+        r"(?:摘\s*要|中文摘要|内容摘要|提\s*要)(?:\s*[:：].*)?)$",
+        re.I,
+    )
+    re_abstract_en = re.compile(
+        r"^\s*(?:[【\[]\s*(?:abstracts?|英文摘要)\s*[】\]]\s*(?:[:：]\s*)?.*|"
+        r"(?:abstracts?|英文摘要)(?:\s*[:：].*)?)$",
+        re.I,
+    )
+    re_keywords_cn = re.compile(
+        r"^\s*(?:[【\[]\s*(?:关\s*键\s*词|主\s*题\s*词)\s*[】\]]\s*(?:[:：]\s*)?.*|"
+        r"(?:关\s*键\s*词|主\s*题\s*词)(?:\s*[:：].*)?)$",
+        re.I,
+    )
+    re_keywords_en = re.compile(
+        r"^\s*(?:[【\[]\s*(?:key\s*words?|index\s+terms?)\s*[】\]]\s*(?:[:：]\s*)?.*|"
+        r"(?:key\s*words?|index\s+terms?)(?:\s*[:：].*)?)$",
+        re.I,
+    )
+    re_toc = re.compile(r"^\s*(?:目\s*录|目\s*次|table\s+of\s+contents|contents)\s*$", re.I)
     re_next_module = re.compile(
-        r"^\s*(?:第\s*[一二三四五六七八九十0-9]+\s*章|\d+(?:[、.\s]|\s*)[^\s\d.]|符号说明|符号表|术语表|symbols?|glossary|参考文献|参考资料|致\s*谢|附\s*录|references|bibliography|acknowledg(?:e)?ments?|appendix)",
+        r"^\s*(?:第\s*[一二三四五六七八九十0-9]+\s*章|\d+(?:[、.\s]|\s*)[^\s\d.]|"
+        r"主要符号(?:对照)?表|符号(?:与|及)?缩略语说明|符号说明|缩略语(?:对照)?表|符号表|术语表|"
+        r"symbols?|abbreviations?|nomenclature|glossary|"
+        r"参考文献|参考资料|引用文献|致\s*谢|谢\s*辞|后\s*记|附\s*录|"
+        r"references|bibliography|works\s+cited|acknowledg(?:e)?ments?|appendix)",
         re.I,
     )
 
@@ -714,10 +762,40 @@ def _find_toc_insertion_anchor(document: Document):
     if placeholder_toc_p is not None:
         return placeholder_toc_p, placeholder_toc_p
 
+    def _upcoming_abstract_lang(start_idx: int) -> str | None:
+        """Look ahead across 1-2 short abstract_title lines for a following Abstract/摘要."""
+        limit = min(len(paragraphs), start_idx + 3)
+        for j in range(start_idx, limit):
+            cand = paragraphs[j]
+            if paragraph_style_name(document, cand._p) in TOC_MANAGED_STYLES:
+                continue
+            ct = cand.text.strip()
+            if not ct:
+                continue
+            if re_abstract_en.match(ct):
+                return "en"
+            if re_abstract_cn.match(ct):
+                return "zh"
+            c_style = paragraph_style_name(document, cand._p).lower()
+            c_h1 = (
+                c_style.startswith("heading 1")
+                or c_style.startswith("标题 1")
+                or c_style == "heading"
+            )
+            if (
+                len(ct) > 200
+                or c_h1
+                or re_toc.match(ct)
+                or re_next_module.match(ct)
+                or re.search(r"[。；;！？!?]", ct)
+            ):
+                return None
+        return None
+
     state = "SEEKING_ABSTRACT"
     anchor_p = None
 
-    for p in paragraphs:
+    for idx, p in enumerate(paragraphs):
         if paragraph_style_name(document, p._p) in TOC_MANAGED_STYLES:
             continue
         t = p.text.strip()
@@ -752,18 +830,27 @@ def _find_toc_insertion_anchor(document: Document):
         elif state == "IN_CHINESE_KEYWORDS":
             if re_abstract_en.match(t):
                 state = "IN_ENGLISH_ABSTRACT"
+            elif _upcoming_abstract_lang(idx) == "en":
+                continue
             else:
                 anchor_p = p
                 break
         elif state == "IN_ENGLISH_ABSTRACT":
             if re_keywords_en.match(t) or re_keywords_cn.match(t):
                 state = "IN_ENGLISH_KEYWORDS"
+            elif re_abstract_cn.match(t):
+                state = "IN_CHINESE_ABSTRACT"
             elif re_toc.match(t) or re_next_module.match(t) or is_h1:
                 anchor_p = p
                 break
         elif state == "IN_ENGLISH_KEYWORDS":
-            anchor_p = p
-            break
+            if re_abstract_cn.match(t):
+                state = "IN_CHINESE_ABSTRACT"
+            elif _upcoming_abstract_lang(idx) == "zh":
+                continue
+            else:
+                anchor_p = p
+                break
 
     if anchor_p is None and state == "SEEKING_ABSTRACT":
         anchor_p = paragraphs[0] if paragraphs else None
@@ -777,6 +864,7 @@ def _find_toc_insertion_anchor(document: Document):
             sect_pr = prev_xml.find("./" + qn("w:pPr") + "/" + qn("w:sectPr"))
             if sect_pr is not None:
                 from docx.text.paragraph import Paragraph as DocxParagraph
+
                 anchor_p = DocxParagraph(prev_xml, document)
                 break
             if prev_xml.find(".//" + qn("w:t")) is not None:
@@ -795,45 +883,68 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
 
     title = str(tokens.get("title") or "目录")
     max_level = int(tokens.get("max_heading_level", 3))
-    from .spec import DEFAULT_TOC_TITLE_STYLE
+    from .contracts import FormatError
+    from .properties import outline_level
+    from .toc import headings, imported_fields
 
-    title_style_tokens = tokens.get("title_style") or DEFAULT_TOC_TITLE_STYLE
+    for node in imported_fields(document):
+        node.getparent().remove(node)
+        removed += 1
+    entries = headings(document, max_level)
+    if not entries:
+        raise FormatError(
+            "Table of contents (TOC) has no confirmed headings", "needs_clarification"
+        )
+    # Preserve the template's font, numbering and paragraph style. A real
+    # outline level makes conservative text-inferred headings searchable by
+    # Word's TOC \\u switch without imposing built-in Heading formatting.
+    for paragraph, level in entries:
+        if outline_level(document, paragraph._p) is None:
+            pr = paragraph._p.get_or_add_pPr()
+            node = OxmlElement("w:outlineLvl")
+            node.set(qn("w:val"), str(level - 1))
+            pr.append(node)
+    cached_entries = ["  " * (level - 1) + p.text.strip() for p, level in entries]
     heading_style = get_or_create_paragraph_style(document, "WFM TOC Heading")
     field_style = get_or_create_paragraph_style(document, "WFM TOC Field")
     break_style = get_or_create_paragraph_style(document, "WFM TOC Break")
     for style in (heading_style, field_style, break_style):
         if style.base_style is None:
             style.base_style = get_or_create_paragraph_style(document, "Normal")
-    set_style_font(heading_style, title_style_tokens)
-    set_paragraph_format(heading_style, title_style_tokens)
-    set_paragraph_format(field_style, {"space_before_pt": 0, "space_after_pt": 8})
-    set_paragraph_format(break_style, {"space_before_pt": 0, "space_after_pt": 0})
+    for style, key in (
+        (heading_style, "title_format"),
+        (field_style, "field_format"),
+        (break_style, "break_format"),
+    ):
+        appearance = tokens.get(key, tokens.get("title_style", {}) if key == "title_format" else {})
+        set_style_font(style, appearance)
+        set_paragraph_format(style, appearance)
+    # The TOC title must never index itself, regardless of its visual appearance.
+    from .properties import element
+
+    element(element(heading_style.element, "pPr"), "outlineLvl").set(qn("w:val"), "9")
 
     anchor_p, placeholder_toc_p = _find_toc_insertion_anchor(document)
     anchor_xml = anchor_p._p if anchor_p is not None else None
 
     if placeholder_toc_p is not None:
         title_paragraph = placeholder_toc_p
+        saved_rpr = None
+        for r in title_paragraph.runs:
+            rpr = r._r.find(qn("w:rPr"))
+            if rpr is not None:
+                saved_rpr = copy.deepcopy(rpr)
+                break
         clear_paragraph_content(title_paragraph)
         title_paragraph.style = heading_style
-        title_paragraph.add_run(title)
+        title_run = title_paragraph.add_run(title)
+        if saved_rpr is not None:
+            title_run._r.insert(0, saved_rpr)
+        title_appearance = tokens.get("title_format", tokens.get("title_style", {}))
+        if title_appearance:
+            set_run_font(title_run, title_appearance)
         insert_target = title_paragraph._p.getnext()
         field_paragraph = _insert_body_paragraph_before(document, insert_target, field_style)
-        cached_entries = []
-        for paragraph in document.paragraphs:
-            style_name = paragraph_style_name(document, paragraph._p)
-            if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
-                continue
-            text = paragraph.text.strip()
-            if not text:
-                continue
-            if re.match(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", text, re.I):
-                continue
-            match = re.fullmatch(r"Heading ([1-9])", style_name, re.I)
-            if match and int(match.group(1)) <= max_level:
-                level = int(match.group(1))
-                indent = "  " * (level - 1)
-                cached_entries.append(f"{indent}{text}")
         append_field(
             field_paragraph,
             f'TOC \\o "1-{max_level}" \\h \\z \\u',
@@ -884,21 +995,6 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
         title_paragraph = _insert_body_paragraph_before(document, anchor_xml, heading_style)
         title_paragraph.add_run(title)
         field_paragraph = _insert_body_paragraph_before(document, anchor_xml, field_style)
-        cached_entries = []
-        for paragraph in document.paragraphs:
-            style_name = paragraph_style_name(document, paragraph._p)
-            if style_name in TOC_MANAGED_STYLES or style_name.lower().startswith("wfm toc"):
-                continue
-            text = paragraph.text.strip()
-            if not text:
-                continue
-            if re.match(r"^\s*(?:目\s*录|table\s+of\s+contents|contents)\s*$", text, re.I):
-                continue
-            match = re.fullmatch(r"Heading ([1-9])", style_name, re.I)
-            if match and int(match.group(1)) <= max_level:
-                level = int(match.group(1))
-                indent = "  " * (level - 1)
-                cached_entries.append(f"{indent}{text}")
         append_field(
             field_paragraph,
             f'TOC \\o "1-{max_level}" \\h \\z \\u',
@@ -969,7 +1065,7 @@ def _bind_style_numbering(document: Document, style_name: str, num_id: int, ilvl
 
 def _ensure_heading_multilevel_numbering(
     document: Document,
-    level1_format: str = "chinese",
+    level1_format: str,
     level2_format: str = "arabic",
     level3_format: str = "arabic",
     headings_spec: list[dict[str, Any]] | None = None,
@@ -989,24 +1085,19 @@ def _ensure_heading_multilevel_numbering(
         document.styles["Heading 3"].style_id if "Heading 3" in document.styles else "Heading3"
     )
 
-    if level1_format == "chinese":
-        l1_fmt = "chineseCountingThousand"
-        l1_txt = "第%1章"
-    elif level1_format == "arabic":
-        l1_fmt = "decimal"
-        l1_txt = "%1、"
-    elif level1_format == "arabic-space":
-        l1_fmt = "decimal"
-        l1_txt = "%1"
-    else:
-        l1_fmt = "chineseCountingThousand"
-        l1_txt = "第%1章"
+    # Frozen adapter for legacy enum requests. New templates carry complete levels.
+    modes = json.loads(
+        (SKILL_DIR / "templates/compatibility/heading-numbering.json").read_text(encoding="utf-8")
+    )
+    if level1_format not in modes:
+        raise ValueError("Explicit heading numbering format is required")
+    l1_fmt, l1_txt = modes[level1_format]["format"], modes[level1_format]["text"]
 
-    def _lvl_ind_xml(lvl_idx: int, default_size: float) -> str:
+    def _lvl_ind_xml(lvl_idx: int) -> str:
         h = next(
             (item for item in (headings_spec or []) if int(item.get("level", 0)) == lvl_idx + 1), {}
         )
-        f_sz = float(h.get("font_size_pt") or default_size)
+        f_sz = float(h["font_size_pt"]) if h.get("font_size_pt") else None
         fl_c = h.get("first_line_indent_chars")
         fl_m = h.get("first_line_indent_mm")
         l_c = h.get("left_indent_chars")
@@ -1016,32 +1107,24 @@ def _ensure_heading_multilevel_numbering(
         if fl_c is not None:
             fl_val = float(fl_c)
             attrs.append(f'w:firstLineChars="{int(round(fl_val * 100))}"')
-            attrs.append(f'w:firstLine="{int(round(fl_val * f_sz * 20))}"')
+            if f_sz:
+                attrs.append(f'w:firstLine="{int(round(fl_val * f_sz * 20))}"')
         elif fl_m is not None and float(fl_m) > 0:
-            chars = round(float(fl_m) / (f_sz * 25.4 / 72), 2)
-            attrs.append(f'w:firstLineChars="{int(round(chars * 100))}"')
             attrs.append(f'w:firstLine="{int(round(float(fl_m) * 56.6929))}"')
-        else:
-            attrs.append('w:firstLine="0"')
-            attrs.append('w:firstLineChars="0"')
 
         if l_c is not None:
             l_val = float(l_c)
             attrs.append(f'w:leftChars="{int(round(l_val * 100))}"')
-            attrs.append(f'w:left="{int(round(l_val * f_sz * 20))}"')
+            if f_sz:
+                attrs.append(f'w:left="{int(round(l_val * f_sz * 20))}"')
         elif l_m is not None and float(l_m) > 0:
-            chars = round(float(l_m) / (f_sz * 25.4 / 72), 2)
-            attrs.append(f'w:leftChars="{int(round(chars * 100))}"')
             attrs.append(f'w:left="{int(round(float(l_m) * 56.6929))}"')
-        else:
-            attrs.append('w:left="0"')
-            attrs.append('w:leftChars="0"')
 
-        return f"<w:pPr><w:ind {' '.join(attrs)}/></w:pPr>"
+        return f"<w:pPr><w:ind {' '.join(attrs)}/></w:pPr>" if attrs else ""
 
-    ind_l1 = _lvl_ind_xml(0, 16.0)
-    ind_l2 = _lvl_ind_xml(1, 14.0)
-    ind_l3 = _lvl_ind_xml(2, 12.0)
+    ind_l1 = _lvl_ind_xml(0)
+    ind_l2 = _lvl_ind_xml(1)
+    ind_l3 = _lvl_ind_xml(2)
 
     abstract_xml = f'''
     <w:abstractNum {nsdecls("w")} w:abstractNumId="{abstract_id}">
@@ -1178,7 +1261,12 @@ def normalize_heading_styles(
         if not text:
             continue
         current_style = paragraph_style_name(document, paragraph._p)
-        if current_style in TOC_MANAGED_STYLES or current_style.lower().startswith("wfm toc"):
+        lower_style = current_style.lower()
+        if (
+            current_style in TOC_MANAGED_STYLES
+            or lower_style.startswith("wfm toc")
+            or (lower_style.startswith("wfm ") and lower_style.endswith(" heading"))
+        ):
             continue
         from document_structure import heading_level, is_heading_candidate
 
@@ -1273,6 +1361,16 @@ def normalize_heading_styles(
         ):
             _set_paragraph_numbering(paragraph, num_id, ilvl=2)
 
+        # Explicit semantic level wins over a stale typed prefix (for example
+        # a Heading 3 paragraph still carrying "1.2"). Never leave both labels.
+        if actual_level in {1, 2, 3} and num_id is not None and not re_special.match(text):
+            from .numbering import heading_prefix
+
+            prefix = heading_prefix(paragraph.text)
+            if prefix and paragraph.text.strip() == text:
+                strip_text_prefix(paragraph._p, prefix.end())
+            _set_paragraph_numbering(paragraph, num_id, actual_level - 1)
+
     if adjusted:
         changes.append(
             f"Normalized {adjusted} heading paragraph style(s) according to chapter/section numbering"
@@ -1319,7 +1417,8 @@ def apply_reference_style(
         num_fmt, level_text = LIST_NUMBERING_STYLES[style_key]
         numbering = _get_numbering_element(document, create=True)
         abstract_id = _numbering_max_id(numbering, "abstractNum", "abstractNumId") + 1
-        num_id = _numbering_max_id(numbering, "num", "numId") + 1
+        # numId=0 means "suppress numbering", even in an otherwise empty part.
+        num_id = max(0, _numbering_max_id(numbering, "num", "numId")) + 1
 
         abstract = OxmlElement("w:abstractNum")
         abstract.set(qn("w:abstractNumId"), str(abstract_id))
@@ -1344,28 +1443,14 @@ def apply_reference_style(
         justification.set(qn("w:val"), "left")
         lvl.append(justification)
 
-        pPr_lvl = OxmlElement("w:pPr")
-        ind_lvl = OxmlElement("w:ind")
-        ind_lvl.set(qn("w:left"), "0")
-        ind_lvl.set(qn("w:leftChars"), "0")
-        ind_lvl.set(qn("w:hanging"), "420")
-        ind_lvl.set(qn("w:hangingChars"), "200")
-        pPr_lvl.append(ind_lvl)
-        lvl.append(pPr_lvl)
+        # Marker typography and indentation inherit unless explicitly supplied.
+        # The chosen template already applies reference paragraph properties.
+        from .properties import element, write_font
+        from .spec import FONT
 
-        rPr_lvl = OxmlElement("w:rPr")
-        rFonts_lvl = OxmlElement("w:rFonts")
-        latin = reference_tokens.get("font_latin") or "Times New Roman"
-        east_asia = reference_tokens.get("font_east_asia") or "宋体"
-        rFonts_lvl.set(qn("w:ascii"), latin)
-        rFonts_lvl.set(qn("w:hAnsi"), latin)
-        rFonts_lvl.set(qn("w:eastAsia"), east_asia)
-        rPr_lvl.append(rFonts_lvl)
-        size_pt = float(reference_tokens.get("font_size_pt") or 10.5)
-        sz_lvl = OxmlElement("w:sz")
-        sz_lvl.set(qn("w:val"), str(int(round(size_pt * 2))))
-        rPr_lvl.append(sz_lvl)
-        lvl.append(rPr_lvl)
+        for property_name in FONT:
+            if property_name in reference_tokens:
+                write_font(element(lvl, "rPr"), property_name, reference_tokens[property_name])
 
         abstract.append(lvl)
         numbering.append(abstract)
@@ -1413,7 +1498,7 @@ def _numbering_max_id(numbering, tag: str, attribute: str) -> int:
     return max(values, default=-1)
 
 
-def _num_format_for_num_id(numbering, num_id: str | None) -> str | None:
+def _num_format_for_num_id(numbering, num_id: str | None, ilvl: int = 0) -> str | None:
     if not num_id:
         return None
     num = next(
@@ -1432,7 +1517,20 @@ def _num_format_for_num_id(numbering, num_id: str | None) -> str | None:
         ),
         None,
     )
-    level = abstract.find(qn("w:lvl")) if abstract is not None else None
+    level = (
+        next(
+            (node for node in abstract.findall(qn("w:lvl")) if node.get(qn("w:ilvl")) == str(ilvl)),
+            None,
+        )
+        if abstract is not None
+        else None
+    )
+    override = next(
+        (node for node in num.findall(qn("w:lvlOverride")) if node.get(qn("w:ilvl")) == str(ilvl)),
+        None,
+    )
+    if override is not None and override.find(qn("w:lvl")) is not None:
+        level = override.find(qn("w:lvl"))
     num_fmt = level.find(qn("w:numFmt")) if level is not None else None
     return num_fmt.get(qn("w:val")) if num_fmt is not None else None
 
@@ -1479,14 +1577,14 @@ def _has_numbered_list_marker(document: Document, paragraph) -> bool:
         }
     ):
         return False
-    numbering = _get_numbering_element(document, create=False)
-    ppr = paragraph._p.pPr
-    num_pr = ppr.find(qn("w:numPr")) if ppr is not None else None
-    if num_pr is not None and numbering is not None:
-        num_id = num_pr.find(qn("w:numId"))
-        fmt = _num_format_for_num_id(
-            numbering, num_id.get(qn("w:val")) if num_id is not None else None
-        )
+    from .numbering import effective_numbering
+    from .properties import read_paragraph
+
+    if read_paragraph(document, paragraph._p, "numbering_suppressed"):
+        return False
+    found = effective_numbering(document, paragraph._p)
+    if found is not None:
+        fmt = _num_format_for_num_id(_get_numbering_element(document), found[0], found[1])
         return fmt not in {None, "bullet", "picture"}
     return any(
         marker in style_name for marker in ("list number", "numbered", "编号", "list paragraph")
@@ -1593,11 +1691,15 @@ def apply_numbered_lists(document: Document, tokens: dict[str, Any]) -> list[str
         num_id = _append_numbering_definition(document, style, start)
         for paragraph in paragraphs[index : end + 1]:
             _set_managed_num_pr(paragraph, num_id)
-            p_format = paragraph.paragraph_format
+            from .properties import write_paragraph
+
+            ppr = paragraph._p.get_or_add_pPr()
             if left_indent is not None:
-                p_format.left_indent = Mm(float(left_indent))
+                write_paragraph(ppr, "left_indent", {"value": float(left_indent), "unit": "mm"})
             if hanging_indent is not None:
-                p_format.first_line_indent = Mm(-float(hanging_indent))
+                write_paragraph(
+                    ppr, "hanging_indent", {"value": float(hanging_indent), "unit": "mm"}
+                )
         changes.append(f"Applied managed {style} numbering to {end - index + 1} list paragraph(s)")
         index = end + 1
     return changes

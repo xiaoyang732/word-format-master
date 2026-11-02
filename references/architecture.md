@@ -37,6 +37,10 @@
 `format_cli.py` 提供 `capabilities / inspect / profile / check-structure / audit / plan / apply / verify`。
 `apply_spec.py` 兼容直接 `--spec` 应用，委托 `word_format.api.apply_spec()`；兼容导出的字段/页码方法仍归属核心。
 
+`templates/builtin/` 是新模板入口的权威数据，`assets/presets.json` 是旧 spec 接口的冻结兼容数据；两者不互相补值。
+`references/` 仅保留当前契约；历史设计、修复与评审结果归档于 `_dev/docs/`。
+`_dev/tests/`、`_dev/scripts/` 和 `_dev/ci/` 纳入版本控制，生成文件与缓存不纳入。
+
 - Format Profile：`schema_version: 1.0`，见 [format-profile.md](format-profile.md)。
 - Format Spec：`schema_version: 1.0`，见 [format-spec.md](format-spec.md)。
 - Request / Plan / Report：`schema_version: 2.0`，见 [direct-format-api.md](direct-format-api.md)。

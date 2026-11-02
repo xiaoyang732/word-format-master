@@ -5,13 +5,20 @@ from __future__ import annotations
 import hashlib
 import re
 
-from document_structure import MODULE_MARKERS, classify_module, heading_level
+from document_structure import MODULE_MARKERS, classify_module, heading_level, is_inline_abstract
 from docx import Document
 from docx.text.paragraph import Paragraph
 
 from .contracts import json_hash, sha256, source_path
 from .namespaces import qn
-from .properties import outline_level, read_font, read_paragraph, style_map, text_runs, xml_value
+from .properties import (
+    outline_level,
+    paragraph_style,
+    read_font,
+    read_paragraph,
+    text_runs,
+    xml_value,
+)
 
 
 def paragraph_text(p):
@@ -36,40 +43,49 @@ class DocumentIndex:
         body = document.element.body
         for i, p in enumerate(body.iter(qn("w:p"))):
             top = p.getparent() is body
-            style_node = p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle"))
-            style_id = style_node.get(qn("w:val")) if style_node is not None else "Normal"
-            style = style_map(document).get(style_id)
-            style_name = style.name if style is not None else style_id
+            style = paragraph_style(document, p)
+            style_id = style.style_id if style is not None else ""
+            style_name = style.name if style is not None else ""
             text = paragraph_text(p)
             outline = outline_level(document, p)
             level = heading_level(text.strip(), style_name, outline)
             special = classify_module(text.strip(), style_name, outline)
+            inline_abs = special == "abstract" and is_inline_abstract(text)
             role = (
                 "keywords"
                 if special == "keywords"
+                else "body"
+                if inline_abs
                 else "heading"
                 if level or special in MODULE_MARKERS
                 else "body"
             )
             normalized = style_name.lower().replace(" ", "")
-            if normalized in {"title", "subtitle"}:
+            if re.fullmatch(r"(?:toc|目录)[1-9]|wfmtocfield|wfmtocbreak", normalized):
+                # Cached TOC text may look exactly like a chapter/caption.
+                role, level, special = "toc", None, None
+            elif normalized in {"title", "subtitle"}:
                 role = "title"
             elif "caption" in normalized or re.match(
                 r"^\s*(?:图|表|Figure|Fig\.|Table)\s*\d+", text, re.I
             ):
                 role = "caption"
             elif normalized.startswith("toc") or normalized.startswith("wfmtoc"):
-                role = "toc"
+                role = "heading" if special == "toc" else "toc"
             elif (
                 "list" in normalized or p.find("./" + qn("w:pPr") + "/" + qn("w:numPr")) is not None
             ):
                 role = "list" if not level else "heading"
-            if not top:
-                role = "table_text"
             unsafe = any(
                 a.tag in {qn("w:sdt"), qn("w:ins"), qn("w:del"), qn("w:txbxContent")}
                 for a in p.iterancestors()
             )
+            in_table = any(a.tag == qn("w:tbl") for a in p.iterancestors())
+            if not top:
+                if any(a.tag == qn("w:txbxContent") for a in p.iterancestors()):
+                    role = "textbox_text"
+                elif in_table and not unsafe:
+                    role = "table_text"
             oid = f"p{i}"
             self._add(
                 oid,
@@ -107,16 +123,35 @@ class DocumentIndex:
             ),
             None,
         )
-        if boundary is not None and any(
-            self.records[oid]["text"].strip() for oid in self.top_ids[:boundary]
-        ):
+        body_children = list(body)
+        boundary_elem = (
+            self.elements[self.top_ids[boundary]]
+            if boundary is not None and boundary < len(self.top_ids)
+            else None
+        )
+        boundary_idx = (
+            body_children.index(boundary_elem)
+            if boundary_elem in body_children
+            else len(body_children)
+        )
+        has_front_elements = boundary is not None and (
+            any(self.records[oid]["text"].strip() for oid in self.top_ids[:boundary])
+            or any(
+                c.tag == qn("w:tbl")
+                or c.find(".//" + qn("w:drawing")) is not None
+                or c.find(".//" + qn("w:pict")) is not None
+                for c in body_children[:boundary_idx]
+            )
+        )
+        if has_front_elements:
             module = "cover"
             module_counts["cover"] = 1
             module_occurrence = 1
             first = next(
-                oid for oid in self.top_ids[:boundary] if self.records[oid]["text"].strip()
+                (oid for oid in self.top_ids[:boundary] if self.records[oid]["text"].strip()),
+                None,
             )
-            if self.records[first]["role"] == "body":
+            if first is not None and self.records[first]["role"] == "body":
                 self.records[first]["role"] = "title"
         for oid in self.top_ids:
             record = self.records[oid]
@@ -150,13 +185,6 @@ class DocumentIndex:
                 and record["role"] == "body"
             ):
                 record["role"] = "module_body"
-        body_children = list(body)
-        boundary_elem = (
-            self.elements[self.top_ids[boundary]] if boundary is not None and boundary < len(self.top_ids) else None
-        )
-        boundary_idx = (
-            body_children.index(boundary_elem) if boundary_elem in body_children else len(body_children)
-        )
         for i, tbl in enumerate(body.iter(qn("w:tbl"))):
             pid = next((oid for oid, e in self.elements.items() if e is tbl.getparent()), None)
             tbl_idx = body_children.index(tbl) if tbl in body_children else boundary_idx
@@ -174,6 +202,9 @@ class DocumentIndex:
                     if p_oid and p_oid in self.records:
                         self.records[p_oid]["module"] = "cover"
                         self.records[p_oid]["role"] = "cover_text"
+        from .semantics import annotate
+
+        annotate(self)
         for i, section in enumerate(document.sections):
             from .headers import VARIANTS, effective_root
 
@@ -257,7 +288,7 @@ class DocumentIndex:
             for oid in self.top_ids
             if (
                 self.records[oid].get("module") == "references"
-                and self.records[oid].get("role") != "heading"
+                and self.records[oid].get("role") in {"reference", "list"}
             )
             or (
                 self.records[oid].get("module") is None
@@ -275,14 +306,20 @@ class DocumentIndex:
                 None,
                 name,
             )
+        runs = list(text_runs(p))
+        non_empty = [
+            r for r in runs if any(t.text and t.text.strip() for t in r.findall(qn("w:t")))
+        ]
+        target_runs = set(non_empty if start is None and non_empty else runs)
         values = []
         offset = 0
-        for r in text_runs(p):
+        for r in runs:
             length = sum(len(t.text or "") for t in r.findall(qn("w:t")))
             if length and (start is None or (offset < end and offset + length > start)):
-                value = read_font(self.document, p, r, name)
-                if value not in values:
-                    values.append(value)
+                if r in target_runs:
+                    value = read_font(self.document, p, r, name)
+                    if value not in values:
+                        values.append(value)
             offset += length
         return values or [read_font(self.document, p, None, name)]
 

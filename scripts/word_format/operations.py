@@ -7,7 +7,14 @@ from docx.table import Table
 
 from .contracts import FormatError
 from .namespaces import qn
-from .properties import element, simple_range, text_runs, write_font, write_paragraph
+from .properties import (
+    element,
+    simple_range,
+    text_runs,
+    write_font,
+    write_paragraph,
+    write_style_font,
+)
 
 
 def ensure_style(index, ref):
@@ -16,7 +23,7 @@ def ensure_style(index, ref):
         style = index.document.styles[name]
     except KeyError:
         style = index.document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
-        style.base_style = index.document.styles["Normal"]
+        style.base_style = index.document.styles.default(WD_STYLE_TYPE.PARAGRAPH)
     index.elements[ref["id"]] = style.element
     if style.type != WD_STYLE_TYPE.PARAGRAPH:
         raise FormatError("Only paragraph styles are supported", "unsupported")
@@ -28,8 +35,8 @@ def ensure_style(index, ref):
 
 def set_font_property(index, ref, params, name):
     if ref["kind"] == "style":
-        pr = element(ensure_style(index, ref).element, "rPr")
-        write_font(pr, name, params["value"])
+        style = ensure_style(index, ref)
+        write_style_font(index.document, style, name, params["value"])
         return
     p = index.elements[ref["id"]]
     runs = (
@@ -41,7 +48,9 @@ def set_font_property(index, ref, params, name):
         # Empty runs may contain bookmarks/fields. Do not create formatting on them.
         if any(t.text for t in run.findall(qn("w:t"))):
             write_font(element(run, "rPr"), name, params["value"])
-    if not any(t.text for run in runs for t in run.findall(qn("w:t"))):
+    if ref["kind"] == "paragraph" or not any(
+        t.text for run in runs for t in run.findall(qn("w:t"))
+    ):
         write_font(element(element(p, "pPr"), "rPr"), name, params["value"])
 
 
@@ -128,6 +137,14 @@ def assign_style(index, ref, params):
     style = ensure_style(index, style_ref)
     node = element(element(index.elements[ref["id"]], "pPr"), "pStyle")
     node.set(qn("w:val"), style.style_id)
+
+
+def set_outline_level(index, ref, params):
+    set_paragraph_property(index, ref, params, "outline_level")
+
+
+def suppress_numbering(index, ref, params):
+    set_paragraph_property(index, ref, params, "numbering_suppressed")
 
 
 def set_page_property(index, ref, params, attr):
