@@ -15,24 +15,7 @@ htmlcov/
 Thumbs.db
 output/
 
-# Track development documentation, tests and archived reference templates.
-# Generated reports, renderings, caches and local experiments stay local.
-dev/*
-!dev/README.md
-!dev/tests/
-dev/tests/*
-!dev/tests/test_*.py
-!dev/scripts/
-dev/scripts/*
-!dev/scripts/validate_project.py
-!dev/scripts/smoke_test.py
-!dev/ci/
-dev/ci/*
-!dev/ci/pyproject.toml
-!dev/ci/requirements-dev.txt
-!dev/docs/
-!dev/docs/**
-!dev/templates/
-!dev/templates/**
-!dev/reports/
-!dev/reports/**
+# Local development material is not part of the runtime repository.
+/dev/
+/_dev/
+/.agents/
