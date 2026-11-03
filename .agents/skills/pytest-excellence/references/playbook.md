@@ -5,7 +5,7 @@
 ```toml
 # pyproject.toml
 [tool.pytest.ini_options]
-testpaths = ["tests", "_dev/tests"]
+testpaths = ["tests", "dev/tests"]
 addopts = "-v --strict-markers --tb=short"
 markers = [
     "slow: marks tests as slow",
@@ -16,7 +16,7 @@ markers = [
 
 [tool.coverage.run]
 source = ["scripts", "src"]
-omit = ["tests/*", "_dev/tests/*"]
+omit = ["tests/*", "dev/tests/*"]
 
 [tool.coverage.report]
 fail_under = 80

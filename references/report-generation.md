@@ -1,6 +1,6 @@
 # 默认报告生成流程
 
-当用户要求新写一份报告、课程作业报告、课题报告且未指定模板或详细格式要求时，使用项目登记的通用课程报告模板。入口读取 `templates/reports.json` 的 `default`，不依赖以前聊天、`output/` 下的示例、网络临时下载或机器上的绝对路径。原始学校文件是来源证据，不能误选成默认通用版本。此流程不改变已有文档排版、只读检查或学位论文任务的路由。
+当用户要求新写一份报告、课程作业报告、课题报告且未指定模板或详细格式要求时，使用项目登记的通用课程报告模板。入口读取 `templates/reports.json` 的 `default`，不依赖以前聊天、`dev/output/` 下的示例、网络临时下载或机器上的绝对路径。历史学校模板及来源原件归档于 `dev/templates/`，不能误选成默认通用版本。此流程不改变已有文档排版、只读检查或学位论文任务的路由。
 
 ## 选择与准备
 
@@ -12,7 +12,7 @@
 
 ```powershell
 $SKILL_DIR = "D:/project/word-format-master"
-$REPORT_TASK = "D:/project/word-format-master/output/新报告任务"
+$REPORT_TASK = "D:/project/word-format-master/dev/output/新报告任务"
 python "$SKILL_DIR/scripts/format_cli.py" report list
 python "$SKILL_DIR/scripts/format_cli.py" report prepare "$REPORT_TASK" --topic "用户指定主题"
 # 用户提供其他 DOCX 时：report prepare "$REPORT_TASK" --sample "D:/材料/教师模板.docx"

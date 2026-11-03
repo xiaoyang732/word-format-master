@@ -128,7 +128,11 @@ word-format-master/
 │   ├── reports.json         # 默认报告模板登记及来源文件指纹
 │   └── reference/general-course-report/ # 已选定的通用课程报告模板
 ├── references/              # 当前接口规范与工作流契约
-└── _dev/                    # 回归测试、开发配置、验证脚本与历史改造记录
+└── dev/                     # 开发计划、报告、历史模板、测试及生成产物归档
+    ├── docs/                # 开发计划和审查、修复报告
+    ├── templates/           # 未启用的学校模板及来源原件
+    ├── reports/             # 模板验收摘要
+    └── output/              # 历次报告和渲染产物，仅本地保留
 ```
 
 ### 3. 命令行工作流示例（由 AI 在后台自动组织调用）
@@ -180,13 +184,13 @@ python scripts/render_docx.py "论文-排版后.docx" --output-dir render --meth
 
 ## 五、 开发验证与进阶文档
 
-自动化测试、开发配置和验证脚本位于 `_dev/`，并已纳入版本控制。生成文件与缓存由 `.gitignore` 排除；开发历史记录放在 `_dev/docs/`。
+开发资料统一放在 [dev/](dev/README.md)：计划和审查报告放在 `dev/docs/`，未启用的参考模板放在 `dev/templates/`，验收摘要放在 `dev/reports/`，生成报告和页面证据放在 `dev/output/`。自动化测试、校验脚本、历史文档及参考模板纳入版本控制；生成文件、缓存和本地实验按 `.gitignore` 排除。
 
 ```powershell
 # 在仓库根目录运行本地回归与算子校验
-python _dev/scripts/validate_project.py
-python _dev/scripts/smoke_test.py
-python -m unittest discover -s _dev/tests -v
+python dev/scripts/validate_project.py
+python dev/scripts/smoke_test.py
+python -m unittest discover -s dev/tests -v
 ```
 
 - [Skill 工作流说明](SKILL.md)
@@ -195,7 +199,7 @@ python -m unittest discover -s _dev/tests -v
 - [按样例生成论文流程](references/thesis-generation.md)
 - [兼容格式规范](references/format-spec.md) · [页眉设置](references/header-requirements.md) · [标准与预设](references/standards-registry.md)
 - [架构说明](references/architecture.md) · [安全边界](SECURITY.md)
-- [本次可靠性审查与优化建议](_dev/docs/reliability-review-2026-10-31.md)
+- [本次可靠性审查与优化建议](dev/docs/reliability-review-2026-10-31.md)
 
 README 面向使用者，介绍能力、安装和任务选择；`SKILL.md` 说明 AI 应如何选择 CLI 参数、处理附件证据和交付结果；`references/` 保存详细接口契约，`SECURITY.md` 记录本地处理与文件保护边界。
 
@@ -205,7 +209,7 @@ README 面向使用者，介绍能力、安装和任务选择；`SKILL.md` 说�
 新增独立内置模板与用户模板编译流程。一般格式迁移使用 `plan --template`；按样例严格起草及默认报告使用 `plan --profile --match-structure`。用户样例不回退内置参数。参见 [模板引擎、迁移与验收](references/template-engine.md)。旧 spec / presets 接口保留兼容，新功能使用模板入口。
 
 
-历史设计与验证记录归档于 [_dev/docs/](_dev/docs/template-refactor-report.md)。一键执行共享流程：
+历史设计与验证记录归档于 [dev/docs/](dev/docs/template-refactor-report.md)。一键执行共享流程：
 
 ```powershell
 python scripts/run_format_pipeline.py input.docx output.docx --template thesis-standard
@@ -222,15 +226,8 @@ python scripts/run_format_pipeline.py "D:/报告任务/draft.docx" "D:/报告任
 
 准备入口不会生成报告正文或宣告验收完成。模板登记不改变原有 `template list`（数值格式模板）的含义，也不扩展冻结的旧 presets 接口。
 
-## 课程与课题报告参考模板
+## 运行模板与开发归档
 
 日常课程作业默认使用 [通用课程报告模板](templates/reference/general-course-report/通用课程报告模板.docx)。它根据用户选定的天华学院原版改制，保留封面分栏填写、目录、标题层级及正文段落设置，移除学校标识、专业示例、评分栏和批注；章节与参考文献采用自动编号。详细参数和填写方法见 [格式与使用说明](templates/reference/general-course-report/格式与使用说明.md)，改制依据见 [来源说明](templates/reference/general-course-report/SOURCE.md)。该文件已登记在 `templates/reports.json`，由 `report prepare` 默认调用。
 
-通用版本的原始来源为 [上海师范大学天华学院课程考核报告模板原件](templates/reference/course-report-tianhua/上海师范大学天华学院-课程考核报告模板-原件.doc)，另附 [DOCX 格式转换副本](templates/reference/course-report-tianhua/上海师范大学天华学院-课程考核报告模板-格式转换副本.docx)，保留用于溯源和对照。文件直接取自学校教务处发布的压缩包，示例为数字图像处理课程报告，包含封面、目录、分级标题、结果分析、参考文献与程序附录；保留原貌，没有自行改制。来源、原件校验及局限见 [来源说明](templates/reference/course-report-tianhua/SOURCE.md)，段落参数见 [格式核对说明](templates/reference/course-report-tianhua/格式核对说明.md)。
-
-以下保留为其他课题报告的历史参考。
-
-简洁的学校课题报告可参考 [南京城市职业学院科研项目研究报告 Word 原版](templates/reference/school-report/学校课题报告模板-南京城市职业学院原版.docx)。文件为中文，包含课题封面与正文格式要求，适合用作学校课题报告的格式参考；来源及使用说明见 [来源说明](templates/reference/school-report/SOURCE.md)。它是外部样例，不是内置排版预设。
-
-
-网上原版详例可参考 [中国石油大学（北京）课题研究报告原件](templates/reference/downloaded-school-reports/中国石油大学北京-课题研究报告模板.doc)，包含排版批注及正文示例；另附 [DOCX格式转换副本](templates/reference/downloaded-school-reports/中国石油大学北京-课题研究报告模板-格式转换副本.docx)。来源、实际格式及转换说明见 [原版来源说明](templates/reference/downloaded-school-reports/SOURCE.md)。
+学位论文模板和兼容数据保留在 `templates/builtin/`、`templates/compatibility/`。天华学院原件、其他学校模板及调研资料已移至 [dev/templates/](dev/templates/README.md)，历史报告和验收产物移至 `dev/output/`，模板验收摘要移至 `dev/reports/`。默认报告生成继续读取根目录登记的通用模板。

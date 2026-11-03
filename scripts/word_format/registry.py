@@ -40,9 +40,9 @@ class Capability:
             "parameters": self.parameters,
             "structural": self.structural,
             "effects": list(self.effects),
-            "test": "_dev/tests/test_headers.py"
+            "test": "dev/tests/test_headers.py"
             if self.property.startswith("header:") or self.property == "section_break"
-            else "_dev/tests/test_format_core.py",
+            else "dev/tests/test_format_core.py",
         }
 
 

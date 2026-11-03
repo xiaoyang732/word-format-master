@@ -6,7 +6,7 @@ Configuration and best practices for pytest with coverage enforcement.
 
 ```toml
 [tool.pytest.ini_options]
-testpaths = ["tests", "_dev/tests"]
+testpaths = ["tests", "dev/tests"]
 addopts = [
     "-ra",
     "--strict-markers",
@@ -30,7 +30,7 @@ uv run pytest
 uv run pytest -v
 
 # Run specific test file
-uv run pytest _dev/tests/test_format_core.py
+uv run pytest dev/tests/test_format_core.py
 
 # Stop on first failure
 uv run pytest -x

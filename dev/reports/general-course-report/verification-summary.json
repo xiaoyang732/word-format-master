@@ -1,6 +1,6 @@
 {
   "created_on": "2026-11-03",
-  "source_docx": "../course-report-tianhua/上海师范大学天华学院-课程考核报告模板-格式转换副本.docx",
+  "source_docx": "../../templates/reference/course-report-tianhua/上海师范大学天华学院-课程考核报告模板-格式转换副本.docx",
   "source_sha256": "0b362be9ceed0881dcc18c11d3298785fda2706a11ed1d4c6373c947998d08a0",
   "output_sha256": "2e42502bd6ba17641bbc7c2cc7859a0947051800682c1e2b2056d8fc5b8c4c15",
   "page_count": 5,
@@ -8,7 +8,7 @@
   "numbering_status": "passed",
   "visual_status": "passed",
   "source_files_unchanged": true,
-  "evidence_directory": "../../../output/通用模板一级标题编号调整",
+  "evidence_directory": "../../output/通用模板一级标题编号调整",
   "updated_on": "2026-11-03",
   "heading_level1": "第一章、第二章……",
   "heading_level2": "1.1、2.1……"
