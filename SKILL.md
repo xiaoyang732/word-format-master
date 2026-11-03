@@ -2,7 +2,7 @@
 name: word-format-master
 description: Word（.docx）论文与报告生成及格式修改工具：支持根据用户提供的格式要求、样例模板或内置模板（通用课程报告模板、标准学位论文模板）从零生成论文或报告，也支持根据用户提供的格式要求、样例模板或修改指令调整已有论文版式。新写报告未指定依据时默认调用通用课程报告模板，用户提供的模板和明确要求优先。
 slug: docx-format-master
-version: 1.2.0
+version: 1.2.1
 displayName: 论文排版大师 (Word/DOCX)
 ---
 
