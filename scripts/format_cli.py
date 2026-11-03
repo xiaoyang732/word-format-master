@@ -25,6 +25,7 @@ from word_format.profiles import (
     requirements_profile,
     template_profile,
 )
+from word_format.reports import CATALOG, load_report_catalog, prepare_report
 from word_format.templates import compile_template, list_templates, load_template, template_plan
 
 
@@ -42,6 +43,18 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
     p = commands.add_parser("capabilities")
+    p.add_argument("--output")
+    p = commands.add_parser("report", help="Select the default report sample and prepare a draft")
+    p.add_argument("kind", choices=["list", "prepare"])
+    p.add_argument("workspace", nargs="?", help="New directory for draft, profile and workflow")
+    report_source = p.add_mutually_exclusive_group()
+    report_source.add_argument(
+        "--template", help="Registered report ID; default from templates/reports.json"
+    )
+    report_source.add_argument(
+        "--sample", help="User-supplied DOCX sample takes precedence over default"
+    )
+    p.add_argument("--topic", default="")
     p.add_argument("--output")
     p = commands.add_parser("inspect")
     p.add_argument("input")
@@ -200,7 +213,27 @@ def main():
             if "profile_context" in request:
                 protected.append(request["profile_context"]["source"]["path"])
         ensure_protected_paths(destination, *protected)
-        if args.command == "capabilities":
+        if args.command == "report":
+            protected.extend([CATALOG, CATALOG.parents[1] / "references/report-generation.md"])
+            if args.sample:
+                protected.append(args.sample)
+            else:
+                catalog = load_report_catalog()
+                protected.extend(t[key] for t in catalog["templates"]
+                                 for key in ("path", "source_notes", "usage_notes"))
+            if args.workspace:
+                protected.extend(Path(args.workspace) / name for name in
+                                 ("draft.docx", "profile.json", "workflow.json"))
+            ensure_protected_paths(destination, *protected)
+            if args.kind == "list":
+                result = load_report_catalog()
+            else:
+                if not args.workspace:
+                    raise FormatError("report prepare requires a new workspace directory")
+                result = prepare_report(
+                    args.workspace, template_id=args.template, sample=args.sample, topic=args.topic
+                )
+        elif args.command == "capabilities":
             result = capabilities()
         elif args.command == "inspect":
             result = inspect_document(args.input)

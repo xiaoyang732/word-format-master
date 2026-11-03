@@ -4,6 +4,8 @@
 
 ## 入口
 
+新报告默认走真实 DOCX 样例工作流：`format_cli.py report list` 查看登记，`report prepare TASK_DIR` 从 `templates/reports.json` 选定通用课程报告模板并整包克隆草稿、提取 profile。填充后用 `check-structure` 和 `plan --profile --match-structure`，或 `run_format_pipeline.py --profile ... --match-structure`，接入同一 planner/registry/apply/verify。详见 [报告生成流程](report-generation.md)。`report list` 与下面的格式模板 `template list` 是两个不同目录，不把参考 DOCX 冒充为已编译的数值模板。
+
 从零生成的内容先保存为 DOCX 初稿，再与已有论文走相同的 plan/apply/verify 流程。仅在用户选择内置模板时使用内置 ID：
 
 ```powershell

@@ -4,6 +4,15 @@ Read this when a user explicitly requests a thesis draft, or when diagnosing
 formatting failures from a generated thesis. Existing-document formatting still
 uses the direct profile/request, plan, apply and verify workflow.
 
+New reports are also routed here for content and citation checks. For “帮我写一份报告”
+or a course/subject report without a supplied template or explicit format basis,
+first follow [the default report workflow](report-generation.md):
+`format_cli.py report prepare TASK_DIR` selects the approved source from
+`templates/reports.json`, clones its package and extracts a source-bound profile.
+Author the draft and use `--profile --match-structure`, never the thesis preset as
+a fallback. User-supplied templates and explicit requirements take priority;
+existing-document formatting and thesis requests retain their existing routes.
+
 ## Authoring boundary
 
 Clarify consequential missing requirements: academic level, topic, length,

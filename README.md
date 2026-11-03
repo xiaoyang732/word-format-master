@@ -1,22 +1,25 @@
 # 论文排版大师 (Word/DOCX)（Word 论文与报告智能排版工具）
 
-**把论文和格式要求交给 AI，自动完成 Word 排版与格式检查，原稿安全不破坏。**
+**用一句话撰写课程报告，或把论文和格式要求交给 AI，完成 Word 排版与格式检查。**
+
+直接说“帮我写一份报告，计算机方向的”或“帮我写一份数据库课程作业报告”，即可默认调用项目的[通用课程报告模板](templates/reference/general-course-report/通用课程报告模板.docx)。模板沿用已选定的封面填写线、段落格式、自动目录和“第一章、第二章……”编号。无需再次指定模板；主题不明确时会询问主题。用户提供的其他模板或明确格式要求优先。详见 [报告生成流程](references/report-generation.md)。
 
 生成文件中的章节、小节、列表、参考文献使用 Word 自动编号；题注、公式、页码和交叉引用使用动态域，禁止键入结构编号。交付前必须执行 `python scripts/check_numbering.py OUTPUT.docx --output numbering.json`；统一流水线自动拦截检查失败的结果。详见 [生成规范](references/thesis-generation.md)。
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE.txt)
 
-你只需要提供**待排版的 Word 文档**，再给出一份**学校/期刊的格式要求**、一份**已经排好版的样例文档**，或者**直接用日常语言说出你想怎么改**。无需自己编写代码或手动敲命令，AI 会自动读懂要求、对齐章节结构，并调用本地确定性排版引擎生成排好版的新文档与清晰的前后对比验收报告。
+已有文档排版时，提供**待排版的 Word 文档**，再给出**格式要求**、**已排版样例**，或**用日常语言说明想怎么改**。撰写新报告时，只需说明主题与已有素材。无需自己编写代码或手动敲命令，AI 会组织内容与规则，并调用本地确定性排版引擎生成新的文档及验收报告。
 
 ---
 
 ## 一、 它能帮你做什么？
 
-### 1. 五大常用场景
+### 1. 常用场景
 - **场景 1：按《格式要求文档》排版**：支持读取 Word（`.docx`/`.dotx`，装有 Word/WPS/LibreOffice 时自动只读兼容 `.doc`/`.dot`/`.wps`）、PDF、TXT、Markdown 格式的排版规范，自动提取字体、字号、行距、页边距等规定并应用到你的论文中。
 - **场景 2：照着《已排版样例》迁移版式**：没有规则说明？直接丢一份往届优秀论文或模板样例（`.docx`/`.dotx`/`.doc`/`.dot`/`.wps`），自动提取其中的版式风格并迁移到你的文档，支持按需克隆官方封面布局（校徽、表格边框、文本框、下划线槽位）（**只学格式，绝不照抄样例里的文字和姓名**）。
-- **场景 3：一句话局部修改 / 一键套用内置预设**：直接告诉 AI“只把第三章正文改成宋体小四、1.5 倍行距”或“把全文表格改成三线表”，指哪改哪；若手里没有格式规定，也可直接指定内置的**学位论文**、**期刊/课程论文**或**公文汇报**预设模板。
+- **场景 3：一句话局部修改 / 一键套用内置预设**：直接告诉 AI“只把第三章正文改成宋体小四、1.5 倍行距”或“把全文表格改成三线表”，指哪改哪；若手里没有格式规定，也可直接指定内置的**学位论文**预设模板。
 - **场景 4：参照样例结构起草新论文**：提供一份样例文档和你的研究素材，AI 会严格按照样例实际包含的模块（封面、中英文摘要、目录、章节层级、参考文献、致谢等）及先后顺序起草并排版，不多加、不漏项。
+- **新写课程或课题报告**：未指定模板时自动使用项目的通用课程报告模板，生成封面、目录、五章正文、参考文献和附录；写入用户主题与素材后，通过统一格式、结构、编号和页面复核流程。
 - **场景 5：只做格式体检（不改原文件）**：提交前想确认格式是否合规？支持只检查不修改，逐条对比要求并生成清晰的格式问题清单。
 
 ### 2. 支持调整的格式范围与内置预设
@@ -27,7 +30,8 @@
 | **字体与标题** | 中英文字体分离控制（如中文宋体 + 西文 Times New Roman）、字号、加粗、斜体、颜色、多级标题样式与自动编号 |
 | **段落排版** | 行距（多倍/固定值/最小值）、首行缩进（精确保持字符单位如 2 字符）、悬挂缩进、左右缩进、段前/段后间距、对齐方式、孤行与分页控制 |
 | **论文结构** | 自动生成目录、分节页眉页脚与底边框横线、首页不同/奇偶页不同、动态章节标题页眉（`STYLEREF`）、正文节页码重启与前置页码隔离、图表题注对齐、三线表与跨页表头重复、参考文献编号整理 |
-| **内置预设** | `thesis-standard`（标准学位/毕业论文）、`journal-paper-cn`（中文期刊/课程论文）、`official-report-cn`（通用公文与专项工作报告，参考 GB/T 9704） |
+| **内置预设** | `thesis-standard`（标准学位/毕业论文） |
+| **默认报告模板** | `general-course-report`（项目内通用课程报告 DOCX，属于真实文档模板工作流，非学位论文数值预设） |
 | **质量核对** | 自动回读校验每项格式是否生效、检查正文文字是否一字不差、支持通过 Word / WPS / LibreOffice 渲染成页面图片逐页视觉检查 |
 
 > **安全边界说明**：
@@ -61,7 +65,7 @@ python -m venv .venv
   > “用 `D:/排版样例.docx` 作为格式参考，帮我排版 `D:/我的论文.docx` 并另存为新文件，保留我自己的正文和数据。”
 - **用法 3：局部快速修改或套用内置预设**
   > “把 `D:/我的论文.docx` 里的所有一级标题改成黑体三号居中，正文改成宋体小四、1.5 倍行距、首行缩进 2 字符，表格全部改成三线表。”
-  > “我手头没有学校的格式文件，帮我用内置的 `thesis-standard` 标准毕业论文预设（或 `journal-paper-cn` 课程论文预设）排版 `D:/我的论文.docx`。”
+  > “我手头没有学校的格式文件，帮我用内置的 `thesis-standard` 标准毕业论文预设排版 `D:/我的论文.docx`。”
 - **用法 4：参照样例结构写新论文**
   > “参考 `D:/排版样例.docx` 的结构帮我起草一篇新论文。样例里有哪些模块和章节层级就照着来，不要多加样例里没有的模块。”
 - **用法 5：只检查不修改（格式体检）**
@@ -75,6 +79,7 @@ python -m venv .venv
 | 参考样例迁移格式 | 提供样例、待排论文，并说明只迁移格式 | 是 |
 | 修改少数格式或套用预设 | 指明文档、修改范围和具体属性；使用预设时说出预设名称 | 是 |
 | 按样例结构起草论文 | 提供样例和研究素材，说明以样例实际结构为准 | 是 |
+| 新写报告 | 说明主题或沿用对话主题；未提供格式依据时自动调用通用课程报告模板 | 是 |
 | 只检查格式 | 提供要求文件和待检查论文，并明确“只检查，不修改” | 否 |
 
 日常使用时只需说明目标和文件路径，AI 会选择对应的内部命令流程。若你自行运行 CLI，`SKILL.md` 中有参数组合速查；不要把自然语言直接当作 `--request` 文件传入。
@@ -112,7 +117,7 @@ word-format-master/
 ├── SKILL.md                  # 技能说明、常见问题与 AI 执行指南
 ├── README.md                 # 项目说明文档
 ├── assets/
-│   └── presets.json          # 内置标准排版预设（毕业论文 / 期刊课程论文 / 公文汇报）
+│   └── presets.json          # 内置标准排版预设（毕业论文）
 ├── scripts/
 │   ├── format_cli.py         # 核心命令行入口（提取、检查、规划、执行、验收）
 │   ├── render_docx.py        # 页面视觉渲染工具（调用 Word / WPS / LibreOffice 导出页面图）
@@ -120,6 +125,8 @@ word-format-master/
 │   ├── thesis_quality.py     # 正文长度、数字引用映射与人工内容核验状态报告
 │   └── word_format/          # 底层确定性排版核心库，唯一注册写入路径
 ├── templates/               # 新模板入口的数据；compatibility/ 保留旧编号协议
+│   ├── reports.json         # 默认报告模板登记及来源文件指纹
+│   └── reference/general-course-report/ # 已选定的通用课程报告模板
 ├── references/              # 当前接口规范与工作流契约
 └── _dev/                    # 回归测试、开发配置、验证脚本与历史改造记录
 ```
@@ -157,7 +164,7 @@ python scripts/render_docx.py "论文-排版后.docx" --output-dir render --meth
 - **3. 学校的 PDF 格式要求是扫描件或图片截图怎么办？**
   扫描版 PDF 缺少可提取的文本层，工具会提示需要 OCR。你可以先做 OCR 文字识别，或直接把截图发给支持视觉能力的 AI 提取成文字要求后再执行。
 - **4. 我没有学校格式要求文档，或者不确定具体参数怎么办？**
-  你可以直接让 AI 使用内置的 3 套标准预设（`thesis-standard` 毕业论文、`journal-paper-cn` 期刊/课程论文、`official-report-cn` 公文汇报），或者套用上方的“快速口述模板”。若要求文档内部存在前后矛盾，AI 会先列出冲突项请示你，绝不盲目覆盖。
+  你可以直接让 AI 使用内置的 毕业论文预设（`thesis-standard`），或者套用上方的“快速口述模板”。若要求文档内部存在前后矛盾，AI 会先列出冲突项请示你，绝不盲目覆盖。
 - **5. 电脑没装 Microsoft Word（比如只装了 WPS，或使用 macOS / Linux）能用吗？**
   能用。基础排版与格式检查完全基于本地 Python 库，在 Windows / macOS / Linux 下均无需安装 Office。如需将文档渲染成图片做视觉检查，Windows 下支持调用 Microsoft Word、WPS Office 或 LibreOffice，macOS / Linux 下支持调用 LibreOffice。
 - **6. 打开生成的文档后，目录页码或页眉章节名没有更新怎么办？**
@@ -195,7 +202,7 @@ README 面向使用者，介绍能力、安装和任务选择；`SKILL.md` 说�
 [MIT License](LICENSE.txt)
 ## 1.1 模板引擎更新
 
-新增独立内置模板与用户模板编译流程。已有论文和新生成初稿统一使用 `plan --template`；用户样例不再回退内置参数。参见 [模板引擎、迁移与验收](references/template-engine.md)。旧 spec / presets 接口保留兼容，新功能使用模板入口。
+新增独立内置模板与用户模板编译流程。一般格式迁移使用 `plan --template`；按样例严格起草及默认报告使用 `plan --profile --match-structure`。用户样例不回退内置参数。参见 [模板引擎、迁移与验收](references/template-engine.md)。旧 spec / presets 接口保留兼容，新功能使用模板入口。
 
 
 历史设计与验证记录归档于 [_dev/docs/](_dev/docs/template-refactor-report.md)。一键执行共享流程：
@@ -204,3 +211,26 @@ README 面向使用者，介绍能力、安装和任务选择；`SKILL.md` 说�
 python scripts/run_format_pipeline.py input.docx output.docx --template thesis-standard
 python scripts/run_format_pipeline.py input.docx output.docx --template school-template.json --mapping mapping.json
 ```
+
+新报告的模板选择与准备入口（准备后由 AI 填充草稿、决策和映射，再执行流水线）：
+
+```powershell
+python scripts/format_cli.py report list
+python scripts/format_cli.py report prepare "D:/报告任务" --topic "计算机网络"
+python scripts/run_format_pipeline.py "D:/报告任务/draft.docx" "D:/报告任务/报告.docx" --profile "D:/报告任务/profile.json" --match-structure --mapping "D:/报告任务/mapping.json" --resolutions "D:/报告任务/resolutions.json" --render
+```
+
+准备入口不会生成报告正文或宣告验收完成。模板登记不改变原有 `template list`（数值格式模板）的含义，也不扩展冻结的旧 presets 接口。
+
+## 课程与课题报告参考模板
+
+日常课程作业默认使用 [通用课程报告模板](templates/reference/general-course-report/通用课程报告模板.docx)。它根据用户选定的天华学院原版改制，保留封面分栏填写、目录、标题层级及正文段落设置，移除学校标识、专业示例、评分栏和批注；章节与参考文献采用自动编号。详细参数和填写方法见 [格式与使用说明](templates/reference/general-course-report/格式与使用说明.md)，改制依据见 [来源说明](templates/reference/general-course-report/SOURCE.md)。该文件已登记在 `templates/reports.json`，由 `report prepare` 默认调用。
+
+通用版本的原始来源为 [上海师范大学天华学院课程考核报告模板原件](templates/reference/course-report-tianhua/上海师范大学天华学院-课程考核报告模板-原件.doc)，另附 [DOCX 格式转换副本](templates/reference/course-report-tianhua/上海师范大学天华学院-课程考核报告模板-格式转换副本.docx)，保留用于溯源和对照。文件直接取自学校教务处发布的压缩包，示例为数字图像处理课程报告，包含封面、目录、分级标题、结果分析、参考文献与程序附录；保留原貌，没有自行改制。来源、原件校验及局限见 [来源说明](templates/reference/course-report-tianhua/SOURCE.md)，段落参数见 [格式核对说明](templates/reference/course-report-tianhua/格式核对说明.md)。
+
+以下保留为其他课题报告的历史参考。
+
+简洁的学校课题报告可参考 [南京城市职业学院科研项目研究报告 Word 原版](templates/reference/school-report/学校课题报告模板-南京城市职业学院原版.docx)。文件为中文，包含课题封面与正文格式要求，适合用作学校课题报告的格式参考；来源及使用说明见 [来源说明](templates/reference/school-report/SOURCE.md)。它是外部样例，不是内置排版预设。
+
+
+网上原版详例可参考 [中国石油大学（北京）课题研究报告原件](templates/reference/downloaded-school-reports/中国石油大学北京-课题研究报告模板.doc)，包含排版批注及正文示例；另附 [DOCX格式转换副本](templates/reference/downloaded-school-reports/中国石油大学北京-课题研究报告模板-格式转换副本.docx)。来源、实际格式及转换说明见 [原版来源说明](templates/reference/downloaded-school-reports/SOURCE.md)。

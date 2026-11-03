@@ -1,0 +1,35 @@
+{
+  "verified_on": "2026-11-03",
+  "publisher": "上海师范大学天华学院教务处",
+  "listing_date": "2021-03-02",
+  "source_page": "https://jwc.sthu.edu.cn/jsbgxz/list.htm",
+  "archive_url": "https://jwc.sthu.edu.cn/_upload/article/files/6a/54/d7e23bad4f65acb64fc899c8484b/472fad32-5253-4205-863c-119e6217d5b9.rar",
+  "archive_sha256": "0527d64b905048092888a5e032e1f80ac693765397f85cc76cb4bc77ac0a3481",
+  "member": "课程报告模版/考核报告模板.doc",
+  "original_sha256": "fec9a3d42eaf58f8a0fe1f03161b7b755f7d614ebbc5b62ce0f94bd0842b1056",
+  "converted_sha256": "0b362be9ceed0881dcc18c11d3298785fda2706a11ed1d4c6373c947998d08a0",
+  "conversion": "WPS Office DOC to DOCX; content not edited",
+  "render_page_count": 13,
+  "reviewed_pages": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13
+  ],
+  "original_unchanged": true,
+  "known_source_layout_traits": [
+    "原有彩色提示",
+    "章节余白",
+    "部分分图跨页",
+    "部分结构编号为手工文本"
+  ]
+}

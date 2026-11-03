@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from apply_spec import validate_spec
 from word_format.registry import REGISTRY
 from word_format.templates import list_templates, load_template
+from word_format.reports import load_report_catalog
 
 REQUIRED = [
     "SKILL.md", "README.md", "agents/openai.yaml", "assets/presets.json",
@@ -24,6 +25,8 @@ REQUIRED = [
     "scripts/word_format/visual.py",
     "scripts/word_format/template_structure.py",
     "references/thesis-generation.md",
+    "references/report-generation.md", "templates/reports.json",
+    "scripts/word_format/reports.py",
 ]
 REMOVED = [
     "assets/ui/index.html", "assets/ui/app.js", "assets/ui/styles.css",
@@ -36,6 +39,10 @@ REMOVED = [
 
 def main():
     errors = []
+    try:
+        load_report_catalog()
+    except (ValueError, OSError, TypeError, KeyError) as exc:
+        errors.append(f"Invalid report template catalog: {exc}")
     for template in list_templates():
         try:
             load_template(template["id"])
@@ -88,8 +95,6 @@ def main():
                 errors.append(f"{preset_id}: table-of-contents preset is incomplete")
         expected = {
             "thesis-standard",
-            "journal-paper-cn",
-            "official-report-cn",
         }
         missing = expected - ids
         if missing:

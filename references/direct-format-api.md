@@ -10,6 +10,8 @@
 
 ```powershell
 python scripts/format_cli.py capabilities --output capabilities.json
+python scripts/format_cli.py report list
+python scripts/format_cli.py report prepare NEW_TASK_DIR --topic "计算机方向报告"
 python scripts/format_cli.py inspect source.docx --output inspect.json
 python scripts/format_cli.py audit source.docx --request request.json --output audit.json
 python scripts/format_cli.py plan source.docx result.docx --request request.json --output plan.json
@@ -18,6 +20,8 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 ```
 
 命令失败退出码为 2，并返回 `failed`、`unsupported` 或 `needs_clarification`。已有输出默认拒绝覆盖；只有显式传入 `--overwrite` 才可替换输出。源文件和它的硬链接始终不能作为输出。JSON 路径也不得覆盖源文档、输出文档、请求或计划。
+
+`report prepare` 使用 `templates/reports.json` 的默认真实 DOCX，也可通过互斥的 `--template REPORT_ID` 或 `--sample USER.docx` 显式选择；模板指纹不符、未知 ID、任务目录已存在或任务位于模板库内时拒绝准备。它返回 `status: draft`，生成整包草稿、原模板 profile 和 workflow.json，不生成正文、不解决 profile issues、不替代 plan/apply/verify。完整调用见 [报告生成流程](report-generation.md)。
 
 `audit` 接受与 `plan` 相同的 `operations` 或 `spec` 请求，使用同一位置解析器和独立回读器检查文档，不调用写入 handler、不保存 DOCX、不创建输出文档。报告逐项列出对象 ID、文字、期望值、实际有效值和状态，`summary` 汇总通过/失败项。存在偏差时仍可写出完整 JSON 报告，退出码为 2；通过为 0。未选中可执行检查时为 `no_change`。只检查请求覆盖的属性，视觉状态为 `skipped`；这不等于完整论文合规审查。
 
