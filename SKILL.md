@@ -1,12 +1,18 @@
 ---
 name: word-format-master
-description: 用于撰写 Word 报告、课程作业报告、论文起草和排版，以及按要求或样例调整格式。“帮我写一份报告”等新报告请求默认调用项目的通用课程报告模板；用户提供的模板和明确要求优先。
+description: Word（.docx）论文与报告生成及格式修改工具：支持根据用户提供的格式要求、样例模板或内置模板（通用课程报告模板、标准学位论文模板）从零生成论文或报告，也支持根据用户提供的格式要求、样例模板或修改指令调整已有论文版式。新写报告未指定依据时默认调用通用课程报告模板，用户提供的模板和明确要求优先。
 slug: docx-format-master
 version: 1.2.0
 displayName: 论文排版大师 (Word/DOCX)
 ---
 
 # 论文排版大师 (Word/DOCX)（Word 论文与报告智能排版工具）
+
+## 技能概述
+
+本技能面向用户提供两大核心能力：
+1. **从零生成论文或报告**：支持根据用户提供的**格式要求文档**、**已排版样例/模板**，或直接使用**内置模板**（新写报告默认调用 `general-course-report` [通用课程报告模板](templates/reference/general-course-report/通用课程报告模板.docx)；毕业/学位论文可按用户选择调用 `thesis-standard` 标准学位论文模板），完成初稿起草并经本地确定性引擎输出带原生自动编号与动态域的 `.docx`。
+2. **修改已有论文格式**：支持根据用户提供的**格式要求文档**、**样例模板**、**口述局部指令**或**内置模板**修改现有 `.docx` 论文版式（或执行只读 `audit` 格式体检），保留原稿正文与复杂对象并另存为新文件。
 
 ## 新报告请求的默认入口
 
@@ -32,11 +38,12 @@ displayName: 论文排版大师 (Word/DOCX)
 
 | 任务 | 入口与必需组合 | 仅在需要时添加 |
 | :--- | :--- | :--- |
-| 撰写新报告，未指定模板或格式要求 | `report prepare TASK_DIR` → 填充克隆草稿 → `check-structure` → `plan --profile --match-structure` → `apply` / `verify` | 默认模板由 `templates/reports.json` 选择；详见 [报告生成流程](references/report-generation.md)。 |
-| 按要求或样例排版 | `profile` 提取证据，`template compile` 编译，再 `plan ... --template template.json` | 编译时用 `--resolutions` 解决问题，规划时用 `--mapping` 对齐目标。现有论文迁移不强制照搬样例模块。 |
+| 撰写新报告，未指定模板或格式要求 | `report prepare TASK_DIR` → 填充克隆草稿 → `check-structure` → `plan --profile --match-structure` → `apply` / `verify` | 默认模板由 `templates/reports.json` 选择；用户提供 DOCX 模板可传 `--sample`；详见 [报告生成流程](references/report-generation.md)。 |
+| 按样例结构起草新论文 | 提取样例 profile；完成草稿后先 `check-structure`，再用 `plan ... --profile profile.json --match-structure` | 仅在结构与规则有明确映射或决策时添加 `--mapping`、`--resolutions`。 |
+| 按格式要求或内置模板起草新论文 | 先起草语义化初稿 `DRAFT.docx`；按要求 `profile` + `template compile`（或按用户选择指定内置 `thesis-standard`），再 `plan DRAFT.docx OUTPUT.docx --template ...` → `apply` / `verify` | 生成稿交付前均须通过 `check_numbering.py` 动态编号检查。 |
+| 按要求或样例修改已有论文 | `profile` 提取证据，`template compile` 编译，再 `plan ... --template template.json` → `apply` / `verify` | 编译时用 `--resolutions` 解决问题，规划时用 `--mapping` 对齐目标。现有论文迁移不强制照搬样例模块。 |
 | 按明确要求做局部修改 | `plan INPUT.docx OUTPUT.docx --request request.json`，再 `apply`、`verify` | `--request`、`--profile`、`--template` 三者互斥。 |
 | 只检查格式，不生成 DOCX | 已编译模板用 `audit INPUT.docx --template template.json`；局部规则用 `--request request.json` | Audit 不接收 `--profile`；按要求文件检查时先提取并编译模板。模板审查须报告 coverage、limitations、execution_status 和 compliance。 |
-| 按样例结构起草新论文 | 提取样例 profile；完成草稿后先 `check-structure`，再用 `plan ... --profile profile.json --match-structure` | 仅在结构与规则有明确映射或决策时添加 `--mapping`、`--resolutions`。 |
 | 克隆或替换官方模板封面 | `cover TEMPLATE OUTPUT.docx --fields fields.json`（注入现有草稿加 `--into DRAFT.docx`，替换草稿旧封面加 `--replace-existing-cover`） | 保留校徽图片、表格边框/`vMerge`、VML 文本框与下划线槽宽；样例无封面或用户要求保留原封面时不得调用。 |
 | 做页面视觉验收 | 渲染输出的每一页并逐页检查，再运行 `verify` | `--visual-report` 必须与对应的 `--render-manifest` 一起传入；证据缺失或未检查完要报告 `skipped` / `pending`。 |
 
