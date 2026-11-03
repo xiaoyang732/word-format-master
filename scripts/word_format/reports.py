@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import json
+import base64
+import hashlib
+import os
 import re
 import tempfile
 from pathlib import Path
@@ -12,6 +15,36 @@ from .contracts import FormatError, sha256
 from .profiles import template_profile
 
 CATALOG = Path(__file__).resolve().parents[2] / "templates" / "reports.json"
+
+
+def _distribution_template(path, expected_hash):
+    """Restore a verified template when a distribution forbids DOCX uploads."""
+    encoded = path.with_suffix(path.suffix + ".json")
+    if not encoded.is_file():
+        return path
+    if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
+        raise FormatError("Invalid encoded report template hash")
+    payload = json.loads(encoded.read_text(encoding="utf-8"))
+    if payload.get("format") != "docx-base64-v1":
+        raise FormatError("Unsupported encoded report template")
+    try:
+        data = base64.b64decode(payload["data"], validate=True)
+    except (ValueError, KeyError, TypeError) as exc:
+        raise FormatError("Invalid encoded report template data") from exc
+    if hashlib.sha256(data).hexdigest() != expected_hash:
+        raise FormatError("Encoded report template hash mismatch")
+    cache = Path(tempfile.gettempdir()) / "word-format-master" / "templates"
+    cache.mkdir(parents=True, exist_ok=True)
+    restored = cache / (expected_hash + ".docx")
+    if not restored.is_file() or sha256(restored) != expected_hash:
+        with tempfile.NamedTemporaryFile(dir=cache, delete=False) as stream:
+            temporary = Path(stream.name)
+            stream.write(data)
+        try:
+            os.replace(temporary, restored)
+        finally:
+            temporary.unlink(missing_ok=True)
+    return restored
 
 
 def load_report_catalog(path=CATALOG):
@@ -40,7 +73,11 @@ def load_report_catalog(path=CATALOG):
             if not isinstance(relative, str) or not relative or Path(relative).is_absolute():
                 raise FormatError(f"Report {key} must be project-relative")
             candidate = (path.parent / relative).resolve()
-            if path.parent not in candidate.parents or not candidate.is_file():
+            if path.parent not in candidate.parents:
+                raise FormatError(f"Invalid or missing report {key}: {relative}")
+            if key == "path" and not candidate.is_file():
+                candidate = _distribution_template(candidate, entry.get("sha256"))
+            if not candidate.is_file():
                 raise FormatError(f"Invalid or missing report {key}: {relative}")
             value[key] = str(candidate)
         if Path(value["path"]).suffix.lower() != ".docx":

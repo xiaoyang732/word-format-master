@@ -50,6 +50,8 @@ python scripts/format_cli.py template validate school-template.json
 
 ## 模板维护与兼容
 
+受限发布平台不接受 DOCX 时，可仅在分发包中将报告模板编码为相邻的 `.docx.json` 文件（`format: docx-base64-v1`，`data` 为 Base64）。加载器仅在原 DOCX 缺失时使用该载体，并以登记文件中的 SHA-256 校验后还原到本机临时缓存。Git 仓库保留原 DOCX；编码载体不改变模板内容或规则来源。
+
 `templates/builtin/<id>/template.json` 是新入口的内置格式来源。封面使用独立 cover.json，`word_format.cover.render_cover` 只接收布局和真实数据，不填入虚构姓名、题目或日期。封面渲染是新稿构建工具，不能用于重建已有论文的封面。
 
 `assets/presets.json` 和 `templates/compatibility/heading-numbering.json` 保留为旧 spec API 的冻结兼容数据。新功能不再扩展旧枚举，不从兼容文件为用户模板补值。旧示例生成脚本只演示内容构建，最终排版统一调用模板入口。
