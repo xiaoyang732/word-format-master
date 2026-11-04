@@ -13,9 +13,14 @@ MAX_OPERATIONS = 5000
 
 
 class FormatError(ValueError):
-    def __init__(self, message: str, status: str = "failed"):
+    def __init__(self, message: str, status: str = "failed", *, code="FORMAT_ERROR",
+                 user_message=None, next_actions=None, retryable=False):
         super().__init__(message)
         self.status = status
+        self.code = code
+        self.message = user_message or "格式处理未完成，请检查错误详情"
+        self.next_actions = next_actions or ["检查格式依据、输入路径及核对报告后重试"]
+        self.retryable = retryable
 
 
 def require_keys(

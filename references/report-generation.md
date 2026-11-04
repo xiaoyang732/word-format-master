@@ -14,6 +14,7 @@
 $SKILL_DIR = "D:/project/word-format-master"
 $REPORT_TASK = "D:/project/word-format-master/dev/output/新报告任务"
 python "$SKILL_DIR/scripts/format_cli.py" report list
+python "$SKILL_DIR/scripts/format_cli.py" doctor
 python "$SKILL_DIR/scripts/format_cli.py" report prepare "$REPORT_TASK" --topic "用户指定主题"
 # 用户提供其他 DOCX 时：report prepare "$REPORT_TASK" --sample "D:/材料/教师模板.docx"
 ```
@@ -37,6 +38,8 @@ python "$SKILL_DIR/scripts/run_format_pipeline.py" "$REPORT_TASK/draft.docx" "$R
 ```
 
 mapping / resolutions 仅在有对应映射或问题时传入。流水线先 `check-structure`，再执行 `plan --profile --match-structure`、apply、verify、check_numbering，可选渲染。结构不匹配或问题未解决即停止，不回退学位论文格式；原模板和草稿不可被输出覆盖。也可逐条调用同一 CLI，不另建 DOCX 格式写入器。
+
+如后续阶段失败，保留任务目录，修复原因后使用相同命令追加 `--resume`。恢复会检查已完成阶段的文件与证据摘要；改变草稿、格式依据或输出后应另建任务，不能自动覆盖。查看 `summary.json` 获取失败阶段及各项核对状态。
 
 在 Word/WPS 中刷新目录和所有 StoryRanges 的域，并核对实际目录条目、章号、图表引用与正文起始页码。若刷新导致文件变化，须重新基于刷新稿 plan/apply，生成与最终输出哈希一致的证据；不要把刷新前的 apply/verify 当作当前文件验收。
 

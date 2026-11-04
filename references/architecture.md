@@ -42,7 +42,7 @@
 
 `templates/builtin/` 是新模板入口的权威数据，`assets/presets.json` 是旧 spec 接口的冻结兼容数据；两者不互相补值。
 `templates/reports.json` 登记真实报告 DOCX、默认 ID、来源和格式说明及文件指纹；它不属于格式规则 JSON，也不从旧 presets 补值。路径相对于登记文件解析，项目迁移目录后仍可使用。
-`references/` 保存当前接口与执行契约。开发计划、测试、历史报告、未启用模板及生成产物只在本地保存，由 `.gitignore` 排除，不随运行仓库分发。
+`references/` 保存当前接口与执行契约。必要的 `dev/tests/`、`dev/tools/`、验证工具与 CI 配置纳入版本管理，保证新克隆仓库可复现验证；报告、缓存、未启用模板及生成产物集中于 `dev/` 并由 `.gitignore` 排除。运行发布包通过 `dev/tools/build_release.py` 的独立清单构建，不携带开发资料。
 
 - Format Profile：`schema_version: 1.0`，见 [format-profile.md](format-profile.md)。
 - Format Spec：`schema_version: 1.0`，见 [format-spec.md](format-spec.md)。
@@ -66,6 +66,8 @@ Profile 记录原始证据和问题，`resolutions` 保留决策理由。`mappin
 `render_docx.py` 只产生页面证据，`verify_output.py` 检查结构与视觉证据。渲染使用预先计算哈希的快照，源文件变化不发布清单；显式渲染器选择不静默降级。刷新所有 StoryRanges 中的字段和目录后输出 PDF/PNG，不保存回原稿。相对外部关系需要先处理基准路径。
 
 结构通过不证明分页、字形或视觉通过。AI 必须检查所有页面后才可给出视觉结论；缺少渲染或检查须报告 skipped / pending。
+
+流水线在报告目录保存 `pipeline-state.json` 与 `summary.json`。状态绑定输入、参数、引擎和各阶段产物摘要，通过进程级非阻塞锁避免并发执行；`--resume` 拒绝复用已修改或缺失的证据。汇总区分实际渲染与全页视觉审查，内容真实性默认未核实。恢复与自检入口见 [runtime-and-recovery.md](runtime-and-recovery.md)。
 
 ## 扩展检查
 

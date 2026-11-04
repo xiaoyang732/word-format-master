@@ -8,6 +8,12 @@ import json
 import sys
 from pathlib import Path
 
+# Diagnosis must run before importing the formatting engine and its dependencies.
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "doctor":
+    from runtime_doctor import main as doctor_main
+
+    raise SystemExit(doctor_main(sys.argv[2:]))
+
 from json_output import ensure_protected_paths, write_json
 from word_format import (
     apply_plan,
@@ -42,6 +48,7 @@ def main():
     configure_cli_output()
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("doctor", help="检查依赖、模板、目录权限与页面渲染能力")
     p = commands.add_parser("capabilities")
     p.add_argument("--output")
     p = commands.add_parser("report", help="Select the default report sample and prepare a draft")
@@ -337,7 +344,11 @@ def main():
     except (FormatError, ValueError, OSError, KeyError, TypeError) as exc:
         print(
             json.dumps(
-                {"status": getattr(exc, "status", "failed"), "error": str(exc)}, ensure_ascii=False
+                {"status": getattr(exc, "status", "failed"), "error": str(exc),
+                 "code": getattr(exc, "code", "INVALID_INPUT"),
+                 "message": getattr(exc, "message", "操作未完成，请检查输入与文件权限"),
+                 "retryable": getattr(exc, "retryable", False),
+                 "next_actions": getattr(exc, "next_actions", ["检查错误详情后修正输入，再重新执行"])}, ensure_ascii=False
             ),
             file=sys.stderr,
         )

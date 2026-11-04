@@ -25,14 +25,15 @@ def _distribution_template(path, expected_hash):
     if not isinstance(expected_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_hash):
         raise FormatError("Invalid encoded report template hash")
     payload = json.loads(encoded.read_text(encoding="utf-8"))
-    if payload.get("format") != "docx-base64-v1":
+    if not isinstance(payload, dict) or payload.get("format") != "docx-base64-v1":
         raise FormatError("Unsupported encoded report template")
     try:
         data = base64.b64decode(payload["data"], validate=True)
     except (ValueError, KeyError, TypeError) as exc:
         raise FormatError("Invalid encoded report template data") from exc
     if hashlib.sha256(data).hexdigest() != expected_hash:
-        raise FormatError("Encoded report template hash mismatch")
+        raise FormatError("Encoded report template hash mismatch", code="TEMPLATE_HASH_MISMATCH",
+                          user_message="编码模板摘要与登记不一致", next_actions=["重新安装完整发布包，勿绕过摘要校验"])
     cache = Path(tempfile.gettempdir()) / "word-format-master" / "templates"
     cache.mkdir(parents=True, exist_ok=True)
     restored = cache / (expected_hash + ".docx")
@@ -78,12 +79,17 @@ def load_report_catalog(path=CATALOG):
             if key == "path" and not candidate.is_file():
                 candidate = _distribution_template(candidate, entry.get("sha256"))
             if not candidate.is_file():
-                raise FormatError(f"Invalid or missing report {key}: {relative}")
+                code = {"path": "REPORT_TEMPLATE_MISSING", "source_notes": "REPORT_SOURCE_NOTES_MISSING",
+                        "usage_notes": "REPORT_USAGE_NOTES_MISSING"}[key]
+                raise FormatError(f"Invalid or missing report {key}: {relative}", code=code,
+                                  user_message=f"默认报告所需资源缺失：{relative}",
+                                  next_actions=["重新安装完整发布包，或通过 --sample 指定自己的 DOCX 模板"])
             value[key] = str(candidate)
         if Path(value["path"]).suffix.lower() != ".docx":
             raise FormatError("Registered report templates must be DOCX")
         if sha256(value["path"]) != entry.get("sha256"):
-            raise FormatError(f"Report template hash mismatch: {identifier}")
+            raise FormatError(f"Report template hash mismatch: {identifier}", code="TEMPLATE_HASH_MISMATCH",
+                              user_message="报告模板摘要不匹配", next_actions=["核对模板来源并重新安装完整发布包"])
         resolved.append(value)
     if data.get("default") not in ids:
         raise FormatError("Default report template is not registered")
