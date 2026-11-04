@@ -48,6 +48,10 @@
 | 段中不分页，`value: boolean` | `header.keep_together.set` | `set_keep_together` | 对应有效布尔属性 |
 | 段前分页，`value: boolean` | `header.page_break_before.set` | `set_page_break` | 对应有效布尔属性 |
 | 孤行控制，`value: boolean` | `header.widow_control.set` | `set_widow` | 对应有效布尔属性 |
+| 上下文段距，`value: boolean` | `header.contextual_spacing.set` | `set_contextual_spacing` | 直接格式与样式继承中的有效值 |
+| 文档网格对齐，`value: boolean` | `header.snap_to_grid.set` | `set_snap_to_grid` | 显式 false 可覆盖继承 |
+| 镜像缩进，`value: boolean` | `header.mirror_indents.set` | `set_mirror_indents` | 对应有效布尔属性 |
+| 制表位集合，`value: list` | `header.tabs.set` | `set_tabs` | 完整整数 twip 位置、对齐、leader 集合；清除未请求的继承位置，见[支持矩阵](paragraph-properties.md) |
 | 页眉距页面顶端 | `page.header_distance.set` | `operations.set_header_distance` | 所选节 `w:pgMar/@w:header`，mm |
 | 下一页分节符 | `section.break.next_page.insert` | `section_breaks.insert` | 指定段落结束节 + 下一节 nextPage；正文与其余包部件不变 |
 

@@ -16,6 +16,7 @@ from .properties import (
     read_font,
     read_paragraph,
     write_font,
+    write_effective_tabs,
     write_paragraph,
     xml_value,
 )
@@ -207,6 +208,8 @@ def set_format(index, ref, params, name):
             for run in p.iter(qn("w:r")):
                 write_font(element(run, "rPr"), name, params["value"])
             write_font(element(element(p, "pPr"), "rPr"), name, params["value"])
+        elif name == "tabs":
+            write_effective_tabs(index.document, p, element(p, "pPr"), params["value"])
         else:
             write_paragraph(
                 element(p, "pPr"),
@@ -311,6 +314,22 @@ def set_widow(index, ref, params):
     set_format(index, ref, params, "widow_control")
 
 
+def set_contextual_spacing(index, ref, params):
+    set_format(index, ref, params, "contextual_spacing")
+
+
+def set_snap_to_grid(index, ref, params):
+    set_format(index, ref, params, "snap_to_grid")
+
+
+def set_mirror_indents(index, ref, params):
+    set_format(index, ref, params, "mirror_indents")
+
+
+def set_tabs(index, ref, params):
+    set_format(index, ref, params, "tabs")
+
+
 def read_header(index, ref, cap):
     name = cap.property.removeprefix("header:")
     if name == "odd_even":
@@ -334,7 +353,7 @@ def read_header(index, ref, cap):
             def visit(node):
                 nonlocal field_depth
                 for child in node:
-                    if child.tag == qn("w:fldSimple"):
+                    if child.tag in {qn("w:fldSimple"), qn("w:pPr"), qn("w:rPr")}:
                         continue
                     if child.tag == qn("w:fldChar"):
                         kind = child.get(qn("w:fldCharType"))

@@ -12,6 +12,7 @@ from .properties import (
     simple_range,
     text_runs,
     write_font,
+    write_effective_tabs,
     write_paragraph,
     write_style_font,
 )
@@ -130,6 +131,29 @@ def set_page_break_before(index, ref, params):
 
 def set_widow_control(index, ref, params):
     set_paragraph_property(index, ref, params, "widow_control")
+
+
+def set_contextual_spacing(index, ref, params):
+    set_paragraph_property(index, ref, params, "contextual_spacing")
+
+
+def set_snap_to_grid(index, ref, params):
+    set_paragraph_property(index, ref, params, "snap_to_grid")
+
+
+def set_mirror_indents(index, ref, params):
+    set_paragraph_property(index, ref, params, "mirror_indents")
+
+
+def set_tabs(index, ref, params):
+    node = ensure_style(index, ref).element if ref["kind"] == "style" else index.elements[ref["id"]]
+    if ref["kind"] == "style":
+        from .inspect import _style_paragraph
+
+        paragraph = _style_paragraph(ref["id"][6:], index.document)
+    else:
+        paragraph = node
+    write_effective_tabs(index.document, paragraph, element(node, "pPr"), params["value"])
 
 
 def assign_style(index, ref, params):

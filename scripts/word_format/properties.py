@@ -36,6 +36,10 @@ PARAGRAPH_TAGS = {
     "keep_together": ("keepLines",),
     "page_break_before": ("pageBreakBefore",),
     "widow_control": ("widowControl",),
+    "contextual_spacing": ("contextualSpacing",),
+    "snap_to_grid": ("snapToGrid",),
+    "mirror_indents": ("mirrorIndents",),
+    "tabs": ("tabs",),
 }
 ATTRIBUTES = {
     "font_east_asia": {"rFonts": ("eastAsia", "eastAsiaTheme")},
@@ -396,6 +400,30 @@ def read_paragraph(document, paragraph, name):
     if name == "alignment":
         value = _attr(sources, "jc") or "left"
         return "justify" if value == "both" else value
+    if name == "tabs":
+        # Tab sets accumulate through the style chain; a clear entry removes
+        # just the inherited stop at its exact twip position.
+        stops = {}
+        malformed = []
+        for pr in reversed(sources):
+            tabs = pr.find(qn("w:tabs")) if pr is not None else None
+            if tabs is None:
+                continue
+            for node in tabs.findall(qn("w:tab")):
+                raw = node.get(qn("w:pos"))
+                try:
+                    position = int(raw)
+                except (TypeError, ValueError):
+                    malformed.append({"alignment": node.get(qn("w:val")), "position": raw,
+                                      "unit": "twips", "leader": node.get(qn("w:leader"), "none")})
+                    continue
+                alignment = node.get(qn("w:val"))
+                if alignment == "clear":
+                    stops.pop(position, None)
+                else:
+                    stops[position] = {"alignment": alignment, "position": position,
+                                       "unit": "twips", "leader": node.get(qn("w:leader"), "none")}
+        return [stops[position] for position in sorted(stops)] + malformed
     if name in {"space_before_pt", "space_after_pt"}:
         side = "before" if name == "space_before_pt" else "after"
         automatic = _attr(sources, "spacing", side + "Autospacing")
@@ -483,11 +511,35 @@ def read_paragraph(document, paragraph, name):
     for pr in sources:
         node = pr.find(qn("w:" + tag)) if pr is not None else None
         if node is not None:
-            return node.get(qn("w:val"), "1") not in {"0", "false", "off"}
-    return name == "widow_control"
+            raw = node.get(qn("w:val"), "1")
+            if name in {"contextual_spacing", "snap_to_grid", "mirror_indents"}:
+                if raw not in {"0", "false", "off", "1", "true", "on"}:
+                    # Preserve malformed evidence for profile validation; do
+                    # not silently migrate an arbitrary lexical value as true.
+                    return {"invalid_on_off": raw}
+            return raw not in {"0", "false", "off"}
+    return name in {"widow_control", "snap_to_grid"}
 
 
-def write_paragraph(pr, name, value):
+def write_effective_tabs(document, paragraph, pr, value):
+    """Replace custom tabs, including positions hidden by existing clear entries."""
+    requested_positions = {stop["position"] for stop in value}
+    clear_positions = set()
+    for source in ppr_sources(document, paragraph):
+        tabs = source.find(qn("w:tabs")) if source is not None else None
+        if tabs is None:
+            continue
+        for stop in tabs.findall(qn("w:tab")):
+            try:
+                position = int(stop.get(qn("w:pos")))
+            except (TypeError, ValueError):
+                continue
+            if position not in requested_positions:
+                clear_positions.add(position)
+    write_paragraph(pr, "tabs", value, clear_positions)
+
+
+def write_paragraph(pr, name, value, clear_tab_positions=()):
     if name == "outline_level":
         element(pr, "outlineLvl").set(qn("w:val"), str(int(value)))
     elif name == "numbering_suppressed":
@@ -501,6 +553,21 @@ def write_paragraph(pr, name, value):
             pr.remove(node)
     elif name == "alignment":
         element(pr, "jc").set(qn("w:val"), "both" if value == "justify" else value)
+    elif name == "tabs":
+        node = element(pr, "tabs")
+        for child in list(node):
+            node.remove(child)
+        for position in sorted(clear_tab_positions):
+            stop = OxmlElement("w:tab")
+            stop.set(qn("w:val"), "clear")
+            stop.set(qn("w:pos"), str(position))
+            node.append(stop)
+        for item in value:
+            stop = OxmlElement("w:tab")
+            stop.set(qn("w:val"), item["alignment"])
+            stop.set(qn("w:pos"), str(item["position"]))
+            stop.set(qn("w:leader"), item["leader"])
+            node.append(stop)
     elif name in {"space_before_pt", "space_after_pt"}:
         attr = "before" if name == "space_before_pt" else "after"
         spacing = element(pr, "spacing")

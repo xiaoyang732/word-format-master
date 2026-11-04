@@ -72,8 +72,8 @@ def set_style_font(style, tokens: dict[str, Any]) -> None:
         write_font(element(style.element, "rPr"), key, params["value"])
 
 
-def set_paragraph_format(style, tokens: dict[str, Any]) -> None:
-    from .properties import element, write_paragraph
+def set_paragraph_format(style, tokens: dict[str, Any], document=None) -> None:
+    from .properties import element, write_effective_tabs, write_paragraph
     from .spec import INDENTS, PARA, token_operations
 
     selected = {
@@ -88,6 +88,20 @@ def set_paragraph_format(style, tokens: dict[str, Any]) -> None:
         key = {"spacing_before": "space_before_pt", "spacing_after": "space_after_pt"}.get(key, key)
         value = params if key == "line_spacing" or key.endswith("indent") else params["value"]
         node = style._p if hasattr(style, "_p") else style.element
+        if key == "tabs":
+            if hasattr(style, "_p"):
+                document = document or style.part.document
+                paragraph = node
+            else:
+                if document is None:
+                    from .contracts import FormatError
+
+                    raise FormatError("Replacing style tabs requires the owning document")
+                from .inspect import _style_paragraph
+
+                paragraph = _style_paragraph(style.name, document)
+            write_effective_tabs(document, paragraph, element(node, "pPr"), value)
+            continue
         write_paragraph(element(node, "pPr"), key, value)
 
 
@@ -522,7 +536,7 @@ def apply_headers_footers(document: Document, tokens: dict[str, Any]) -> list[st
         style_name = f"WFM {kind.title()}"
         style = get_or_create_paragraph_style(document, style_name)
         set_style_font(style, config)
-        set_paragraph_format(style, config)
+        set_paragraph_format(style, config, document)
         seen: set[int] = set()
         for section in document.sections:
             container = getattr(section, kind)
@@ -611,7 +625,7 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     style_name = "WFM Page Number"
     style = get_or_create_paragraph_style(document, style_name)
     set_style_font(style, tokens)
-    set_paragraph_format(style, tokens)
+    set_paragraph_format(style, tokens, document)
     start = int(tokens.get("start", 1))
 
     # Freeze all variants before changing linked definitions, including explicit
@@ -918,7 +932,7 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
     ):
         appearance = tokens.get(key, tokens.get("title_style", {}) if key == "title_format" else {})
         set_style_font(style, appearance)
-        set_paragraph_format(style, appearance)
+        set_paragraph_format(style, appearance, document)
     # The TOC title must never index itself, regardless of its visual appearance.
     from .properties import element
 
@@ -1408,7 +1422,7 @@ def apply_reference_style(
     if bibliography.base_style is None:
         bibliography.base_style = get_or_create_paragraph_style(document, "Normal")
     set_style_font(bibliography, reference_tokens)
-    set_paragraph_format(bibliography, reference_tokens)
+    set_paragraph_format(bibliography, reference_tokens, document)
 
     numbering_mode = references.get("numbering_mode")
     num_id = None
