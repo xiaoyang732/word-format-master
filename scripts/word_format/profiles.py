@@ -200,6 +200,50 @@ def _atomic_candidate(target, name, value, evidence):
     return {"target": target, "action": action, "params": params, "evidence": evidence}
 
 
+def _expanded_paragraph_evidence(pr):
+    """Do not hide unknown attributes or malformed clear entries in known tags."""
+    unknown, malformed = set(), set()
+    for tag in ("contextualSpacing", "snapToGrid", "mirrorIndents", "tabs"):
+        node = pr.find(qn("w:" + tag))
+        if node is None:
+            continue
+        for attr in node.attrib:
+            if tag == "tabs" or attr != qn("w:val"):
+                unknown.add(tag + "@" + attr.split("}")[-1])
+        if tag != "tabs":
+            if node.get(qn("w:val"), "1") not in {"0", "1", "false", "true", "on", "off"}:
+                malformed.add(tag)
+            if len(node):
+                unknown.update(tag + "/" + child.tag.split("}")[-1] for child in node)
+            continue
+        seen = set()
+        for stop in node:
+            if stop.tag != qn("w:tab"):
+                unknown.add("tabs/" + stop.tag.split("}")[-1])
+                continue
+            unknown.update("tabs/tab@" + attr.split("}")[-1] for attr in stop.attrib
+                           if attr not in {qn("w:val"), qn("w:pos"), qn("w:leader")})
+            if len(stop):
+                unknown.update("tabs/tab/" + child.tag.split("}")[-1] for child in stop)
+            try:
+                raw = stop.get(qn("w:pos"))
+                if raw is None or not re.fullmatch(r"[+-]?\d+", raw):
+                    raise FormatError("Malformed tab position")
+                position = int(raw)
+                if position in seen:
+                    raise FormatError("Duplicate tab position")
+                seen.add(position)
+                alignment = stop.get(qn("w:val"))
+                # Clear entries have no effective stop but still require valid
+                # raw evidence before a profile may claim complete migration.
+                REGISTRY["paragraph.tabs.set"].validator({"value": [{
+                    "alignment": "left" if alignment == "clear" else alignment,
+                    "position": position, "unit": "twips", "leader": stop.get(qn("w:leader"), "none")}]})
+            except (FormatError, TypeError, ValueError):
+                malformed.add("tabs")
+    return unknown, malformed
+
+
 def template_profile(path):
     from analyze_docx import analyze_docx
 
@@ -230,6 +274,7 @@ def template_profile(path):
     groups = defaultdict(list)
     snapshot = []
     unknown = set()
+    malformed = set()
     for record in records:
         if record["kind"] != "paragraph" or record["part"] != "word/document.xml":
             continue
@@ -268,6 +313,10 @@ def template_profile(path):
                 "keepLines",
                 "pageBreakBefore",
                 "widowControl",
+                "contextualSpacing",
+                "snapToGrid",
+                "mirrorIndents",
+                "tabs",
                 "sectPr",
                 "outlineLvl",
                 "lang",
@@ -276,6 +325,9 @@ def template_profile(path):
                 "rPr",
             }
             unknown.update(n.tag.split("}")[-1] for n in pr if n.tag.split("}")[-1] not in known)
+            expanded_unknown, expanded_malformed = _expanded_paragraph_evidence(pr)
+            unknown.update(expanded_unknown)
+            malformed.update(expanded_malformed)
         if record.get("unsupported_container"):
             continue
         if not record.get("text", "").strip():
@@ -531,6 +583,9 @@ def template_profile(path):
             "Additional direct or inherited OOXML properties are recorded but not automatically migrated",
             properties=sorted(unknown),
         )
+    if malformed:
+        _issue(profile, "Malformed paragraph settings require explicit interpretation before migration",
+               properties=sorted(malformed))
     used_ids = {r.get("style_id") for r in snapshot}
     used_styles = [s for s in document.styles if s.style_id in used_ids]
     if any(s.element.find(".//" + qn("w:numPr")) is not None for s in used_styles) or any(

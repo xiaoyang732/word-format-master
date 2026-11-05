@@ -1,0 +1,14 @@
+{
+  "schema_version": "1.0",
+  "default": "general-course-report",
+  "templates": [
+    {
+      "id": "general-course-report",
+      "name": "通用课程报告模板",
+      "path": "reference/general-course-report/通用课程报告模板.docx",
+      "sha256": "2e42502bd6ba17641bbc7c2cc7859a0947051800682c1e2b2056d8fc5b8c4c15",
+      "source_notes": "reference/general-course-report/SOURCE.md",
+      "usage_notes": "reference/general-course-report/格式与使用说明.md"
+    }
+  ]
+}

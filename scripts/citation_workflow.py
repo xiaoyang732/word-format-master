@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import re
 from pathlib import Path
@@ -11,7 +10,6 @@ from typing import Any
 
 from docx.document import Document as DocumentType
 from docx.text.paragraph import Paragraph
-from docx.text.run import Run
 
 
 REFERENCE_HEADING_RE = re.compile(
@@ -35,17 +33,19 @@ def _is_heading(paragraph: Paragraph) -> bool:
 
 def extract_citation_data(document: DocumentType) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return body paragraph anchors and references using stable top-level indexes."""
+    from word_format.inspect import DocumentIndex
+
+    index_data = DocumentIndex(document)
+    records = {index_data.elements[oid]: index_data.records[oid] for oid in index_data.top_ids}
+    reference_nodes = index_data.reference_nodes()
     paragraphs: list[dict[str, Any]] = []
     references: list[dict[str, Any]] = []
-    in_references = False
     reference_index = 0
     for index, paragraph in enumerate(document.paragraphs):
         text = paragraph.text.strip()
-        if REFERENCE_HEADING_RE.match(text):
-            in_references = True
-            continue
-        if in_references:
-            if text and not _is_heading(paragraph):
+        record = records.get(paragraph._p, {})
+        if paragraph._p in reference_nodes:
+            if text:
                 reference_index += 1
                 label_match = re.match(r"^\s*(\[\s*\d+\s*\]|\d+[.)])", text)
                 label = label_match.group(1) if label_match else f"[{reference_index}]"
@@ -57,7 +57,7 @@ def extract_citation_data(document: DocumentType) -> tuple[list[dict[str, Any]],
                     "paragraph_sha256": paragraph_sha256(text),
                 })
             continue
-        if text and not _is_heading(paragraph):
+        if text and record.get('role') == 'body' and record.get('module') in {None, 'chapters'}:
             paragraphs.append({
                 "paragraph_index": index,
                 "text": text,
@@ -110,78 +110,7 @@ def _citation_offset(text: str, placement: dict[str, Any]) -> int:
     raise ValueError(f"unsupported citation insert position: {position}")
 
 
-def _insert_run_at_offset(paragraph: Paragraph, offset: int, text: str) -> None:
-    runs = list(paragraph.runs)
-    if not runs:
-        paragraph.add_run(text)
-        return
-    cursor = 0
-    for run in runs:
-        run_text = run.text or ""
-        next_cursor = cursor + len(run_text)
-        if offset <= next_cursor:
-            relative = max(0, offset - cursor)
-            original_element = copy.deepcopy(run._r)
-            before, after = run_text[:relative], run_text[relative:]
-            run.text = before
-            citation = paragraph.add_run()
-            if original_element.rPr is not None:
-                citation._r.insert(0, copy.deepcopy(original_element.rPr))
-            citation.text = text
-            run._r.addnext(citation._r)
-            if after:
-                suffix = Run(original_element, paragraph)
-                suffix.text = after
-                citation._r.addnext(suffix._r)
-            return
-        cursor = next_cursor
-    paragraph.add_run(text)
-
-
 def apply_citations(document: DocumentType, citations: dict[str, Any] | None) -> list[str]:
-    if not citations:
-        return []
-    placements = citations.get("placements", [])
-    if not isinstance(placements, list):
-        raise ValueError("citations.placements must be an array")
-    _, references = extract_citation_data(document)
-    reference_ids = {item["id"] for item in references}
-    indexed = list(document.paragraphs)
-    validated: list[tuple[Paragraph, dict[str, Any], str]] = []
-    seen_paragraphs: set[int] = set()
-    for placement in placements:
-        if not isinstance(placement, dict):
-            raise ValueError("each citation placement must be an object")
-        index = int(placement.get("paragraph_index", -1))
-        if index < 0 or index >= len(indexed):
-            raise ValueError(f"citation paragraph_index {index} is outside the document")
-        if index in seen_paragraphs:
-            raise ValueError(f"multiple citation placements for paragraph {index} are not supported")
-        seen_paragraphs.add(index)
-        paragraph = indexed[index]
-        expected = str(placement.get("paragraph_sha256") or "")
-        actual = paragraph_sha256(paragraph.text)
-        if not expected or expected != actual:
-            raise ValueError(f"citation paragraph fingerprint mismatch at index {index}")
-        ids = placement.get("reference_ids", [])
-        if not isinstance(ids, list) or not ids or any(str(item) not in reference_ids for item in ids):
-            raise ValueError(f"citation references are invalid at paragraph {index}")
-        citation_text = str(placement.get("citation_text") or "").strip()
-        if not citation_text or len(citation_text) > 200:
-            raise ValueError(f"citation_text is missing or too long at paragraph {index}")
-        if citation_text in paragraph.text:
-            raise ValueError(f"citation text already exists at paragraph {index}")
-        spacing = str(placement.get("spacing") or "none")
-        if spacing not in {"none", "space-before", "space-after", "spaces-around"}:
-            raise ValueError(f"citation spacing is invalid at paragraph {index}")
-        insertion_text = (
-            (" " if spacing in {"space-before", "spaces-around"} else "")
-            + citation_text
-            + (" " if spacing in {"space-after", "spaces-around"} else "")
-        )
-        validated.append((paragraph, placement, insertion_text))
+    from word_format.citations import insert_citations
 
-    for paragraph, placement, citation_text in validated:
-        offset = _citation_offset(paragraph.text, placement)
-        _insert_run_at_offset(paragraph, offset, citation_text)
-    return [f"Inserted {len(validated)} AI-approved citation placement(s) with paragraph fingerprints"]
+    return insert_citations(document, citations)

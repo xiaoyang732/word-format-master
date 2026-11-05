@@ -8,6 +8,12 @@ import json
 import sys
 from pathlib import Path
 
+# Diagnosis must run before importing the formatting engine and its dependencies.
+if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "doctor":
+    from runtime_doctor import main as doctor_main
+
+    raise SystemExit(doctor_main(sys.argv[2:]))
+
 from json_output import ensure_protected_paths, write_json
 from word_format import (
     apply_plan,
@@ -25,6 +31,7 @@ from word_format.profiles import (
     requirements_profile,
     template_profile,
 )
+from word_format.reports import CATALOG, load_report_catalog, prepare_report
 from word_format.templates import compile_template, list_templates, load_template, template_plan
 
 
@@ -36,12 +43,25 @@ def read_json(path):
 
 
 def main():
-    from cli_output import configure_cli_output
+    from cli_output import configure_cli_output, summarize_result
 
     configure_cli_output()
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    commands.add_parser("doctor", help="检查依赖、模板、目录权限与页面渲染能力")
     p = commands.add_parser("capabilities")
+    p.add_argument("--output")
+    p = commands.add_parser("report", help="Select the default report sample and prepare a draft")
+    p.add_argument("kind", choices=["list", "prepare"])
+    p.add_argument("workspace", nargs="?", help="New directory for draft, profile and workflow")
+    report_source = p.add_mutually_exclusive_group()
+    report_source.add_argument(
+        "--template", help="Registered report ID; default from templates/reports.json"
+    )
+    report_source.add_argument(
+        "--sample", help="User-supplied DOCX sample takes precedence over default"
+    )
+    p.add_argument("--topic", default="")
     p.add_argument("--output")
     p = commands.add_parser("inspect")
     p.add_argument("input")
@@ -133,9 +153,19 @@ def main():
         help="Defaults to the plan's renderer preference",
     )
     p.add_argument("--output")
+    for name in ("inspect", "profile", "check-structure", "audit", "template", "plan", "apply", "cover", "verify"):
+        path_option = "--report" if name in {"apply", "cover"} else "--output"
+        commands.choices[name].add_argument(
+            "--summary", action="store_true",
+            help=f"Print a compact summary after writing the full result to {path_option}",
+        )
     args = parser.parse_args()
     try:
         destination = args.report if args.command in {"apply", "cover"} else args.output
+        summary = getattr(args, "summary", False)
+        if summary and not destination:
+            path_option = "--report" if args.command in {"apply", "cover"} else "--output"
+            raise FormatError(f"--summary requires {path_option}")
         protected = [
             Path(v).resolve()
             for v in (
@@ -200,7 +230,27 @@ def main():
             if "profile_context" in request:
                 protected.append(request["profile_context"]["source"]["path"])
         ensure_protected_paths(destination, *protected)
-        if args.command == "capabilities":
+        if args.command == "report":
+            protected.extend([CATALOG, CATALOG.parents[1] / "references/report-generation.md"])
+            if args.sample:
+                protected.append(args.sample)
+            else:
+                catalog = load_report_catalog()
+                protected.extend(t[key] for t in catalog["templates"]
+                                 for key in ("path", "source_notes", "usage_notes"))
+            if args.workspace:
+                protected.extend(Path(args.workspace) / name for name in
+                                 ("draft.docx", "profile.json", "workflow.json"))
+            ensure_protected_paths(destination, *protected)
+            if args.kind == "list":
+                result = load_report_catalog()
+            else:
+                if not args.workspace:
+                    raise FormatError("report prepare requires a new workspace directory")
+                result = prepare_report(
+                    args.workspace, template_id=args.template, sample=args.sample, topic=args.topic
+                )
+        elif args.command == "capabilities":
             result = capabilities()
         elif args.command == "inspect":
             result = inspect_document(args.input)
@@ -298,13 +348,20 @@ def main():
             )
         if destination:
             write_json(destination, result, *protected)
+            if summary:
+                print(json.dumps(summarize_result(args.command, result, destination),
+                                 ensure_ascii=False, allow_nan=False))
         else:
             print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
         return 2 if result.get("status") in {"failed", "unsupported", "needs_clarification"} else 0
     except (FormatError, ValueError, OSError, KeyError, TypeError) as exc:
         print(
             json.dumps(
-                {"status": getattr(exc, "status", "failed"), "error": str(exc)}, ensure_ascii=False
+                {"status": getattr(exc, "status", "failed"), "error": str(exc),
+                 "code": getattr(exc, "code", "INVALID_INPUT"),
+                 "message": getattr(exc, "message", "操作未完成，请检查输入与文件权限"),
+                 "retryable": getattr(exc, "retryable", False),
+                 "next_actions": getattr(exc, "next_actions", ["检查错误详情后修正输入，再重新执行"])}, ensure_ascii=False
             ),
             file=sys.stderr,
         )

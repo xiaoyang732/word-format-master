@@ -10,14 +10,22 @@
 
 ```powershell
 python scripts/format_cli.py capabilities --output capabilities.json
-python scripts/format_cli.py inspect source.docx --output inspect.json
-python scripts/format_cli.py audit source.docx --request request.json --output audit.json
-python scripts/format_cli.py plan source.docx result.docx --request request.json --output plan.json
-python scripts/format_cli.py apply --plan plan.json --report report.json
-python scripts/format_cli.py verify --plan plan.json --report report.json
+python scripts/format_cli.py report list
+python scripts/format_cli.py report prepare NEW_TASK_DIR --topic "计算机方向报告"
+python scripts/format_cli.py inspect source.docx --output inspect.json --summary
+python scripts/format_cli.py audit source.docx --request request.json --output audit.json --summary
+python scripts/format_cli.py plan source.docx result.docx --request request.json --output plan.json --summary
+python scripts/format_cli.py apply --plan plan.json --report report.json --summary
+python scripts/format_cli.py verify --plan plan.json --report report.json --output verification.json --summary
 ```
 
+已有 DOCX 的局部修改走 plan → apply → verify。用户已明确目标且选择器可直接表达时，可以由 plan 解析目标。只有范围需要确认时才 inspect，并从落盘结果提取相关对象 ID、短文本与请求涉及的属性。
+
+`--summary` 与 `--output` 或 apply/cover 的 `--report` 配合使用。stdout 返回状态、计数、证据路径及至多五条问题和五条失败检查索引。用从零开始的 `index` 定位完整文件中的 `issues`、`checks` 或 verify 的 `format.checks`。过长的 ID 在摘要中缩短。省略计数提示需要从完整文件继续查询。plan、apply 和 verify 继续使用完整文件作为输入，摘要用于向用户说明进度和结果。
+
 命令失败退出码为 2，并返回 `failed`、`unsupported` 或 `needs_clarification`。已有输出默认拒绝覆盖；只有显式传入 `--overwrite` 才可替换输出。源文件和它的硬链接始终不能作为输出。JSON 路径也不得覆盖源文档、输出文档、请求或计划。
+
+`report prepare` 使用 `templates/reports.json` 的默认真实 DOCX，也可通过互斥的 `--template REPORT_ID` 或 `--sample USER.docx` 显式选择；模板指纹不符、未知 ID、任务目录已存在或任务位于模板库内时拒绝准备。它返回 `status: draft`，生成整包草稿、原模板 profile 和 workflow.json，不生成正文、不解决 profile issues、不替代 plan/apply/verify。完整调用见 [报告生成流程](report-generation.md)。
 
 `audit` 接受与 `plan` 相同的 `operations` 或 `spec` 请求，使用同一位置解析器和独立回读器检查文档，不调用写入 handler、不保存 DOCX、不创建输出文档。报告逐项列出对象 ID、文字、期望值、实际有效值和状态，`summary` 汇总通过/失败项。存在偏差时仍可写出完整 JSON 报告，退出码为 2；通过为 0。未选中可执行检查时为 `no_change`。只检查请求覆盖的属性，视觉状态为 `skipped`；这不等于完整论文合规审查。
 
@@ -58,6 +66,8 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 | 第 1 节页面 | `{"type":"section","number":1}` |
 | 指定共享样式 | `{"type":"style","name":"Heading 1"}` |
 
+多个段落的同一属性使用相同参数时，优先用一条操作配语义选择器或 `ids`。只核对计划中相关操作的目标及数量即可确认范围。具有顺序依赖的结构操作、共享样式改动和重叠字符范围须按各自契约处理。
+
 `ordinal` 是过滤后非空段落的 1 起始序号。`p0` 等 ID 包含空段落和表格段落，必须来自当前 inspect，不应由 AI 猜测。未明确 ID、part、table_id 的普通段落选择只包含顶层段落。字符 start/end 为当前段落可见文字的 0 起始、左闭右开区间；重复 quote 必须给 1 起始 occurrence。存在域、绘图、制表符、换行或修订的复杂文字范围会拒绝。页面位置选择需要渲染锚点，目前不支持。
 
 旧规范可独立控制关键词标签与词条的粗体，并设置目录标题样式：
@@ -87,6 +97,14 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 `capabilities` 返回每项操作的 action、handler、validator、reader、verifier、参数、允许范围和测试文件。注册表位于 `registry.py`，入口只能执行已登记 action。
 测试文件链接是回归入口，不代表每个参数组合或渲染器均有覆盖。
 
+### 正文范围和动态文内引用
+
+`spec.body` 仅修改章节正文和无模块标记的正文，不再改写共享 Normal 样式；摘要、致谢、附录需通过明确的模块或语义规则设置。`operations` 继续按显式选择范围应用。
+
+`citation.insert` 根据共享模块边界提取文献，在文献条目建立书签与原生编号，并在指定正文位置插入真实 REF 域。`reference_ids` 必须与 `citation_text` 中的编号顺序一致，例如 `ref-1, ref-2` 对应 `[1][2]`。每个 REF 输出完整的 `[编号]`，避免 WPS 忽略去装饰开关后出现双层括号。验收检查书签目标、编号序列、字段结果及原段落指纹，而非只检查文字是否出现。
+
+目前支持逐条列出的数字引用；组合及压缩范围如 `[1,2]`、`[1-3]` 必须改写成 `[1][2]`、`[1][2][3]`，作者年份制与含域、绘图、超链接等复杂插入锚点会明确拒绝。参考文献原有编号序列若与文献区域以外列表共用，或编号标记字体混用，需先明确分离/统一；不会为了插入引用而静默改变其他列表。增删、重排文献后在 Word/WPS 中更新域。
+
 | 格式 | 操作 | 唯一写入职责 |
 |---|---|---|
 | 中文/西文字体 | `font.east_asia.set` / `font.latin.set` | `operations.py` 中各自 handler → `properties.write_font` |
@@ -95,6 +113,8 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 | 行距 | `paragraph.line_spacing.set` | multiple / exact / at_least，模式与单位一并校验 |
 | 首行、左、右、悬挂缩进 | `paragraph.*_indent.set` | chars 或 mm 单一权威值；首行与悬挂互斥 |
 | 段落分页控制 | `paragraph.keep_with_next.set` 等 | 每项只写自己的布尔属性 |
+| 上下文段距、网格对齐、镜像缩进 | `paragraph.contextual_spacing.set` / `paragraph.snap_to_grid.set` / `paragraph.mirror_indents.set` | 布尔值，显式 false 覆盖继承 |
+| 制表位及引导符 | `paragraph.tabs.set` | 完整有效集合；整数 twip 位置、对齐、leader；清除未请求的继承位置 |
 | 页面尺寸、边距、页眉页脚距离 | `page.*.set` | 每项只写所选节的对应属性 |
 | 表格对齐、标题行重复 | `table.alignment.set` / `table.header_repeat.set` | 所选表格属性 |
 | 三线表 | `table.three_line.apply` | 保存原始边框后应用；false 只恢复本工具保存的边框 |
@@ -102,6 +122,8 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 | 页眉页脚、页码、目录、编号、题注位置、引用 | 登记的 configure / convert / insert 操作 | 明确列出结构影响，独立验收 |
 
 整篇旧规范可用 `{"spec": {...}}` 替代 `operations`；两者不能同时提供。旧规范会展开成同一注册表的操作。`apply_spec.py INPUT.docx OUTPUT.docx --spec spec.json` 也委托同一核心，无需额外会话。要求文档和样例使用 [Format Profile](format-profile.md) 提取证据，再通过 `plan --profile` 编译。
+
+段落属性逐项支持程度及制表位参数见[段落属性支持矩阵](paragraph-properties.md)。原始 XML 留存不代表所有 Word 设置均可语义读取、迁移或通过页面验证。
 
 页眉横线使用 `header.border_bottom.set`，节 target 与 `value: boolean`，可选 `variant: default|first|even`；关闭会显式取消样式继承。页码使用 `page_number.configure` 的 `scope: all|body`（缺省 all）和可选一基 `start_section`；body 模式隔离前置各页型页码，在起始节写入 decimal/start，后续节连续计页。前置罗马页码与正文阿拉伯页码的独立双制式配置暂不支持，详见 [页眉与页码契约](header-requirements.md)。
 

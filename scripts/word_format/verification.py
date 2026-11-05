@@ -141,6 +141,10 @@ def read_complex_state(index, name):
             "left_indent",
             "right_indent",
             "hanging_indent",
+            "contextual_spacing",
+            "snap_to_grid",
+            "mirror_indents",
+            "tabs",
         )
 
         def formats(paragraphs):
@@ -295,11 +299,9 @@ def read_complex_state(index, name):
                 )
         return states
     if name == "citations":
-        return [
-            p.text
-            for p in doc.paragraphs
-            if not paragraph_style_name(doc, p._p).startswith("WFM TOC")
-        ]
+        from .citations import read_state
+
+        return read_state(doc)
     raise FormatError(f"Missing structural reader for {name}")
 
 
@@ -528,11 +530,9 @@ def verify_complex_state(actual, params, name):
         target_key = ("after_" if params["position"] == "above" else "before_") + params["role"]
         return all(r[target_key] for r in items)
     if name == "citations":
-        return all(
-            0 <= p["paragraph_index"] < len(actual)
-            and p["citation_text"] in actual[p["paragraph_index"]]
-            for p in params["placements"]
-        )
+        from .citations import verify_state
+
+        return verify_state(actual, params)
     return False
 
 
@@ -762,6 +762,10 @@ def _page_number_content_projection(document):
 
 def structural_snapshot(index, cap, params, refs):
     """Protect body content/objects and unrelated parts across structural writes."""
+    if cap.property == "citations":
+        from .citations import snapshot
+
+        return snapshot(index, params)
     if cap.property == "three_line":
         restores = []
         if not params["value"]:
@@ -919,6 +923,10 @@ def structural_snapshot(index, cap, params, refs):
 
 
 def verify_structural_preservation(index, cap, params, refs, before):
+    if cap.property == "citations":
+        from .citations import verify_preservation
+
+        return verify_preservation(index, params, before)
     if cap.property == "three_line":
         if before[0] != atomic_projection(index.document, index, refs, cap):
             raise FormatError("Table borders changed unrelated content or properties")

@@ -12,6 +12,8 @@
 
 明确局部请求直接转成操作；只读检查走 `audit`。AI 解释含义和权限范围，代码负责确定性提取、校验、写入和独立回读。未决项返回 `needs_clarification`，不能把审阅结果当作执行计划。
 
+新写报告且没有用户指定格式依据时：`templates/reports.json` → `report prepare`（整包复制默认 DOCX、提取 profile、生成 workflow）→ AI 填充内容 → `check-structure` → `plan --profile --match-structure` → 同一 apply/verify、编号检查、域刷新与全页复核。用户提供的依据优先；已有文档排版不触发这个默认值。准备阶段只复制包，不新增格式写入器。
+
 ## 核心职责
 
 | 模块 | 职责 |
@@ -20,6 +22,7 @@
 | `requirement_rules.py` | 保守子句解析；未消费内容、否定和条件进入未决项 |
 | `profiles.py` | 格式来源、有效样例快照、规则、冲突、决策、覆盖及目标映射；编译到同一 planner |
 | `template_structure.py` | 只读提取样例模块、语言、出现次数和章节层级；按实际顺序比较生成草稿，供规划和验收共用 |
+| `reports.py` | 校验默认报告登记及模板 SHA-256，选择用户样例或默认文档，安全准备草稿和源绑定 profile |
 | `inspect.py` / `selectors.py` | 源文件对象目录和严格位置解析；不猜测重复或不存在的位置 |
 | `registry.py` | 可执行 action、目标类型、参数校验、唯一 handler、reader 和 verifier |
 | `properties.py` / `operations.py` | 字体、段落和页面属性的读写及命名 handler |
@@ -34,12 +37,12 @@
 
 ## 入口与数据
 
-`format_cli.py` 提供 `capabilities / inspect / profile / check-structure / audit / plan / apply / verify`。
+`format_cli.py` 提供 `capabilities / report / inspect / profile / check-structure / audit / plan / apply / verify` 等入口。`run_format_pipeline.py` 支持互斥的 `--template` 与 `--profile`，后者可带 `--resolutions`、`--mapping`、`--match-structure`，严格样例模式先检查结构。
 `apply_spec.py` 兼容直接 `--spec` 应用，委托 `word_format.api.apply_spec()`；兼容导出的字段/页码方法仍归属核心。
 
 `templates/builtin/` 是新模板入口的权威数据，`assets/presets.json` 是旧 spec 接口的冻结兼容数据；两者不互相补值。
-`references/` 仅保留当前契约；历史设计、修复与评审结果归档于 `_dev/docs/`。
-`_dev/tests/`、`_dev/scripts/` 和 `_dev/ci/` 纳入版本控制，生成文件与缓存不纳入。
+`templates/reports.json` 登记真实报告 DOCX、默认 ID、来源和格式说明及文件指纹；它不属于格式规则 JSON，也不从旧 presets 补值。路径相对于登记文件解析，项目迁移目录后仍可使用。
+`references/` 保存当前接口与执行契约。必要的 `dev/tests/`、`dev/tools/`、验证工具与 CI 配置纳入版本管理，保证新克隆仓库可复现验证；报告、缓存、未启用模板及生成产物集中于 `dev/` 并由 `.gitignore` 排除。运行发布包通过 `dev/tools/build_release.py` 的独立清单构建，不携带开发资料。
 
 - Format Profile：`schema_version: 1.0`，见 [format-profile.md](format-profile.md)。
 - Format Spec：`schema_version: 1.0`，见 [format-spec.md](format-spec.md)。
@@ -63,6 +66,8 @@ Profile 记录原始证据和问题，`resolutions` 保留决策理由。`mappin
 `render_docx.py` 只产生页面证据，`verify_output.py` 检查结构与视觉证据。渲染使用预先计算哈希的快照，源文件变化不发布清单；显式渲染器选择不静默降级。刷新所有 StoryRanges 中的字段和目录后输出 PDF/PNG，不保存回原稿。相对外部关系需要先处理基准路径。
 
 结构通过不证明分页、字形或视觉通过。AI 必须检查所有页面后才可给出视觉结论；缺少渲染或检查须报告 skipped / pending。
+
+流水线在报告目录保存 `pipeline-state.json` 与 `summary.json`。状态绑定输入、参数、引擎和各阶段产物摘要，通过进程级非阻塞锁避免并发执行；`--resume` 拒绝复用已修改或缺失的证据。汇总区分实际渲染与全页视觉审查，内容真实性默认未核实。恢复与自检入口见 [runtime-and-recovery.md](runtime-and-recovery.md)。
 
 ## 扩展检查
 

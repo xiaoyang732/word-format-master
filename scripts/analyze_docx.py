@@ -230,6 +230,25 @@ def merge_properties(base: dict[str, Any], override: dict[str, Any]) -> dict[str
     return result
 
 
+def merge_paragraph_properties(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    """OOXML tab declarations accumulate; this differs from spec-list overrides."""
+    result = merge_properties(base, override)
+    if "tabs" not in override:
+        return result
+    stops = {}
+    malformed = []
+    for stop in [*base.get("tabs", []), *override["tabs"]]:
+        position = stop.get("position")
+        if not isinstance(position, int):
+            malformed.append(stop)
+        elif stop.get("alignment") == "clear":
+            stops.pop(position, None)
+        else:
+            stops[position] = stop
+    result["tabs"] = [stops[position] for position in sorted(stops)] + malformed
+    return result
+
+
 def parse_theme_fonts(package: zipfile.ZipFile) -> dict[str, str]:
     theme = read_xml(package, "word/theme/theme1.xml")
     if theme is None:
@@ -295,7 +314,9 @@ def parse_paragraph_properties(parent: ET.Element | None) -> dict[str, Any]:
             {
                 key: value for key, value in {
                     "alignment": w_attr(tab, "val"),
-                    "position": w_attr(tab, "pos"),
+                    "position": int(w_attr(tab, "pos")) if re.fullmatch(r"[+-]?\d+", w_attr(tab, "pos") or "") else w_attr(tab, "pos"),
+                    "unit": "twips",
+                    "leader": w_attr(tab, "leader") or "none",
                 }.items() if value is not None
             }
             for tab in tabs.findall("w:tab", NS)
@@ -341,6 +362,9 @@ def parse_paragraph_properties(parent: ET.Element | None) -> dict[str, Any]:
         ("keep_together", "keepLines"),
         ("page_break_before", "pageBreakBefore"),
         ("widow_control", "widowControl"),
+        ("contextual_spacing", "contextualSpacing"),
+        ("snap_to_grid", "snapToGrid"),
+        ("mirror_indents", "mirrorIndents"),
     ):
         value = bool_value(parent.find(f"w:{tag}", NS))
         if value is not None:
@@ -394,13 +418,15 @@ def parse_styles(
         stack.add(style_id)
         base_id = style.get("based_on")
         effective_rpr: dict[str, Any] = dict(default_rpr)
-        effective_ppr: dict[str, Any] = dict(default_ppr)
+        effective_ppr: dict[str, Any] = merge_paragraph_properties({}, default_ppr)
         if base_id in raw:
             base = resolve(base_id, stack)
             effective_rpr = merge_properties(effective_rpr, base.get("effective_rPr", {}))
-            effective_ppr = merge_properties(effective_ppr, base.get("effective_pPr", {}))
+            # The resolved base already includes defaults and any tab clears.
+            # Adding defaults again would revive stops the base removed.
+            effective_ppr = copy.deepcopy(base.get("effective_pPr", effective_ppr))
         effective_rpr = merge_properties(effective_rpr, style.get("rPr", {}))
-        effective_ppr = merge_properties(effective_ppr, style.get("pPr", {}))
+        effective_ppr = merge_paragraph_properties(effective_ppr, style.get("pPr", {}))
         effective_rpr = resolve_theme_font_names(effective_rpr, theme_fonts or {})
         item = dict(style)
         item["effective_rPr"] = effective_rpr
@@ -631,10 +657,15 @@ def infer_visual_paragraph_alignment(
             return alignment
 
     tabs_before_text = 0
-    for node in paragraph.iter():
-        if node.tag == W + "tab":
-            tabs_before_text += 1
-        elif node.tag == W + "t" and str(node.text or "").strip():
+    found_text = False
+    for run in paragraph.findall(".//w:r", NS):
+        for node in run.iter():
+            if node.tag == W + "tab":
+                tabs_before_text += 1
+            elif node.tag == W + "t" and str(node.text or "").strip():
+                found_text = True
+                break
+        if found_text:
             break
     tab_stops = [
         tab for tab in effective_ppr.get("tabs", [])
@@ -695,7 +726,7 @@ def infer_header_footer_tokens(
                     effective.get("effective_rPr", {}),
                     parse_run_properties(paragraph.find("w:r/w:rPr", NS)),
                 )
-                effective["effective_pPr"] = merge_properties(
+                effective["effective_pPr"] = merge_paragraph_properties(
                     effective.get("effective_pPr", {}),
                     parse_paragraph_properties(ppr),
                 )
@@ -940,6 +971,10 @@ def style_tokens(style: dict[str, Any] | None) -> dict[str, Any]:
         "keep_with_next": ppr.get("keep_with_next", False),
         "keep_together": ppr.get("keep_together", False),
         "widow_control": ppr.get("widow_control", True),
+        "contextual_spacing": ppr.get("contextual_spacing"),
+        "snap_to_grid": ppr.get("snap_to_grid"),
+        "mirror_indents": ppr.get("mirror_indents"),
+        "tabs": ppr.get("tabs"),
         "numbering": ppr.get("numbering"),
     }
     for name,source in (("left_indent","left"),("right_indent","right"),("first_line_indent","first_line"),("hanging_indent","hanging")):

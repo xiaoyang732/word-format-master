@@ -4,6 +4,8 @@
 
 ## 入口
 
+新报告默认走真实 DOCX 样例工作流：`format_cli.py report list` 查看登记，`report prepare TASK_DIR` 从 `templates/reports.json` 选定通用课程报告模板并整包克隆草稿、提取 profile。填充后用 `check-structure` 和 `plan --profile --match-structure`，或 `run_format_pipeline.py --profile ... --match-structure`，接入同一 planner/registry/apply/verify。详见 [报告生成流程](report-generation.md)。`report list` 与下面的格式模板 `template list` 是两个不同目录，不把参考 DOCX 冒充为已编译的数值模板。
+
 从零生成的内容先保存为 DOCX 初稿，再与已有论文走相同的 plan/apply/verify 流程。仅在用户选择内置模板时使用内置 ID：
 
 ```powershell
@@ -47,6 +49,8 @@ python scripts/format_cli.py template validate school-template.json
 - 中文摘要、英文摘要、关键词标签和关键词内容分别选择，避免整段套用同一个字符格式。
 
 ## 模板维护与兼容
+
+受限发布平台不接受 DOCX 时，可仅在分发包中将报告模板编码为相邻的 `.docx.json` 文件（`format: docx-base64-v1`，`data` 为 Base64）。加载器仅在原 DOCX 缺失时使用该载体，并以登记文件中的 SHA-256 校验后还原到本机临时缓存。Git 仓库保留原 DOCX；编码载体不改变模板内容或规则来源。
 
 `templates/builtin/<id>/template.json` 是新入口的内置格式来源。封面使用独立 cover.json，`word_format.cover.render_cover` 只接收布局和真实数据，不填入虚构姓名、题目或日期。封面渲染是新稿构建工具，不能用于重建已有论文的封面。
 

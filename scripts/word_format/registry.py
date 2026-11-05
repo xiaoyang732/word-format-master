@@ -40,9 +40,11 @@ class Capability:
             "parameters": self.parameters,
             "structural": self.structural,
             "effects": list(self.effects),
-            "test": "_dev/tests/test_headers.py"
+            "test": "dev/tests/test_headers.py"
             if self.property.startswith("header:") or self.property == "section_break"
-            else "_dev/tests/test_format_core.py",
+            else "dev/tests/test_paragraph_extended.py"
+            if self.property in {"contextual_spacing", "snap_to_grid", "mirror_indents", "tabs"}
+            else "dev/tests/test_format_core.py",
         }
 
 
@@ -99,6 +101,34 @@ def paragraph_spacing(params):
     return scalar("number", 0, 500, "pt")(params)
 
 
+def tabs(params):
+    """A complete effective set of custom stops, preserving raw twip positions."""
+    require_keys(params, {"value"}, {"value"}, "tabs params")
+    value = params["value"]
+    if not isinstance(value, list) or len(value) > 1000:
+        raise FormatError("tabs value must be a list of at most 1000 tab stops")
+    result = []
+    positions = set()
+    for item in value:
+        require_keys(item, {"alignment", "position", "unit", "leader"},
+                     {"alignment", "position"}, "tab stop")
+        if not isinstance(item["alignment"], str) or item["alignment"] not in {
+            "left", "center", "right", "decimal", "bar", "num", "start", "end"
+        }:
+            raise FormatError("Invalid tab alignment")
+        position = number(item["position"], -31680, 31680, "tab position", True)
+        if item.get("unit", "twips") != "twips":
+            raise FormatError("tab position unit must be twips")
+        leader = item.get("leader", "none")
+        if not isinstance(leader, str) or leader not in {"none", "dot", "hyphen", "underscore", "heavy", "middleDot"}:
+            raise FormatError("Invalid tab leader")
+        if position in positions:
+            raise FormatError("Duplicate tab positions require one explicit alignment and leader")
+        positions.add(position)
+        result.append({"alignment": item["alignment"], "position": int(position), "unit": "twips", "leader": leader})
+    return {"value": sorted(result, key=lambda stop: stop["position"])}
+
+
 def line_spacing(params):
     require_keys(params, {"kind", "value", "unit"}, {"kind", "value"}, "line spacing")
     kind = params["kind"]
@@ -153,6 +183,10 @@ def read_atomic(index, ref, cap):
         "keep_together",
         "page_break_before",
         "widow_control",
+        "contextual_spacing",
+        "snap_to_grid",
+        "mirror_indents",
+        "tabs",
     }:
         return read_paragraph(index.document, p, cap.property)
     if cap.property.startswith("page:"):
@@ -250,6 +284,8 @@ def equal_value(actual, expected, tolerance=0.025):
 def verify_atomic(actual, params, cap):
     if cap.property == "three_line":
         return actual["enabled"] if params["value"] else not actual["saved"]
+    if cap.property == "tabs":
+        return equal_value(actual, params["value"])
     expected = (
         params
         if cap.property == "line_spacing" or cap.property.endswith("indent")
@@ -394,6 +430,14 @@ for action, prop, handler, validator, params in (
         scalar("boolean"),
         {"value": "boolean"},
     ),
+    ("paragraph.contextual_spacing.set", "contextual_spacing", op.set_contextual_spacing,
+     scalar("boolean"), {"value": "boolean"}),
+    ("paragraph.snap_to_grid.set", "snap_to_grid", op.set_snap_to_grid,
+     scalar("boolean"), {"value": "boolean"}),
+    ("paragraph.mirror_indents.set", "mirror_indents", op.set_mirror_indents,
+     scalar("boolean"), {"value": "boolean"}),
+    ("paragraph.tabs.set", "tabs", op.set_tabs, tabs,
+     {"value": "complete list of {alignment, position: -31680..31680 integer, unit: twips, leader}; empty clears inherited custom stops"}),
 ):
     add(action, prop, {"paragraph", "style"}, handler, validator, params)
 
@@ -579,7 +623,7 @@ for action, prop, handler, section, effects in (
         "citations",
         op.insert_citations,
         "citations",
-        ("validated citation placement text",),
+        ("dynamic REF citation fields", "reference bookmarks", "native bibliography numbering"),
     ),
 ):
     REGISTRY[action] = Capability(
@@ -845,6 +889,14 @@ for action, prop, targets, handler, validator, parameters in (
         header_variant(scalar("boolean")),
         {"value": "boolean"},
     ),
+    ("header.contextual_spacing.set", "contextual_spacing", {"section"}, headers.set_contextual_spacing,
+     header_variant(scalar("boolean")), {"value": "boolean"}),
+    ("header.snap_to_grid.set", "snap_to_grid", {"section"}, headers.set_snap_to_grid,
+     header_variant(scalar("boolean")), {"value": "boolean"}),
+    ("header.mirror_indents.set", "mirror_indents", {"section"}, headers.set_mirror_indents,
+     header_variant(scalar("boolean")), {"value": "boolean"}),
+    ("header.tabs.set", "tabs", {"section"}, headers.set_tabs, header_variant(tabs),
+     {"value": "complete custom tab set: alignment, integer twip position, unit, leader"}),
 ):
     REGISTRY[action] = Capability(
         action,

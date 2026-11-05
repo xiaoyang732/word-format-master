@@ -34,6 +34,10 @@ PARA = {
     "keep_together": "paragraph.keep_together.set",
     "page_break_before": "paragraph.page_break_before.set",
     "widow_control": "paragraph.widow_control.set",
+    "contextual_spacing": "paragraph.contextual_spacing.set",
+    "snap_to_grid": "paragraph.snap_to_grid.set",
+    "mirror_indents": "paragraph.mirror_indents.set",
+    "tabs": "paragraph.tabs.set",
 }
 INDENTS = ("first_line_indent", "left_indent", "right_indent", "hanging_indent")
 META = {"style_name", "source_style_id", "numbering"}
@@ -623,10 +627,14 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
                 tokens = {k: v for k, v in h1.items() if k not in {"level", "page_break_before"}}
                 style_name = "WFM Abstract Title"
                 extra_outline = 9
-        elif role == "body" or (
-            role == "module_body"
+        elif (role == "body" and r.get("module") in {None, "chapters"}) or (
+            isolated
+            and role == "module_body"
             and r.get("module") in {"abstract", "appendix", "acknowledgements"}
         ):
+            # Legacy body requests select chapter/body-only paragraphs. Other
+            # modules require their own explicit module or semantic rules.
+            # Templates retain their global role baseline before module overrides.
             tokens = spec.get("body", {})
         elif role == "title":
             tokens = spec.get("title", {})
@@ -754,11 +762,11 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
                     "params": {"value": tokens[option]},
                 }
             )
-    # Global named styles mirror the explicit global rules; direct target writes
-    # above ensure that existing overrides cannot hide the requested format.
+    # Named presentation styles mirror the explicit global rules. Body formatting
+    # stays on selected paragraphs: changing Normal also changes effective format
+    # in unrelated modules, table cells, headers and styles that inherit from it.
     for name, tokens in (
         [
-            ("Normal", spec.get("body", {})),
             ("Title", spec.get("title", {})),
             ("Subtitle", spec.get("title", {})),
         ]
@@ -991,6 +999,8 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
 
 # Generated from executable actions, not a second independent supported-fields list.
 def legacy_paths():
+    from .registry import REGISTRY
+
     paths = {}
     for prefix in (
         "body",
@@ -1005,6 +1015,10 @@ def legacy_paths():
         "page_numbers",
     ):
         for key, action in (FONT | PARA).items():
+            if prefix == "headers_footers.header":
+                header_action = "header." + (action if action.startswith("font.") else action.removeprefix("paragraph."))
+                if header_action not in REGISTRY:
+                    continue
             paths[f"{prefix}.{key}"] = action
         for name in INDENTS:
             for unit in ("mm", "chars"):
@@ -1080,9 +1094,11 @@ def legacy_paths():
         ):
             paths[prefix + "." + key] = action
         for key, action in (FONT | PARA).items():
-            paths[prefix + "." + key] = "header." + (
+            header_action = "header." + (
                 action if action.startswith("font.") else action.removeprefix("paragraph.")
             )
+            if header_action in REGISTRY:
+                paths[prefix + "." + key] = header_action
         for name in INDENTS:
             for unit in ("chars", "mm"):
                 paths[prefix + "." + name + "_" + unit] = "header." + name + ".set"
