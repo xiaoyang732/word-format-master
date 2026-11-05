@@ -43,7 +43,7 @@ def read_json(path):
 
 
 def main():
-    from cli_output import configure_cli_output
+    from cli_output import configure_cli_output, summarize_result
 
     configure_cli_output()
     parser = argparse.ArgumentParser(description=__doc__)
@@ -153,9 +153,19 @@ def main():
         help="Defaults to the plan's renderer preference",
     )
     p.add_argument("--output")
+    for name in ("inspect", "profile", "check-structure", "audit", "template", "plan", "apply", "cover", "verify"):
+        path_option = "--report" if name in {"apply", "cover"} else "--output"
+        commands.choices[name].add_argument(
+            "--summary", action="store_true",
+            help=f"Print a compact summary after writing the full result to {path_option}",
+        )
     args = parser.parse_args()
     try:
         destination = args.report if args.command in {"apply", "cover"} else args.output
+        summary = getattr(args, "summary", False)
+        if summary and not destination:
+            path_option = "--report" if args.command in {"apply", "cover"} else "--output"
+            raise FormatError(f"--summary requires {path_option}")
         protected = [
             Path(v).resolve()
             for v in (
@@ -338,6 +348,9 @@ def main():
             )
         if destination:
             write_json(destination, result, *protected)
+            if summary:
+                print(json.dumps(summarize_result(args.command, result, destination),
+                                 ensure_ascii=False, allow_nan=False))
         else:
             print(json.dumps(result, ensure_ascii=False, indent=2, allow_nan=False))
         return 2 if result.get("status") in {"failed", "unsupported", "needs_clarification"} else 0

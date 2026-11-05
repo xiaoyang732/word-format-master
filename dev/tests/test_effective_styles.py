@@ -18,7 +18,7 @@ from word_format.api import apply_plan, audit_document, build_plan, verify_plan
 from word_format.contracts import sha256
 from word_format.inspect import DocumentIndex
 from word_format.profiles import template_profile
-from word_format.properties import read_paragraph
+from word_format.properties import paragraph_style, read_paragraph
 
 
 class EffectiveStyleTests(unittest.TestCase):
@@ -120,6 +120,26 @@ class EffectiveStyleTests(unittest.TestCase):
                         )
                         self.assertEqual(raw.get(qn("w:val")), "1" if wanted != inherited else "0")
                         self.assertIsNone(output.paragraphs[0].runs[0]._r.rPr)
+
+    def test_default_lookup_observes_style_changes_and_document_order(self):
+        document = Document()
+        paragraph = document.add_paragraph("Implicit style")._p
+        normal = document.styles["Normal"]
+        first = document.styles.add_style("First default", WD_STYLE_TYPE.PARAGRAPH)
+        last = document.styles.add_style("Last default", WD_STYLE_TYPE.PARAGRAPH)
+        first.element.set(qn("w:default"), "true")
+        last.element.set(qn("w:default"), "on")
+        self.assertEqual(paragraph_style(document, paragraph).style_id, last.style_id)
+
+        last.element.set(qn("w:default"), "off")
+        self.assertEqual(paragraph_style(document, paragraph).style_id, first.style_id)
+        first.delete()
+        self.assertEqual(paragraph_style(document, paragraph).style_id, normal.style_id)
+        normal.element.attrib.pop(qn("w:default"))
+        self.assertIsNone(paragraph_style(document, paragraph))
+
+        other = Document()
+        self.assertEqual(paragraph_style(other, other.add_paragraph()._p).style_id, "Normal")
 
 
 if __name__ == "__main__":

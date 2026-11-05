@@ -90,6 +90,90 @@ class CliEncodingTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout)["status"], "passed")
 
+    def test_summary_keeps_full_evidence_for_direct_workflow(self):
+        request = self.write_json("request.json", {"operations": [{
+            "action": "font.size.set",
+            "target": {"type": "paragraph", "id": "p0"},
+            "params": {"value": 12},
+        }]})
+        plan_path = self.folder / "plan.json"
+        apply_path = self.folder / "apply.json"
+        for stage, args, path, full_field in (
+            ("inspect", [self.source], self.folder / "inspect.json", "objects"),
+            ("plan", [self.source, self.output, "--request", request], plan_path, "operations"),
+            ("apply", ["--plan", plan_path], apply_path, "checks"),
+            ("verify", ["--plan", plan_path, "--report", apply_path],
+             self.folder / "verify.json", "format"),
+        ):
+            with self.subTest(stage=stage):
+                option = "--report" if stage == "apply" else "--output"
+                run = self.run_cli("format_cli.py", stage, *args, option, path, "--summary")
+                summary = self.assert_json_success(run)
+                self.assertEqual(summary["command"], stage)
+                self.assertEqual(Path(summary["artifact"]), path)
+                self.assertLess(len(run.stdout), 4000)
+                self.assertNotIn("正文中文表格", run.stdout)
+                full = json.loads(path.read_text(encoding="utf-8"))
+                self.assertIn(full_field, full)
+                if stage == "plan":
+                    self.assertEqual(summary["counts"]["targets"], 1)
+        self.assertEqual(summary["states"]["format"], "passed")
+        self.assertEqual(summary["counts"]["checks"], 1)
+        self.assertEqual(sha256(self.source), self.source_hash)
+
+    def test_audit_summary_reports_failed_targets_without_full_text(self):
+        doc = Document(self.source)
+        for _ in range(5):
+            doc.add_paragraph("正文中文表格")
+        doc.save(self.source)
+        request = self.write_json("request.json", {"operations": [{
+            "action": "font.size.set",
+            "target": {"type": "paragraph", "all": True},
+            "params": {"value": 25},
+        }]})
+        artifact = self.folder / "audit.json"
+        run = self.run_cli("format_cli.py", "audit", self.source, "--request", request,
+                           "--output", artifact, "--summary")
+        self.assertEqual(run.returncode, 2)
+        summary = json.loads(run.stdout)
+        self.assertEqual(summary["status"], "failed")
+        self.assertEqual(summary["counts"]["failed_checks"], 6)
+        self.assertEqual(len(summary["failed_checks"]), 5)
+        self.assertEqual(summary["omitted_failed_checks"], 1)
+        self.assertEqual(summary["failed_checks"][0]["target_id"], "p0")
+        checks = json.loads(artifact.read_text(encoding="utf-8"))["checks"]
+        self.assertEqual(len(checks), 6)
+        self.assertEqual(checks[0]["text"], "正文中文表格")
+        self.assertNotIn("正文中文表格", run.stdout)
+
+    def test_summary_requires_evidence_path_before_writing_docx(self):
+        request = {"operations": [{
+            "action": "font.size.set",
+            "target": {"type": "paragraph", "id": "p0"},
+            "params": {"value": 12},
+        }]}
+        plan = self.write_json("plan.json", build_plan(self.source, self.output, request))
+        run = self.run_cli("format_cli.py", "apply", "--plan", plan, "--summary")
+        self.assertEqual(run.returncode, 2)
+        self.assertIn("--report", run.stderr)
+        self.assertFalse(self.output.exists())
+
+    def test_summary_preserves_issue_positions_when_ids_share_a_long_prefix(self):
+        template = json.loads(
+            (ROOT / "templates/builtin/thesis-standard/template.json").read_text(encoding="utf-8")
+        )
+        issue_ids = ["unresolved-" * 12 + suffix for suffix in ("first", "second")]
+        template["issues"] = [{"id": issue_id, "reason": "待确认"} for issue_id in issue_ids]
+        template_path = self.write_json("template.json", template)
+        artifact = self.folder / "issues.json"
+        run = self.run_cli("format_cli.py", "template", "validate", template_path,
+                           "--output", artifact, "--summary")
+        self.assertEqual(run.returncode, 2)
+        summary = json.loads(run.stdout)
+        self.assertEqual(summary["status"], "needs_clarification")
+        issues = json.loads(artifact.read_text(encoding="utf-8"))["issues"]
+        self.assertEqual([issues[entry["index"]]["id"] for entry in summary["issues"]], issue_ids)
+
     def test_chinese_errors_on_stderr_utf8(self):
         missing = self.folder / "不存在的文档.docx"
         invalid_request = self.write_json("invalid-request.json", {"operations": [{

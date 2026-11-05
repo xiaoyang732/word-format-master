@@ -12,12 +12,16 @@
 python scripts/format_cli.py capabilities --output capabilities.json
 python scripts/format_cli.py report list
 python scripts/format_cli.py report prepare NEW_TASK_DIR --topic "计算机方向报告"
-python scripts/format_cli.py inspect source.docx --output inspect.json
-python scripts/format_cli.py audit source.docx --request request.json --output audit.json
-python scripts/format_cli.py plan source.docx result.docx --request request.json --output plan.json
-python scripts/format_cli.py apply --plan plan.json --report report.json
-python scripts/format_cli.py verify --plan plan.json --report report.json
+python scripts/format_cli.py inspect source.docx --output inspect.json --summary
+python scripts/format_cli.py audit source.docx --request request.json --output audit.json --summary
+python scripts/format_cli.py plan source.docx result.docx --request request.json --output plan.json --summary
+python scripts/format_cli.py apply --plan plan.json --report report.json --summary
+python scripts/format_cli.py verify --plan plan.json --report report.json --output verification.json --summary
 ```
+
+已有 DOCX 的局部修改走 plan → apply → verify。用户已明确目标且选择器可直接表达时，可以由 plan 解析目标。只有范围需要确认时才 inspect，并从落盘结果提取相关对象 ID、短文本与请求涉及的属性。
+
+`--summary` 与 `--output` 或 apply/cover 的 `--report` 配合使用。stdout 返回状态、计数、证据路径及至多五条问题和五条失败检查索引。用从零开始的 `index` 定位完整文件中的 `issues`、`checks` 或 verify 的 `format.checks`。过长的 ID 在摘要中缩短。省略计数提示需要从完整文件继续查询。plan、apply 和 verify 继续使用完整文件作为输入，摘要用于向用户说明进度和结果。
 
 命令失败退出码为 2，并返回 `failed`、`unsupported` 或 `needs_clarification`。已有输出默认拒绝覆盖；只有显式传入 `--overwrite` 才可替换输出。源文件和它的硬链接始终不能作为输出。JSON 路径也不得覆盖源文档、输出文档、请求或计划。
 
@@ -61,6 +65,8 @@ python scripts/format_cli.py verify --plan plan.json --report report.json
 | 表格第 1 行第 2 格文字 | `{"type":"paragraph","table_id":"t0","row":1,"cell":2,"all":true}` |
 | 第 1 节页面 | `{"type":"section","number":1}` |
 | 指定共享样式 | `{"type":"style","name":"Heading 1"}` |
+
+多个段落的同一属性使用相同参数时，优先用一条操作配语义选择器或 `ids`。只核对计划中相关操作的目标及数量即可确认范围。具有顺序依赖的结构操作、共享样式改动和重叠字符范围须按各自契约处理。
 
 `ordinal` 是过滤后非空段落的 1 起始序号。`p0` 等 ID 包含空段落和表格段落，必须来自当前 inspect，不应由 AI 猜测。未明确 ID、part、table_id 的普通段落选择只包含顶层段落。字符 start/end 为当前段落可见文字的 0 起始、左闭右开区间；重复 quote 必须给 1 起始 occurrence。存在域、绘图、制表符、换行或修订的复杂文字范围会拒绝。页面位置选择需要渲染锚点，目前不支持。
 

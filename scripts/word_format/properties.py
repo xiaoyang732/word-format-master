@@ -9,6 +9,7 @@ from xml.etree import ElementTree
 
 from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import OxmlElement
+from docx.styles.style import StyleFactory
 
 from .contracts import FormatError
 from .namespaces import qn
@@ -109,7 +110,11 @@ def paragraph_style(document, paragraph):
     style = style_map(document).get(node.get(qn("w:val"))) if node is not None else None
     if style is not None and style.type == WD_STYLE_TYPE.PARAGRAPH:
         return style
-    return document.styles.default(WD_STYLE_TYPE.PARAGRAPH)
+    # Filter in lxml before decoding Python style properties. The live XML keeps
+    # the result current even when a writer changes a flag without adding a style.
+    candidates = document.styles.element.xpath("w:style[@w:type='paragraph'][@w:default]")
+    defaults = [candidate for candidate in candidates if candidate.default]
+    return StyleFactory(defaults[-1]) if defaults else None
 
 
 def paragraph_style_name(document, paragraph):
