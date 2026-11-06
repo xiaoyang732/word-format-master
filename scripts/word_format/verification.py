@@ -541,6 +541,15 @@ def atomic_projection(document, index, refs, cap):
     Text runs are flattened to character tokens so harmless splitting does not
     conceal bookmark/hyperlink/object changes or adjacent-character formatting.
     """
+    if cap.property == "citation_display":
+        from .citation_display import CitationReader
+
+        reader = CitationReader(index)
+        refs = [
+            {**ref, "ranges": [(mark.start, mark.end) for mark in marks],
+             "controls": {run for mark in marks for run in mark.controls}}
+            for ref in refs if (marks := reader.marks(ref["id"]))
+        ]
     targets = {
         index.elements.get(r["id"]): r for r in refs if index.elements.get(r["id"]) is not None
     }
@@ -587,7 +596,8 @@ def atomic_projection(document, index, refs, cap):
                 tokens = []
                 original_format = xml_value(rpr) if rpr is not None and len(rpr) else ""
                 selected_format = (
-                    sanitize_properties(rpr, prop) if prop in FONT_TAGS else original_format
+                    sanitize_properties(rpr, prop)
+                    if prop in FONT_TAGS or prop == "citation_display" else original_format
                 )
                 attributes = tuple(sorted(child.attrib.items()))
                 for sub in child:
@@ -595,12 +605,17 @@ def atomic_projection(document, index, refs, cap):
                         continue
                     if sub.tag == qn("w:t"):
                         for char in sub.text or "":
-                            selected = ref.get("start", 0) <= offset < ref.get("end", 10**12)
+                            selected = (
+                                any(start <= offset < end for start, end in ref["ranges"])
+                                if prop == "citation_display"
+                                else ref.get("start", 0) <= offset < ref.get("end", 10**12)
+                            )
                             fmt = selected_format if selected else original_format
                             tokens.append(("char", char, fmt, attributes))
                             offset += 1
                     else:
-                        tokens.append(("object", xml_value(sub), xml_value(rpr)))
+                        fmt = selected_format if child in ref.get("controls", ()) else xml_value(rpr)
+                        tokens.append(("object", xml_value(sub), fmt))
                 return tokens
             if child.tag == qn("w:pPr"):
                 return []

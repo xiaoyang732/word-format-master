@@ -63,7 +63,8 @@ class FormatCoreTests(unittest.TestCase):
             "line_spacing":{"kind":"at_least","value":18,"unit":"pt"},"style":{"name":"Local Custom"},
             "tabs":{"value":[{"alignment":"right","position":1441,"unit":"twips","leader":"dot"}]},
             "table_alignment":{"value":"center"},"repeat_header":{"value":True},
-            "outline_level":{"value":2},"numbering_suppressed":{"value":True}}
+            "outline_level":{"value":2},"numbering_suppressed":{"value":True},
+            "citation_display":{"value":"superscript"}}
         for action,cap in REGISTRY.items():
             if cap.structural: continue
             with self.subTest(action=action):

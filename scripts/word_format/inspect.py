@@ -341,8 +341,10 @@ def inspect_document(path):
     document = Document(source)
     index = DocumentIndex(document)
     records = index.public()
+    from .citation_display import CitationReader, citation_evidence
     from .registry import REGISTRY
 
+    citation_reader = CitationReader(index)
     properties = {
         cap.property
         for cap in REGISTRY.values()
@@ -351,6 +353,8 @@ def inspect_document(path):
     for record in records:
         if record["kind"] == "paragraph":
             p = index.elements[record["id"]]
+            marks = citation_reader.marks(record["id"])
+            record.update(citation_evidence(p, marks, record["text"]))
             from .properties import FONT_TAGS, PARAGRAPH_TAGS
 
             record["format"] = {
@@ -368,6 +372,7 @@ def inspect_document(path):
             record["format"]["style"] = (
                 record.get("style_name") or index.paragraph(record["id"]).style.name
             )
+            record["format"]["citation_display"] = sorted({mark.display for mark in marks})
     return {
         "schema_version": "2.0",
         "source": {"path": str(source), "sha256": sha256(source)},

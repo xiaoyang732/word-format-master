@@ -236,6 +236,25 @@ def build_plan(input_path, output, request, *, _document=None):
                 "params": params,
             }
         )
+    citation_displays = {
+        index.elements[ref["id"]]: item["params"]["value"]
+        for item in resolved if item["action"] == "citation.display.set"
+        for ref in item["targets"]
+    }
+    if citation_displays:
+        paragraphs = document.paragraphs
+        for item in resolved:
+            if item["action"] != "citation.insert":
+                continue
+            for placement in item["params"]["placements"]:
+                position = placement["paragraph_index"]
+                if position < len(paragraphs):
+                    display = citation_displays.get(paragraphs[position]._p)
+                    if display is not None and display != placement.get("display", "inline"):
+                        raise FormatError(
+                            "Conflicting citation display for existing and new citations in the same paragraph",
+                            "needs_clarification",
+                        )
     normalized_request = {**request, "schema_version": SCHEMA_VERSION, "operations": normalized}
     plan = {
         "schema_version": SCHEMA_VERSION,

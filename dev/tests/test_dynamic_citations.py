@@ -8,6 +8,7 @@ from unittest.mock import patch
 from dataclasses import replace
 
 from docx import Document
+from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 
@@ -18,6 +19,7 @@ from word_format import build_plan, apply_plan, verify_plan
 from word_format.contracts import FormatError
 from word_format.registry import REGISTRY
 from word_format.properties import read_paragraph, PARAGRAPH_TAGS
+from word_format.profiles import profile_plan, template_profile
 
 
 class DynamicCitationTests(unittest.TestCase):
@@ -63,6 +65,7 @@ class DynamicCitationTests(unittest.TestCase):
         self.assertEqual(doc.paragraphs[1].text,'数据库索引改善查询性能[1]。')
         codes=[n.text for n in doc.paragraphs[1]._p.iter(qn('w:instrText'))]
         self.assertTrue(any(c.strip().startswith('REF ') for c in codes))
+        self.assertIn(r'\* MERGEFORMAT', ''.join(codes))
         bookmark=doc.paragraphs[4]._p.find(qn('w:bookmarkStart'))
         self.assertIsNotNone(bookmark)
         self.assertIn(bookmark.get(qn('w:name')), ''.join(codes))
@@ -71,6 +74,181 @@ class DynamicCitationTests(unittest.TestCase):
         self.assertTrue(doc.paragraphs[4]._p.xpath('./w:pPr/w:numPr/w:numId'))
         self.assertEqual(doc.paragraphs[4].text,'Author. Database[M]. 2020.')
         self.assertEqual(doc.paragraphs[7].text,'感谢各位。')
+
+    def test_citation_display_is_independent_of_position_and_first_run(self):
+        doc = Document(self.source)
+        doc.paragraphs[1].runs[0].font.superscript = True
+        doc.save(self.source)
+        request = self.request()
+        placements = request['operations'][0]['params']['placements']
+        raised = self.request(position='after-terminal-punctuation', index=2)
+        placements.append({**raised['operations'][0]['params']['placements'][0],
+                           'display': 'superscript'})
+        output, _, _ = self.execute(request)
+        for index, suffix, expected in [(1, '[1]。', False), (2, '。[1]', True)]:
+            paragraph = output.paragraphs[index]
+            result = next(run for run in paragraph.runs if run.text == '[1]')
+            self.assertTrue(paragraph.text.endswith(suffix))
+            self.assertIs(result.font.superscript, expected)
+        self.assertIs(output.paragraphs[1].runs[0].font.superscript, True)
+
+    def test_verifier_rejects_wrong_citation_display(self):
+        request = self.request()
+        request['operations'][0]['params']['placements'][0]['display'] = 'superscript'
+        cap = REGISTRY['citation.insert']
+
+        def wrong(index, ref, params):
+            cap.handler(index, ref, params)
+            result = next(r for r in index.document.paragraphs[1].runs if r.text == '[1]')
+            result.font.superscript = False
+
+        with patch.dict(REGISTRY, {'citation.insert': replace(cap, handler=wrong)}):
+            with self.assertRaisesRegex(FormatError, 'Citation fields, display or bookmarks'):
+                self.execute(request)
+        self.assertFalse(self.output.exists())
+
+    def test_sample_superscript_rule_applies_only_to_recognized_citations(self):
+        sample = self.folder / 'sample.docx'
+        doc = Document(self.source)
+        style = doc.styles.add_style('Citation Mark', WD_STYLE_TYPE.CHARACTER)
+        style.font.superscript = True
+        doc.paragraphs[1].add_run('[1]', style)
+        doc.save(sample)
+
+        profile = template_profile(sample)
+        rule = next((r for r in profile['rules'] if r['action'] == 'citation.display.set'), None)
+        self.assertIsNotNone(rule)
+        self.assertEqual(rule['params']['value'], 'superscript')
+        self.assertFalse(any('vertAlign' in issue.get('properties', []) for issue in profile['issues']))
+
+        doc = Document(self.source)
+        paragraph = doc.paragraphs[1]
+        paragraph.add_run('[1]与[2]支持结论，未列出的编号[99]保留。').bold = True
+        paragraph.add_run('2').font.superscript = True
+        doc.save(self.source)
+        resolutions = {issue['id']: {'decision': 'ignore', 'reason': 'Unrelated sample settings'}
+                       for issue in profile['issues']}
+        plan = profile_plan(self.source, self.output, profile, resolutions=resolutions,
+                            match_structure=True)
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)['status'], 'passed')
+        paragraph = Document(self.output).paragraphs[1]
+        self.assertEqual([r.text for r in paragraph.runs if r.font.superscript], ['[1]', '[2]', '2'])
+        self.assertEqual(paragraph.text, doc.paragraphs[1].text)
+
+    def test_mixed_sample_keeps_both_displays_as_separate_evidence(self):
+        doc = Document(self.source)
+        doc.paragraphs[1].add_run('[1]').font.superscript = True
+        doc.paragraphs[2].add_run('[2]')
+        doc.save(self.source)
+        task = build_citation_task(doc)
+        self.assertEqual([[m['display'] for m in p['citations']] for p in task['paragraphs']],
+                         [['superscript'], ['inline']])
+        profile = template_profile(self.source)
+        issue = next((i for i in profile['issues'] if i.get('property') == 'citation_display'), None)
+        self.assertIsNotNone(issue)
+        self.assertEqual({r['params']['value'] for r in issue['candidates']}, {'inline', 'superscript'})
+        self.assertFalse(any(r['action'] == 'citation.display.set' for r in profile['rules']))
+
+    def test_existing_ref_can_be_reformatted_without_rewriting_field(self):
+        output, _, _ = self.execute(self.request())
+        self.source = self.output
+        self.output = self.folder / 'raised.docx'
+        original = output.paragraphs[1]
+        request = {'operations': [{'action': 'citation.display.set',
+                                  'target': {'type': 'paragraph', 'role': 'body', 'all': True},
+                                  'params': {'value': 'superscript'}}]}
+        output, _, _ = self.execute(request)
+        paragraph = output.paragraphs[1]
+        self.assertEqual(paragraph.text, original.text)
+        self.assertEqual([n.text for n in paragraph._p.iter(qn('w:instrText'))],
+                         [n.text for n in original._p.iter(qn('w:instrText'))])
+        result = next(r for r in paragraph.runs if r.text == '[1]')
+        self.assertIs(result.font.superscript, True)
+        self.assertTrue(all(r.font.superscript for r in paragraph.runs
+                            if r._r.find(qn('w:instrText')) is not None))
+        profile = template_profile(self.output)
+        self.assertFalse(any('vertAlign' in i.get('properties', []) for i in profile['issues']))
+
+    def test_reference_field_format_does_not_touch_an_unrelated_field(self):
+        doc = Document(self.source)
+        paragraph = doc.paragraphs[1]
+        for target, name in [(doc.paragraphs[4], 'reference'), (doc.paragraphs[2], 'unrelated')]:
+            start = OxmlElement('w:bookmarkStart')
+            start.set(qn('w:id'), str(len(name)))
+            start.set(qn('w:name'), name)
+            target._p.insert(0, start)
+            end = OxmlElement('w:bookmarkEnd')
+            end.set(qn('w:id'), str(len(name)))
+            target._p.append(end)
+            field = OxmlElement('w:fldSimple')
+            field.set(qn('w:instr'), f'REF {name} \\h')
+            paragraph.add_run('[')
+            field.append(paragraph.add_run('1')._r)
+            paragraph._p.append(field)
+            paragraph.add_run(']')
+        doc.save(self.source)
+
+        request = {'operations': [{'action': 'citation.display.set',
+                                  'target': {'type': 'paragraph', 'role': 'body', 'all': True},
+                                  'params': {'value': 'superscript'}}]}
+        output, _, _ = self.execute(request)
+        fields = list(output.paragraphs[1]._p.iter(qn('w:fldSimple')))
+        alignments = [field.find('.//' + qn('w:vertAlign')) for field in fields]
+        self.assertEqual(alignments[0].get(qn('w:val')), 'superscript')
+        self.assertIsNone(alignments[1])
+        self.assertEqual([r.text for r in output.paragraphs[1].runs if r.font.superscript], ['[', ']'])
+
+    def test_literal_citations_require_actual_numeric_reference_labels(self):
+        doc = Document(self.source)
+        doc.paragraphs[1].add_run('文献[8]与数组[1]。')
+        for paragraph in doc.paragraphs[4:6]:
+            paragraph.text = paragraph.text[4:]
+        task = build_citation_task(doc)
+        self.assertEqual(task['paragraphs'][0]['citations'], [])
+
+        from word_format.numbering import effective_numbering
+        for paragraph in doc.paragraphs[4:6]:
+            paragraph.style = 'List Number'
+        num = effective_numbering(doc, doc.paragraphs[4]._p)[3]
+        override = OxmlElement('w:lvlOverride')
+        override.set(qn('w:ilvl'), '0')
+        start = OxmlElement('w:startOverride')
+        start.set(qn('w:val'), '8')
+        override.append(start)
+        num.append(override)
+        task = build_citation_task(doc)
+        self.assertEqual([m['text'] for m in task['paragraphs'][0]['citations']], ['[8]'])
+
+    def test_citation_task_offsets_use_the_exported_source_text(self):
+        doc = Document(self.source)
+        doc.paragraphs[1].text = '  测试引文[1]。'
+        body = build_citation_task(doc)['paragraphs'][0]
+        mark = body['citations'][0]
+        self.assertEqual(body['text'][mark['start']:mark['end']], '[1]')
+
+    def test_conflicting_citation_display_requests_are_rejected_during_planning(self):
+        request = self.request()
+        request['operations'].append({'action': 'citation.display.set',
+                                      'target': {'type': 'paragraph', 'role': 'body', 'all': True},
+                                      'params': {'value': 'superscript'}})
+        with self.assertRaisesRegex(FormatError, 'Conflicting citation display'):
+            build_plan(self.source, self.output, request)
+
+    def test_verifier_checks_separators_inside_superscript_citation(self):
+        request = self.request('[1], [2]', ['ref-1', 'ref-2'])
+        request['operations'][0]['params']['placements'][0]['display'] = 'superscript'
+        cap = REGISTRY['citation.insert']
+
+        def wrong(index, ref, params):
+            cap.handler(index, ref, params)
+            separator = next(r for r in index.document.paragraphs[1].runs if r.text == ', ')
+            separator.font.superscript = False
+
+        with patch.dict(REGISTRY, {'citation.insert': replace(cap, handler=wrong)}):
+            with self.assertRaisesRegex(FormatError, 'Citation fields, display or bookmarks'):
+                self.execute(request)
+        self.assertFalse(self.output.exists())
 
     def test_reject_display_id_mismatch_before_publish(self):
         with self.assertRaises((ValueError,FormatError)):

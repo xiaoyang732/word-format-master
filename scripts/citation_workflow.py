@@ -31,11 +31,12 @@ def _is_heading(paragraph: Paragraph) -> bool:
     return style.startswith("heading")
 
 
-def extract_citation_data(document: DocumentType) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def extract_citation_data(document: DocumentType, *, index_data=None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Return body paragraph anchors and references using stable top-level indexes."""
     from word_format.inspect import DocumentIndex
 
-    index_data = DocumentIndex(document)
+    if index_data is None:
+        index_data = DocumentIndex(document)
     records = {index_data.elements[oid]: index_data.records[oid] for oid in index_data.top_ids}
     reference_nodes = index_data.reference_nodes()
     paragraphs: list[dict[str, Any]] = []
@@ -67,7 +68,19 @@ def extract_citation_data(document: DocumentType) -> tuple[list[dict[str, Any]],
 
 
 def build_citation_task(document: DocumentType, *, filename: str = "document.docx", source_sha256: str | None = None) -> dict[str, Any]:
-    paragraphs, references = extract_citation_data(document)
+    from word_format.citation_display import DISPLAY_VALUES, CitationReader, citation_evidence
+    from word_format.inspect import DocumentIndex
+
+    index_data = DocumentIndex(document)
+    paragraphs, references = extract_citation_data(document, index_data=index_data)
+    reader = CitationReader(index_data)
+    ids = {index_data.elements[oid]: oid for oid in index_data.top_ids}
+    body = document.paragraphs
+    for paragraph in paragraphs:
+        original = body[paragraph["paragraph_index"]]
+        paragraph["text"] = original.text
+        paragraph["citations"] = []
+        paragraph.update(citation_evidence(original._p, reader.marks(ids[original._p]), original.text))
     return {
         "schema_version": "1.0",
         "kind": "word-citation-placement-task",
@@ -80,6 +93,8 @@ def build_citation_task(document: DocumentType, *, filename: str = "document.doc
             "goal": "Identify claims in body paragraphs that require a cited reference.",
             "insert_options": ["before-terminal-punctuation", "after-terminal-punctuation", "end", "start"],
             "spacing_options": ["none", "space-before", "space-after", "spaces-around"],
+            "display_options": list(DISPLAY_VALUES),
+            "display_rule": "Set display from the citation format requirement; omitted display defaults to inline.",
             "return_only": "JSON with citations.placements; do not rewrite paragraph text or references.",
             "fingerprint_rule": "Copy paragraph_index and paragraph_sha256 exactly from candidates.",
         },

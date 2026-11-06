@@ -78,7 +78,9 @@ def sanitize_properties(pr, property_name: str):
     clone = copy.deepcopy(pr)
     if clone is None:
         return ""
-    tags = FONT_TAGS.get(property_name, PARAGRAPH_TAGS.get(property_name, ()))
+    tags = ("vertAlign",) if property_name == "citation_display" else FONT_TAGS.get(
+        property_name, PARAGRAPH_TAGS.get(property_name, ())
+    )
     for tag in tags:
         node = clone.find(qn("w:" + tag))
         if node is None:

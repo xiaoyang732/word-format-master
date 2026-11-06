@@ -9,6 +9,7 @@ from typing import Callable
 from . import headers, section_breaks
 from . import numbering as template_numbering
 from . import operations as op
+from .citation_display import DISPLAY_VALUES, read_citation_display, set_citation_display
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .inspect import _style_paragraph
 from .namespaces import qn
@@ -652,6 +653,18 @@ for action, prop, handler, section, effects in (
         True,
         effects,
     )
+
+
+REGISTRY["citation.display.set"] = Capability(
+    "citation.display.set",
+    "citation_display",
+    frozenset({"paragraph"}),
+    set_citation_display,
+    scalar("text", enum=DISPLAY_VALUES),
+    read_citation_display,
+    lambda actual, params, cap: all(value == params["value"] for value in actual),
+    {"value": list(DISPLAY_VALUES)},
+)
 
 
 REGISTRY["heading.scheme.configure"] = Capability(

@@ -29,6 +29,13 @@ Do not repair citations by editing fixed line numbers in a generated script. Use
 IDs, review placements, then let the citation workflow reject stale anchors or
 unknown reference IDs before inserting markers.
 
+Set `display` on every citation placement using the explicit requirements or the
+sample's `citation.display.set` rule for the corresponding body scope. Use
+`superscript` for raised citations and `inline` for citations on the text baseline.
+If the sample uses both in the same scope, check the examples and confirm the
+placement convention before choosing a display for new citations. Keep punctuation
+placement in `insert`. Omitting `display` defaults to `inline`.
+
 ## Sample-based structure: nothing added or omitted
 
 When the user supplies a thesis sample, its actual contents define the complete

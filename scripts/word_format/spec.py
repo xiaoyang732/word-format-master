@@ -14,6 +14,7 @@ from document_structure import (
     validate_module_order,
 )
 
+from .citation_display import DISPLAY_VALUES
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .namespaces import qn
 
@@ -390,6 +391,7 @@ def validate_section(section, data):
                     "paragraph_sha256",
                     "reference_ids",
                     "citation_text",
+                    "display",
                     "insert",
                     "spacing",
                     "confidence",
@@ -406,6 +408,8 @@ def validate_section(section, data):
                 text_value(value, "reference ID")
             text_value(placement["paragraph_sha256"], "paragraph_sha256")
             text_value(placement["citation_text"], "citation_text")
+            if placement.get("display", "inline") not in tuple(DISPLAY_VALUES):
+                raise FormatError("citation display must be inline or superscript")
             if "confidence" in placement:
                 number(placement["confidence"], 0, 1, "confidence")
     else:

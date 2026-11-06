@@ -11,6 +11,7 @@ from pathlib import Path
 
 from docx import Document
 
+from .citation_display import DISPLAY_VALUES, CitationReader, citation_evidence
 from .contracts import (
     FormatError,
     json_hash,
@@ -272,6 +273,8 @@ def template_profile(path):
         s.page_width.mm - s.left_margin.mm - s.right_margin.mm for s in document.sections
     )
     groups = defaultdict(list)
+    citation_groups = defaultdict(list)
+    citation_reader = CitationReader(index)
     snapshot = []
     unknown = set()
     malformed = set()
@@ -279,6 +282,10 @@ def template_profile(path):
         if record["kind"] != "paragraph" or record["part"] != "word/document.xml":
             continue
         p = index.elements[record["id"]]
+        marks = citation_reader.marks(record["id"])
+        if marks:
+            target = _selector(record)
+            citation_groups[json_hash(target)].extend((target, record["id"], mark) for mark in marks)
         values = {n: index.font_values(record["id"], n) for n in FONT_TAGS}
         values.update({n: read_paragraph(document, p, n) for n in PARAGRAPH_TAGS})
         snapshot.append(
@@ -287,12 +294,21 @@ def template_profile(path):
                 "format": values,
                 "direct_pPr": str(p.pPr.xml) if p.pPr is not None else None,
                 "direct_rPr": [str(r.rPr.xml) for r in p.iter(qn("w:r")) if r.rPr is not None],
+                **citation_evidence(p, marks, record["text"]),
             }
         )
-        properties = list(ppr_sources(document, p)) + list(rpr_sources(document, p))
+        covered = defaultdict(int)
+        controls = {run for mark in marks for run in mark.controls}
+        for mark in marks:
+            for run, start, end in mark.slices:
+                covered[run] += end - start
+        properties = [(pr, False) for pr in [*ppr_sources(document, p), *rpr_sources(document, p)]]
         for run in p.iter(qn("w:r")):
-            properties.extend(rpr_sources(document, p, run))
-        for pr in properties:
+            citation_only = run in controls or covered[run] and covered[run] == sum(
+                len(node.text or "") for node in run.findall(qn("w:t"))
+            )
+            properties.extend((pr, citation_only) for pr in rpr_sources(document, p, run))
+        for pr, citation_only in properties:
             if pr is None:
                 continue
             known = {
@@ -324,6 +340,8 @@ def template_profile(path):
                 "numPr",
                 "rPr",
             }
+            if citation_only:
+                known.add("vertAlign")
             unknown.update(n.tag.split("}")[-1] for n in pr if n.tag.split("}")[-1] not in known)
             expanded_unknown, expanded_malformed = _expanded_paragraph_evidence(pr)
             unknown.update(expanded_unknown)
@@ -450,6 +468,21 @@ def template_profile(path):
                     candidates=choices,
                     observed=unrepresentable,
                 )
+    for group in citation_groups.values():
+        evidence = defaultdict(list)
+        for target, anchor, mark in group:
+            evidence[mark.display].append({"anchor": anchor, "confidence": 1.0, **mark.evidence()})
+        candidates = [
+            {"target": target, "action": "citation.display.set", "params": {"value": value},
+             "evidence": items}
+            for value, items in evidence.items() if value in DISPLAY_VALUES
+        ]
+        if len(evidence) == len(candidates) == 1:
+            _rule(profile, candidates[0])
+        else:
+            _issue(profile, "Sample citations have mixed or unsupported display formatting",
+                   target=target, property="citation_display", candidates=candidates,
+                   observed=[item for items in evidence.values() for item in items])
     for section in analysis["document"]["sections"]:
         target = {"type": "section", "number": section["index"]}
         values = {k: section.get(k) for k in ("width_mm", "height_mm", "orientation")}
