@@ -100,7 +100,7 @@ def parse_requirements(text: str) -> dict[str, Any]:
     normalized = text.replace("\r\n", "\n").replace("\r", "\n")
     segments = [
         part.strip()
-        for part in re.split(r"[\n。；;]+", normalized)
+        for part in re.split(r"(?:\n|。|(?<![“\"'（(])[；;](?!\s*[”\"'）)]))+", normalized)
         if part.strip()
     ]
     spec: dict[str, Any] = {
@@ -473,6 +473,27 @@ def parse_requirements(text: str) -> dict[str, Any]:
         elif re.search(r"[一二三四五]、", segment):
             record("lists.numbered.style", "chinese-period", segment, 0.92)
             record("lists.numbered.start", 1, segment, 0.92)
+
+    from word_format.keywords import match_keyword_separator_clauses
+
+    keyword_segments = [
+        segment
+        for segment in segments
+        if re.search(r"关键词|主题词|key\s*words?|词间|每词之间|各词之间", segment, re.I)
+    ]
+    for segment in keyword_segments:
+        scoped = bool(re.search(r"关键词|主题词|key\s*words?", segment, re.I))
+        lang = (
+            "en"
+            if re.search(r"英文|\bEnglish\b", segment, re.I)
+            and not re.search(r"中文|\bChinese\b", segment, re.I)
+            else None
+        )
+        for _, sep_value in match_keyword_separator_clauses(
+            segment, scoped=scoped, language=lang
+        ):
+            record("keywords.separator", sep_value, segment, 0.96)
+            break
 
     clauses = [" ".join(part.split()) for part in segments]
     matched_evidence = {item["evidence"] for item in evidence}

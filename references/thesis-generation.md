@@ -59,7 +59,11 @@ over a preset's conventional outline, including declarations placed at the end.
   pages and unusual artwork still need visual confirmation.
 - Chinese and English abstracts and keywords are separate parts. Generate only
   the languages and occurrences actually present. Do not translate an abstract
-  to add a language the sample lacks.
+  to add a language the sample lacks. Match each language's keyword label prefix
+  and keyword delimiter (`keywords.separator.set`, such as `，`, `；`, `、`, `; `
+  or `, `) from the template profile; when written requirements conflict with
+  the sample's keyword separator, resolve the conflict explicitly rather than
+  hardcoding a default semicolon.
 - Include integrity pledges, originality declarations and authorization pages
   only when present, preserving their distinct types and counts. Do not fabricate
   a signature or claim the author has signed a declaration.

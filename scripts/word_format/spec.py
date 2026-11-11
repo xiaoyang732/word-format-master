@@ -43,7 +43,7 @@ PARA = {
 INDENTS = ("first_line_indent", "left_indent", "right_indent", "hanging_indent")
 META = {"style_name", "source_style_id", "numbering"}
 TOKENS = set(FONT) | set(PARA) | {f"{n}_{unit}" for n in INDENTS for unit in ("mm", "chars")}
-KEYWORD_STYLE_TOKENS = {"label_bold", "value_bold"}
+KEYWORD_STYLE_TOKENS = {"label_bold", "value_bold", "separator"}
 PAGE = {
     "width_mm": "page.width.set",
     "height_mm": "page.height.set",
@@ -156,11 +156,15 @@ def validate_tokens(tokens, extra=frozenset()):
 
 
 def validate_keyword_tokens(tokens):
+    from .registry import REGISTRY
+
     validate_tokens(tokens, KEYWORD_STYLE_TOKENS)
-    for key in KEYWORD_STYLE_TOKENS & tokens.keys():
+    for key in {"label_bold", "value_bold"} & tokens.keys():
         if tokens[key] is not None:
             boolean(tokens[key], f"keywords.{key}")
-    if "bold" in tokens and any(key in tokens for key in KEYWORD_STYLE_TOKENS):
+    if tokens.get("separator") is not None:
+        REGISTRY["keywords.separator.set"].validator({"value": tokens["separator"]})
+    if "bold" in tokens and any(key in tokens for key in {"label_bold", "value_bold"}):
         raise FormatError("Choose whole-line keywords.bold or label/value bold controls, not both")
 
 
@@ -779,6 +783,14 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
                     "params": {"value": tokens[option]},
                 }
             )
+        if tokens.get("separator") is not None:
+            operations.append(
+                {
+                    "action": "keywords.separator.set",
+                    "target": {"type": "paragraph", "id": oid},
+                    "params": {"value": tokens["separator"]},
+                }
+            )
     # Named presentation styles mirror the explicit global rules. Body formatting
     # stays on selected paragraphs: changing Normal also changes effective format
     # in unrelated modules, table cells, headers and styles that inherit from it.
@@ -1088,6 +1100,7 @@ def legacy_paths():
         {
             "keywords.label_bold": "font.bold.set on keyword label text range",
             "keywords.value_bold": "font.bold.set on keyword value text range",
+            "keywords.separator": "keywords.separator.set",
             "table_of_contents.title_style": "TOC heading paragraph style",
             "page_numbers.show_on_body_first_page": "page numbers on thesis body first page",
         }

@@ -10,6 +10,7 @@ from docx.table import Table
 from .contracts import FormatError
 from .namespaces import qn
 from .properties import (
+    effective_range_bounds,
     element,
     simple_range,
     text_runs,
@@ -61,8 +62,9 @@ def set_font_property(index, ref, params, name):
         write_style_font(index.document, style, name, params["value"])
         return
     p = index.elements[ref["id"]]
+    start, end = effective_range_bounds(p, ref)
     runs = (
-        simple_range(p, ref["start"], ref["end"], True)
+        simple_range(p, start, end, True)
         if ref["kind"] == "text_range"
         else list(text_runs(p))
     )

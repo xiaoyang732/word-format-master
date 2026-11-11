@@ -23,6 +23,7 @@ from .contracts import (
     text_value,
 )
 from .inspect import DocumentIndex
+from .keywords import KEYWORD_SEPARATORS, keyword_separator_spans, keyword_separators
 from .namespaces import qn
 from .properties import FONT_TAGS, PARAGRAPH_TAGS, ppr_sources, read_paragraph, rpr_sources
 from .registry import REGISTRY
@@ -282,6 +283,7 @@ def template_profile(path):
     usable_width_mm = min(usable_widths, default=150.0)
     groups = defaultdict(list)
     citation_groups = defaultdict(list)
+    keyword_separator_groups = defaultdict(list)
     citation_reader = CitationReader(index)
     snapshot = []
     unknown = set()
@@ -294,8 +296,16 @@ def template_profile(path):
         if marks:
             target = _selector(record)
             citation_groups[json_hash(target)].extend((target, record["id"], mark) for mark in marks)
+        if record.get("semantic_role") == "keywords":
+            spans = keyword_separator_spans(record["text"])
+            if spans:
+                target = _selector(record)
+                keyword_separator_groups[json_hash(target)].extend(
+                    (target, record["id"], start, end, sep) for start, end, sep in spans
+                )
         values = {n: index.font_values(record["id"], n) for n in FONT_TAGS}
         values.update({n: read_paragraph(document, p, n) for n in PARAGRAPH_TAGS})
+        values["keyword_separator"] = keyword_separators(record["text"])
         snapshot.append(
             {
                 **record,
@@ -491,6 +501,39 @@ def template_profile(path):
             _issue(profile, "Sample citations have mixed or unsupported display formatting",
                    target=target, property="citation_display", candidates=candidates,
                    observed=[item for items in evidence.values() for item in items])
+    for group in keyword_separator_groups.values():
+        evidence = defaultdict(list)
+        for target, anchor, start, end, sep in group:
+            evidence[sep].append(
+                {
+                    "anchor": anchor,
+                    "start": start,
+                    "end": end,
+                    "separator": sep,
+                    "confidence": 1.0,
+                }
+            )
+        candidates = [
+            {
+                "target": target,
+                "action": "keywords.separator.set",
+                "params": {"value": value},
+                "evidence": items,
+            }
+            for value, items in evidence.items()
+            if value in KEYWORD_SEPARATORS
+        ]
+        if len(evidence) == len(candidates) == 1:
+            _rule(profile, candidates[0])
+        else:
+            _issue(
+                profile,
+                "Sample keywords have mixed or unsupported separators",
+                target=target,
+                property="keyword_separator",
+                candidates=candidates,
+                observed=[item for items in evidence.values() for item in items],
+            )
     for section in analysis["document"]["sections"]:
         target = {"type": "section", "number": section["index"]}
         values = {k: section.get(k) for k in ("width_mm", "height_mm", "orientation")}

@@ -363,6 +363,7 @@ def inspect_document(path):
     index = DocumentIndex(document)
     records = index.public()
     from .citation_display import CitationReader, citation_evidence
+    from .keywords import keyword_separators
     from .registry import REGISTRY
 
     citation_reader = CitationReader(index)
@@ -394,6 +395,7 @@ def inspect_document(path):
                 record.get("style_name") or index.paragraph(record["id"]).style.name
             )
             record["format"]["citation_display"] = sorted({mark.display for mark in marks})
+            record["format"]["keyword_separator"] = keyword_separators(record["text"])
     return {
         "schema_version": "2.0",
         "source": {"path": str(source), "sha256": sha256(source)},

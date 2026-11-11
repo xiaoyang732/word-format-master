@@ -649,6 +649,22 @@ def text_runs(paragraph):
         yield run
 
 
+def effective_range_bounds(paragraph, ref):
+    start = ref.get("start", 0)
+    end = ref.get("end", 10**12)
+    if ref.get("kind") != "text_range":
+        return start, end
+    text = "".join(t.text or "" for r in text_runs(paragraph) for t in r.findall(qn("w:t")))
+    quote = ref.get("quote")
+    if quote is not None and text[start:end] != quote:
+        from document_structure import keyword_label_ranges
+
+        ranges = keyword_label_ranges(text)
+        if ranges and start == ranges["value"][0]:
+            return start, ranges["value"][1]
+    return start, end
+
+
 def simple_range(paragraph, start, end, split=False):
     runs = list(text_runs(paragraph))
     if any(child.tag not in {qn("w:rPr"), qn("w:t")} for r in runs for child in r):

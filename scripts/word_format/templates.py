@@ -239,8 +239,31 @@ def compile_template(profiles, *, identifier="user-template", resolutions=None):
                 {**copy.deepcopy(issue), "id": f"s{n}.{issue['id']}", "source": n}
             )
     # Merge identical evidence; conflicting values remain decisions, never last-wins.
-    grouped = defaultdict(list)
+    qualified_targets = defaultdict(list)
     for rule in result["rules"]:
+        if isinstance(rule.get("target"), dict) and "language" in rule["target"]:
+            base = {k: v for k, v in rule["target"].items() if k != "language"}
+            key = (json_hash(base), rule["action"])
+            if all(json_hash(t) != json_hash(rule["target"]) for t in qualified_targets[key]):
+                qualified_targets[key].append(rule["target"])
+    expanded_rules = []
+    for rule in result["rules"]:
+        if isinstance(rule.get("target"), dict) and "language" not in rule["target"]:
+            matches = qualified_targets.get((json_hash(rule["target"]), rule["action"]))
+            if matches:
+                for target in matches:
+                    suffix = f".{target['language']}" if len(matches) > 1 else ""
+                    expanded_rules.append(
+                        {
+                            **copy.deepcopy(rule),
+                            "id": f"{rule['id']}{suffix}",
+                            "target": copy.deepcopy(target),
+                        }
+                    )
+                continue
+        expanded_rules.append(rule)
+    grouped = defaultdict(list)
+    for rule in expanded_rules:
         grouped[(json_hash(rule["target"]), rule["action"])].append(rule)
     result["rules"] = []
     for group in grouped.values():

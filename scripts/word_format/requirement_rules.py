@@ -4,6 +4,8 @@ import re
 
 from parse_requirements import CN_SIZE_PT, FONT_NAMES, measure_to_mm
 
+from .keywords import match_keyword_separator_clauses
+
 MEASURE = r"(\d+(?:\.\d+)?)\s*(厘米|毫米|英寸|磅|cm|mm|inches|inch|in|pt)"
 LANGUAGE_PREFIX = r"(?:(?:中文|英文)\s*|(?:Chinese|English)\s+)?"
 ROLES = [
@@ -61,7 +63,7 @@ def _scopes(clause):
 
 
 def _clauses(text):
-    for clause in re.split(r"[\n。；;]+", text):
+    for clause in re.split(r"(?:\n|。|(?<![“\"'（(])[；;](?!\s*[”\"'）)]))+", text):
         # A comma introducing a new explicit scope starts a new instruction.
         # Other commas (宋体，小四，居中) keep the same instruction together.
         starts = [0]
@@ -161,6 +163,7 @@ def parse_blocks(blocks):
                     "reference_item",
                     "acknowledgements_heading",
                     "appendix_heading",
+                    "keywords",
                 }:
                     selected = {"type": "paragraph", "semantic_role": role, "all": True}
                 elif role == "reference":
@@ -363,6 +366,36 @@ def parse_blocks(blocks):
                             {"value": not bool(re.match(r"不|非|not", match.group(), re.I))},
                             match,
                         )
+                if target.get("semantic_role", target.get("role")) == "keywords":
+                    emitted_kw_sep = False
+                    for match, sep_value in list(
+                        match_keyword_separator_clauses(
+                            "".join(remaining),
+                            scoped=True,
+                            language=target.get("language"),
+                        )
+                    ):
+                        emit("keywords.separator.set", {"value": sep_value}, match)
+                        emitted_kw_sep = True
+                    if emitted_kw_sep:
+                        for count_match in re.finditer(
+                            r"(?:需有|一般为|一般|通常为|通常|约|共|选|取|提供|列出|给出)?\s*(?:\d+|[一二三四五六七八九十]+)\s*(?:[-~～至到]\s*(?:\d+|[一二三四五六七八九十]+))?\s*个",
+                            "".join(remaining),
+                        ):
+                            consume(count_match)
+            if not target or target.get("semantic_role", target.get("role")) != "keywords":
+                kw_lang = target.get("language") if target else None
+                kw_selection = {"type": "paragraph", "semantic_role": "keywords", "all": True}
+                if kw_lang:
+                    kw_selection["language"] = kw_lang
+                for match, sep_value in list(
+                    match_keyword_separator_clauses(
+                        "".join(remaining),
+                        scoped=False,
+                        language=kw_lang,
+                    )
+                ):
+                    emit("keywords.separator.set", {"value": sep_value}, match, kw_selection)
             residual = "".join(remaining)
             residual = re.sub(
                 r"(?:使用|采用|设置为|设置|字体|字号|纸张|中文|西文|英文|为|要求|格式|放置|书写|font|size|paper)|[\s，,：:、()（）.]+",

@@ -12,8 +12,14 @@ from . import operations as op
 from .citation_display import DISPLAY_VALUES, read_citation_display, set_citation_display
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .inspect import _style_paragraph
+from .keywords import (
+    KEYWORD_SEPARATORS,
+    read_keyword_separator,
+    set_keyword_separator,
+    validate_keyword_separator,
+)
 from .namespaces import qn
-from .properties import paragraph_style_name, read_font, read_paragraph
+from .properties import effective_range_bounds, paragraph_style_name, read_font, read_paragraph
 
 
 @dataclass(frozen=True)
@@ -152,7 +158,12 @@ def color(params):
 
 def read_atomic(index, ref, cap):
     if cap.property in {"font_east_asia", "font_latin", "font_size_pt", "bold", "italic", "color"}:
-        raw = index.font_values(ref["id"], cap.property, ref.get("start"), ref.get("end"))
+        start, end = (
+            effective_range_bounds(index.elements[ref["id"]], ref)
+            if ref["kind"] == "text_range"
+            else (ref.get("start"), ref.get("end"))
+        )
+        raw = index.font_values(ref["id"], cap.property, start, end)
         if ref["kind"] != "paragraph":
             return raw
         values = list(raw)
@@ -664,6 +675,18 @@ REGISTRY["citation.display.set"] = Capability(
     read_citation_display,
     lambda actual, params, cap: all(value == params["value"] for value in actual),
     {"value": list(DISPLAY_VALUES)},
+)
+
+REGISTRY["keywords.separator.set"] = Capability(
+    "keywords.separator.set",
+    "keyword_separator",
+    frozenset({"paragraph"}),
+    set_keyword_separator,
+    validate_keyword_separator,
+    read_keyword_separator,
+    lambda actual, params, cap: isinstance(actual, list)
+    and all(value == params["value"] for value in actual),
+    {"value": list(KEYWORD_SEPARATORS)},
 )
 
 

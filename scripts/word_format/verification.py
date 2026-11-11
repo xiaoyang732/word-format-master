@@ -6,12 +6,15 @@ import copy
 import re
 
 from .contracts import FormatError
+from .keywords import keyword_separator_spans
 from .namespaces import qn
 from .properties import (
     FONT_TAGS,
     PARAGRAPH_TAGS,
+    effective_range_bounds,
     paragraph_style_name,
     sanitize_properties,
+    text_runs,
     xml_value,
 )
 
@@ -613,6 +616,15 @@ def atomic_projection(document, index, refs, cap):
                 if st is not None:
                     clone.remove(st)
             sanitized = xml_value(clone) if clone is not None and len(clone) else ""
+        range_start, range_end = effective_range_bounds(node, ref)
+        sep_starts, sep_tails = set(), set()
+        if prop == "keyword_separator":
+            paragraph_text = "".join(
+                t.text or "" for r in text_runs(node) for t in r.findall(qn("w:t"))
+            )
+            for s, e, _ in keyword_separator_spans(paragraph_text):
+                sep_starts.add(s)
+                sep_tails.update(range(s + 1, e))
         offset = 0
 
         def content(child):
@@ -631,10 +643,17 @@ def atomic_projection(document, index, refs, cap):
                         continue
                     if sub.tag == qn("w:t"):
                         for char in sub.text or "":
+                            if prop == "keyword_separator" and offset in sep_starts:
+                                tokens.append(("keyword_sep", original_format, attributes))
+                                offset += 1
+                                continue
+                            if prop == "keyword_separator" and offset in sep_tails:
+                                offset += 1
+                                continue
                             selected = (
                                 any(start <= offset < end for start, end in ref["ranges"])
                                 if prop == "citation_display"
-                                else ref.get("start", 0) <= offset < ref.get("end", 10**12)
+                                else range_start <= offset < range_end
                             )
                             fmt = selected_format if selected else original_format
                             tokens.append(("char", char, fmt, attributes))

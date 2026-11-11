@@ -276,6 +276,152 @@ class TemplateFidelityTests(unittest.TestCase):
             apply_plan(self.toc_plan())
         self.assertFalse(self.output.exists())
 
+    def test_template_keyword_separator_converts_semicolons_to_chinese_commas(self):
+        sample = self.root / "sample_comma.docx"
+        doc = Document()
+        doc.add_paragraph("摘  要")
+        doc.add_paragraph("样例中文摘要内容。")
+        p_zh = doc.add_paragraph("关键词: \xa0")
+        p_zh.runs[0].bold = True
+        p_zh.add_run("LabVIEW，声卡，音频信号，数据采集系统").bold = False
+        doc.add_paragraph("Abstract")
+        doc.add_paragraph("Sample English abstract text.")
+        p_en = doc.add_paragraph("Key words:  ")
+        p_en.runs[0].bold = True
+        p_en.add_run("LabVIEW，sound card，audio signal，data acquisition").bold = False
+        doc.save(sample)
+
+        draft = Document()
+        draft.add_paragraph("摘  要")
+        draft.add_paragraph("目标中文摘要内容。")
+        d_zh = draft.add_paragraph("关键词: \xa0")
+        d_zh.runs[0].bold = False
+        d_zh.add_run("大语言模型；预训练机制；对齐优化；强化学习；前沿综述").bold = False
+        draft.add_paragraph("Abstract")
+        draft.add_paragraph("Target English abstract text.")
+        d_en = draft.add_paragraph("Key words:  ")
+        d_en.runs[0].bold = False
+        d_en.add_run(
+            "Large Language Models; Pre-training; Alignment Optimization; Reinforcement Learning; Frontier Survey"
+        ).bold = False
+        draft.save(self.source)
+
+        profile = template_profile(sample)
+        sep_rules = {
+            r["target"].get("language"): r["params"]["value"]
+            for r in profile["rules"]
+            if r["action"] == "keywords.separator.set"
+        }
+        self.assertEqual(sep_rules, {"zh": "，", "en": "，"})
+        decisions = {
+            i["id"]: {"decision": "ignore", "reason": "Synthetic test fixture"}
+            for i in profile["issues"]
+        }
+        plan = profile_plan(self.source, self.output, profile, resolutions=decisions)
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["status"], "passed")
+        out = Document(self.output)
+        self.assertEqual(
+            out.paragraphs[2].text,
+            "关键词: \xa0大语言模型，预训练机制，对齐优化，强化学习，前沿综述",
+        )
+        self.assertEqual(
+            out.paragraphs[5].text,
+            "Key words:  Large Language Models，Pre-training，Alignment Optimization，Reinforcement Learning，Frontier Survey",
+        )
+
+    def test_keyword_separator_lengthening_with_value_segment_fonts(self):
+        for sep_first in (True, False):
+            with self.subTest(sep_first=sep_first):
+                doc = Document()
+                p = doc.add_paragraph("Key words:  ")
+                p.runs[0].bold = True
+                p.add_run("LabVIEW，sound card，audio signal").bold = False
+                doc.save(self.source)
+                ops = [
+                    {
+                        "action": "keywords.separator.set",
+                        "target": {"type": "paragraph", "semantic_role": "keywords", "all": True},
+                        "params": {"value": "; "},
+                    },
+                    {
+                        "action": "font.size.set",
+                        "target": {
+                            "type": "text_range",
+                            "semantic_role": "keywords",
+                            "segment": "value",
+                            "all": True,
+                        },
+                        "params": {"value": 14, "unit": "pt"},
+                    },
+                ]
+                if not sep_first:
+                    ops.reverse()
+                out_path = self.root / f"out_{sep_first}.docx"
+                plan = build_plan(self.source, out_path, {"operations": ops})
+                report = apply_plan(plan)
+                self.assertEqual(verify_plan(plan, report)["status"], "passed")
+                out = Document(out_path)
+                self.assertEqual(
+                    out.paragraphs[0].text,
+                    "Key words:  LabVIEW; sound card; audio signal",
+                )
+                idx = DocumentIndex(out)
+                self.assertEqual(idx.font_values("p0", "font_size_pt", 12, len(out.paragraphs[0].text)), [14.0])
+
+    def test_mixed_sample_keyword_separators_emit_issue(self):
+        doc = Document()
+        doc.add_paragraph("关键词：系统，测试；验证")
+        doc.save(self.source)
+        profile = template_profile(self.source)
+        self.assertFalse(any(r["action"] == "keywords.separator.set" for r in profile["rules"]))
+        issue = next(
+            (i for i in profile["issues"] if i.get("property") == "keyword_separator"),
+            None,
+        )
+        self.assertIsNotNone(issue)
+        self.assertEqual(
+            {c["params"]["value"] for c in issue["candidates"]},
+            {"，", "；"},
+        )
+
+    def test_requirement_keyword_separator_clauses_and_conflict_detection(self):
+        from parse_requirements import parse_requirements
+        from word_format.templates import compile_template
+
+        rules, issues = parse_blocks([{"anchor": "p10", "text": "需有3-5个关键词，词间用分号隔开"}])
+        self.assertEqual(issues, [])
+        self.assertEqual(len(rules), 1)
+        self.assertEqual(rules[0]["action"], "keywords.separator.set")
+        self.assertEqual(rules[0]["params"], {"value": "；"})
+
+        bilingual_rules, bilingual_issues = parse_blocks(
+            [{"anchor": "p11", "text": "中文关键词之间用逗号隔开，英文关键词之间用分号隔开。"}]
+        )
+        self.assertEqual(bilingual_issues, [])
+        self.assertEqual(
+            {(r["target"].get("language"), r["params"]["value"]) for r in bilingual_rules},
+            {("zh", "，"), ("en", "; ")},
+        )
+
+        parsed = parse_requirements("需有3-5个关键词，词间用中文逗号隔开。")
+        self.assertEqual(parsed["spec_patch"].get("keywords", {}).get("separator"), "，")
+
+        sample = self.root / "sample_conflict.docx"
+        doc = Document()
+        doc.add_paragraph("关键词：甲，乙，丙")
+        doc.save(sample)
+        req_file = self.root / "req_conflict.txt"
+        req_file.write_text("需有3-5个关键词，词间用分号隔开。", encoding="utf-8")
+        compiled = compile_template([template_profile(sample), requirements_profile(req_file)])
+        self.assertTrue(
+            any(
+                "Sources disagree" in i["reason"]
+                and any(c["action"] == "keywords.separator.set" for c in i.get("candidates", []))
+                for i in compiled["issues"]
+            )
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

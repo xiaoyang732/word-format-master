@@ -90,7 +90,7 @@ python scripts/format_cli.py verify --plan plan.json --report report.json --outp
 }
 ```
 
-`label_bold` 仅作用于段首的 `关键词：` / `Key words:` 标签，`value_bold` 作用于标签后的词条。省略两个字段时不改变现有粗体；不要同时使用整段 `keywords.bold` 与局部粗体字段。`table_of_contents.title_style` 的字号、字体和段落属性会在 DOCX 回读时检查。
+`label_bold` 仅作用于段首的 `关键词：` / `Key words:` 标签，`value_bold` 作用于标签后的词条，`separator`（或直接操作 `keywords.separator.set`）规范词条之间的分隔符（如 `，`、`；`、`、`、`; `、`, ` 等），同时完整保留标签与词条内容及原有字符格式。省略两个粗体字段时不改变现有粗体；不要同时使用整段 `keywords.bold` 与局部粗体字段。`table_of_contents.title_style` 的字号、字体和段落属性会在 DOCX 回读时检查。
 
 ## 能力与代码对应
 
