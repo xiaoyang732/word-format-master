@@ -237,14 +237,19 @@ _COVER_FIELD_PATTERNS = {
 }
 
 _STANDALONE_DATE_RE = re.compile(
-    r"^[\s\u3000]*(?:[\d〇○零一二三四五六七八九十][\s\u3000]*){2,4}年.*月(?:.*日)?[\s\u3000]*$"
+    r"^[\s\u3000]*(?:[\d〇○零一二三四五六七八九十][\s\u3000]*){2,4}年.*月(?:.*日)?"
+    r"(?:[\s\u3000]*[（(【\[]?[^）)】\]]*(?:号|居中|宋|黑|楷|仿|加粗|bold|pt)[^）)】\]]*[）)】\]]?)?[\s\u3000]*$"
     r"|^[\s\u3000]*年[\s\u3000]*月[\s\u3000]*日[\s\u3000]*$"
+)
+_RED_FORMAT_HINT_RE = re.compile(
+    r"^[\s\u3000]*[（(【\[]?[^）)】\]]*(?:初号|小初|一号|小一|二号|小二|三号|小三|四号|小四|五号|小五|"
+    r"宋体|黑体|楷体|仿宋|加粗|居中|左对齐|右对齐|行距|缩进)[^）)】\]]*[）)】\]]?[\s\u3000]*$"
 )
 _STANDALONE_TITLE_PLACEHOLDER_RE = re.compile(
     r"^[（(【\[]?\s*(?:在此(?:处)?输入)?(?:毕业)?(?:论文|设计)?题\s*目\s*[）)】\]]?$"
 )
 _COVER_BANNER_RE = re.compile(
-    r"(?:毕业(?:设计|论文)|学位论文|课程(?:设计|论文|报告)|实验报告|实习报告|开题报告|期末作业|封面)"
+    r"(?:毕业(?:设计|论文)|学位论文|课程(?:设计|论文|报告)|实验报告|实习报告|开题报告|期末作业|文献综述|专题报告|读书报告|调研报告|封面)"
 )
 _EXPLICIT_CHAPTER_START_RE = re.compile(
     r"^\s*(?:第\s*[一二三四五六七八九十百零〇0-9]+\s*[章节篇]|[一二三四五六七八九十]+、|\d+(?:[、.．]\s*|\s+)\S)"
@@ -1001,7 +1006,77 @@ def _set_whole_paragraph_text(p, value: str) -> bool:
         if sz is not None:
             for sc in rpr.findall(qn("w:szCs")):
                 sc.set(qn("w:val"), sz.get(qn("w:val")))
+        ppr = p.find(qn("w:pPr"))
+        if ppr is not None:
+            old_ppr_rpr = ppr.find(qn("w:rPr"))
+            if old_ppr_rpr is not None:
+                ppr.remove(old_ppr_rpr)
+            ppr.insert(0, copy.deepcopy(rpr))
     return True
+
+
+def _clean_cover_paragraph_hygiene(p, *, was_standalone_date: bool = False) -> None:
+    text_runs = [r for r in p.findall(qn("w:r")) if not _is_opaque_run(r)]
+    if not text_runs:
+        return
+    stripped_hint = False
+    for r in list(text_runs):
+        r_text = "".join(t.text or "" for t in r.findall(qn("w:t")))
+        rpr = r.find(qn("w:rPr"))
+        color_node = rpr.find(qn("w:color")) if rpr is not None else None
+        color_val = (color_node.get(qn("w:val")) or "").lower() if color_node is not None else ""
+        if color_val in {"ff0000", "red"} and (
+            not r_text.strip() or _RED_FORMAT_HINT_RE.match(r_text)
+        ):
+            p.remove(r)
+            stripped_hint = True
+    remaining = [r for r in p.findall(qn("w:r")) if not _is_opaque_run(r)]
+    non_empty = [
+        r for r in remaining if "".join(t.text or "" for t in r.findall(qn("w:t"))) != ""
+    ]
+    if non_empty:
+        for r in list(remaining):
+            if r not in non_empty:
+                p.remove(r)
+    ppr = p.find(qn("w:pPr"))
+    if ppr is not None and (stripped_hint or was_standalone_date):
+        jc = ppr.find(qn("w:jc"))
+        if jc is not None and jc.get(qn("w:val")) == "center":
+            ind = ppr.find(qn("w:ind"))
+            if ind is not None:
+                for attr in ("firstLine", "firstLineChars"):
+                    ind.attrib.pop(qn("w:" + attr), None)
+                if not ind.attrib:
+                    ppr.remove(ind)
+        if non_empty and non_empty[0].find(qn("w:rPr")) is not None:
+            old_ppr_rpr = ppr.find(qn("w:rPr"))
+            if old_ppr_rpr is not None:
+                ppr.remove(old_ppr_rpr)
+            ppr.insert(0, copy.deepcopy(non_empty[0].find(qn("w:rPr"))))
+
+
+def _compact_cover_spacers(nodes: list, count: int) -> None:
+    if count <= 0:
+        return
+    removed = 0
+    while removed < count:
+        runs: list[list[int]] = []
+        current: list[int] = []
+        for idx, node in enumerate(nodes):
+            if node.tag == qn("w:p") and _is_empty_paragraph(node):
+                current.append(idx)
+            else:
+                if current:
+                    runs.append(current)
+                    current = []
+        if current:
+            runs.append(current)
+        if not runs:
+            break
+        multi_runs = [r for r in runs if len(r) >= 2]
+        target_run = multi_runs[-1] if multi_runs else runs[-1]
+        del nodes[target_run[-1]]
+        removed += 1
 
 
 def clone_template_cover(
@@ -1013,6 +1088,8 @@ def clone_template_cover(
     replace_existing_cover: bool = False,
     use_section_break: bool = True,
     include_declaration: bool = True,
+    compact_spacers: int = 0,
+    normalize_base: bool = False,
 ) -> Document:
     """Clone the cover page (tables, VML textboxes, images, underlines, layout) from a template."""
     src_path = Path(template_path).resolve()
@@ -1023,6 +1100,10 @@ def clone_template_cover(
     src_doc = open_word_document(src_path)
     if target_doc is None:
         target_doc = Document()
+        if normalize_base:
+            from .structures import normalize_universal_chinese_base
+
+            normalize_universal_chinese_base(target_doc)
         for child in list(target_doc.element.body):
             if child.tag != qn("w:sectPr"):
                 target_doc.element.body.remove(child)
@@ -1078,9 +1159,10 @@ def clone_template_cover(
         ).strip()
         if not raw_text:
             continue
+        is_standalone_date = bool(_STANDALONE_DATE_RE.match(raw_text))
         handled_whole_line = False
         for key, val, canonical, *_ in compiled_fields:
-            if canonical == "date" and _STANDALONE_DATE_RE.match(raw_text):
+            if canonical == "date" and is_standalone_date:
                 if _set_whole_paragraph_text(p, val):
                     matched_keys.add(key)
                     handled_whole_line = True
@@ -1125,6 +1207,7 @@ def clone_template_cover(
                             replaced_in_single_run = True
                 if not replaced_in_single_run:
                     _replace_paragraph_text_pattern(p, re.escape(old), str(new))
+        _clean_cover_paragraph_hygiene(p, was_standalone_date=is_standalone_date)
 
     # Fallback for standalone centered title placeholders (e.g. "论文题目" without colon or table).
     for key, val, canonical, *_ in compiled_fields:
@@ -1137,6 +1220,9 @@ def clone_template_cover(
                     if _set_whole_paragraph_text(node, val):
                         matched_keys.add(key)
                         break
+
+    if compact_spacers > 0:
+        _compact_cover_spacers(cloned, int(compact_spacers))
 
     body = target_doc.element.body
     for insert_idx, node in enumerate(cloned):
@@ -1154,6 +1240,7 @@ def apply_template_cover_file(
     replace_existing_cover: bool = False,
     use_section_break: bool = True,
     include_declaration: bool = True,
+    compact_spacers: int = 0,
     overwrite: bool = False,
 ) -> dict:
     """Safely clone a template cover to ``destination`` while protecting all inputs."""
@@ -1195,6 +1282,7 @@ def apply_template_cover_file(
         replace_existing_cover=replace_existing_cover,
         use_section_break=use_section_break,
         include_declaration=include_declaration,
+        compact_spacers=compact_spacers,
     )
     out_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = out_path.with_name(f".{out_path.stem}.{uuid.uuid4().hex}.docx")

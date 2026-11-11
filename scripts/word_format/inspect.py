@@ -61,7 +61,9 @@ class DocumentIndex:
                 else "body"
             )
             normalized = style_name.lower().replace(" ", "")
-            if re.fullmatch(r"(?:toc|目录)[1-9]|wfmtocfield|wfmtocbreak", normalized):
+            toc_lvl_match = re.fullmatch(r"(?:toc|目录)([1-9])", normalized)
+            toc_level = int(toc_lvl_match.group(1)) if toc_lvl_match else None
+            if toc_lvl_match or normalized in {"wfmtocfield", "wfmtocbreak"}:
                 # Cached TOC text may look exactly like a chapter/caption.
                 role, level, special = "toc", None, None
             elif normalized in {"title", "subtitle"}:
@@ -99,6 +101,7 @@ class DocumentIndex:
                     "style_name": style_name,
                     "role": role,
                     "heading_level": level,
+                    "toc_level": toc_level,
                     "outline_level": outline,
                     "top_level": top,
                     "unsupported_container": unsafe,
@@ -119,7 +122,11 @@ class DocumentIndex:
             (
                 i
                 for i, oid in enumerate(self.top_ids)
-                if self.records[oid]["module"] or self.records[oid]["heading_level"] == 1
+                if self.records[oid]["module"]
+                or (
+                    self.records[oid]["role"] == "heading"
+                    and self.records[oid]["heading_level"] == 1
+                )
             ),
             None,
         )
@@ -160,7 +167,7 @@ class DocumentIndex:
                 module_counts[module] = module_counts.get(module, 0) + 1
                 module_occurrence = module_counts[module]
                 chapter = None
-            elif record["heading_level"] == 1:
+            elif record["role"] == "heading" and record["heading_level"] == 1:
                 module = "chapters"
                 module_counts[module] = module_counts.get(module, 0) + 1
                 module_occurrence = module_counts[module]
@@ -308,14 +315,28 @@ class DocumentIndex:
             )
         runs = list(text_runs(p))
         non_empty = [
-            r for r in runs if any(t.text and t.text.strip() for t in r.findall(qn("w:t")))
+            r
+            for r in runs
+            if any(t.text and t.text.strip() for t in r.findall(qn("w:t")))
+            or (
+                start is None
+                and r.find(qn("w:tab")) is not None
+                and r.find(qn("w:rPr")) is not None
+                and all(c.tag in {qn("w:rPr"), qn("w:tab")} for c in r)
+            )
         ]
         target_runs = set(non_empty if start is None and non_empty else runs)
         values = []
         offset = 0
         for r in runs:
             length = sum(len(t.text or "") for t in r.findall(qn("w:t")))
-            if length and (start is None or (offset < end and offset + length > start)):
+            is_tab_run = (
+                start is None
+                and not length
+                and r.find(qn("w:tab")) is not None
+                and all(c.tag in {qn("w:rPr"), qn("w:tab")} for c in r)
+            )
+            if (length and (start is None or (offset < end and offset + length > start))) or is_tab_run:
                 if r in target_runs:
                     value = read_font(self.document, p, r, name)
                     if value not in values:
@@ -341,8 +362,10 @@ def inspect_document(path):
     document = Document(source)
     index = DocumentIndex(document)
     records = index.public()
+    from .citation_display import CitationReader, citation_evidence
     from .registry import REGISTRY
 
+    citation_reader = CitationReader(index)
     properties = {
         cap.property
         for cap in REGISTRY.values()
@@ -351,6 +374,8 @@ def inspect_document(path):
     for record in records:
         if record["kind"] == "paragraph":
             p = index.elements[record["id"]]
+            marks = citation_reader.marks(record["id"])
+            record.update(citation_evidence(p, marks, record["text"]))
             from .properties import FONT_TAGS, PARAGRAPH_TAGS
 
             record["format"] = {
@@ -368,6 +393,7 @@ def inspect_document(path):
             record["format"]["style"] = (
                 record.get("style_name") or index.paragraph(record["id"]).style.name
             )
+            record["format"]["citation_display"] = sorted({mark.display for mark in marks})
     return {
         "schema_version": "2.0",
         "source": {"path": str(source), "sha256": sha256(source)},

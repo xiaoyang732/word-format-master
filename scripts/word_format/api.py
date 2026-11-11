@@ -88,7 +88,10 @@ def build_plan(input_path, output, request, *, _document=None):
         if "structure_contract" in context:
             from .profiles import template_structure_contract
 
-            contract = template_structure_contract({"source": context["source"]})
+            flexible = bool(context["structure_contract"].get("flexible_chapters"))
+            contract = template_structure_contract(
+                {"source": context["source"]}, flexible_chapters=flexible
+            )
             if context["structure_contract"] != contract:
                 raise FormatError("Thesis structure must match the current sample")
             verification_spec = copy.deepcopy(request.get("verification_spec", {}))
@@ -159,6 +162,10 @@ def build_plan(input_path, output, request, *, _document=None):
         if cap is None:
             raise FormatError(f"Unknown operation {item['action']!r}", "unsupported")
         params = cap.validator(item["params"])
+        if cap.action == "citation.insert":
+            from .citations import resolve_citation_params
+
+            params = resolve_citation_params(document, params)
         if cap.property == "page_numbers" and "start_section" in params:
             number(params["start_section"], 1, len(document.sections), "start_section", True)
         if (
@@ -236,6 +243,25 @@ def build_plan(input_path, output, request, *, _document=None):
                 "params": params,
             }
         )
+    citation_displays = {
+        index.elements[ref["id"]]: item["params"]["value"]
+        for item in resolved if item["action"] == "citation.display.set"
+        for ref in item["targets"]
+    }
+    if citation_displays:
+        paragraphs = document.paragraphs
+        for item in resolved:
+            if item["action"] != "citation.insert":
+                continue
+            for placement in item["params"]["placements"]:
+                position = placement["paragraph_index"]
+                if position < len(paragraphs):
+                    display = citation_displays.get(paragraphs[position]._p)
+                    if display is not None and display != placement.get("display", "inline"):
+                        raise FormatError(
+                            "Conflicting citation display for existing and new citations in the same paragraph",
+                            "needs_clarification",
+                        )
     normalized_request = {**request, "schema_version": SCHEMA_VERSION, "operations": normalized}
     plan = {
         "schema_version": SCHEMA_VERSION,
@@ -296,6 +322,35 @@ def _preservation(index, refs, cap):
     return atomic_projection(index.document, index, refs, cap)
 
 
+def _has_valid_property_order(index, ref, cap):
+    from .namespaces import qn
+
+    node = index.elements.get(ref["id"])
+    if node is None:
+        return True
+    if ref["kind"] in {"paragraph", "text_range"}:
+        ppr = node.find(qn("w:pPr"))
+        if ppr is not None and node.index(ppr) != 0:
+            return False
+        for run in node.iter(qn("w:r")):
+            rpr = run.find(qn("w:rPr"))
+            if rpr is not None and run.index(rpr) != 0:
+                return False
+    elif ref["kind"] == "table":
+        tblpr = node.find(qn("w:tblPr"))
+        if tblpr is not None and node.index(tblpr) != 0:
+            return False
+        for row in node.findall(qn("w:tr")):
+            trpr = row.find(qn("w:trPr"))
+            if trpr is not None and row.index(trpr) != 0:
+                return False
+            for cell in row.findall(qn("w:tc")):
+                tcpr = cell.find(qn("w:tcPr"))
+                if tcpr is not None and cell.index(tcpr) != 0:
+                    return False
+    return True
+
+
 def _format_verification(document, checks):
     index = DocumentIndex(document)
     failures = []
@@ -307,7 +362,9 @@ def _format_verification(document, checks):
             failures.append(f"Target missing: {ref['id']}")
             continue
         actual = _read(cap, index, ref)
-        passed = cap.verifier(actual, check["params"], cap)
+        passed = cap.verifier(actual, check["params"], cap) and _has_valid_property_order(
+            index, ref, cap
+        )
         if cap.property == "numbered":
             # Recheck the original scope as well as the surviving list items.
             # Dropping numPr must not turn a failed operation into all([]).
@@ -614,6 +671,10 @@ def verify_plan(plan, report, *, visual_report=None, render_manifest=None, rende
         )
         response["execution_status"] = status
         response["status"] = response["compliance"]["status"]
+    if response["status"] != "passed":
+        from .remediation import diagnose_verification_remediation
+
+        response["remediation"] = diagnose_verification_remediation(response)
     return response
 
 
@@ -684,6 +745,10 @@ def audit_document(input_path, request):
         )
         response["execution_status"] = status
         response["status"] = response["compliance"]["status"]
+    if response["status"] != "passed":
+        from .remediation import diagnose_verification_remediation
+
+        response["remediation"] = diagnose_verification_remediation(response)
     return response
 
 

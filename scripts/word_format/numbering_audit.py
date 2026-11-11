@@ -92,8 +92,13 @@ def audit_numbering(document):
                             "reason": "Numbering definition is missing",
                         }
                     )
-    return {
+    result = {
         "status": "failed" if issues else "passed",
         "issues": issues,
         "checked_paragraphs": checked,
     }
+    if issues:
+        from .remediation import diagnose_numbering_remediation
+
+        result["remediation"] = diagnose_numbering_remediation(issues)
+    return result

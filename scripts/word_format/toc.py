@@ -91,7 +91,13 @@ def headings(document, max_level=9):
 def result_status(document, max_level):
     expected = [p.text.strip() for p, _ in headings(document, max_level)]
     fields = [
-        p for p in document.paragraphs if paragraph_style_name(document, p._p) == "WFM TOC Field"
+        p
+        for p in document.paragraphs
+        if paragraph_style_name(document, p._p) == "WFM TOC Field"
+        or re.fullmatch(
+            r"(?:toc|目录)[1-9]",
+            paragraph_style_name(document, p._p).lower().replace(" ", ""),
+        )
     ]
     text = "\n".join("".join(n.text or "" for n in p._p.iter(qn("w:t"))) for p in fields)
     error = bool(

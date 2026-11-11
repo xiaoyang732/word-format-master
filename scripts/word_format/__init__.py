@@ -2,6 +2,7 @@
 
 from .api import apply_plan, audit_document, build_plan, capabilities, inspect_document, verify_plan
 from .cover import add_standard_thesis_cover, apply_east_asia_font
+from .structures import normalize_universal_chinese_base
 
 __all__ = [
     "apply_plan",
@@ -9,6 +10,7 @@ __all__ = [
     "build_plan",
     "capabilities",
     "inspect_document",
+    "normalize_universal_chinese_base",
     "verify_plan",
     "add_standard_thesis_cover",
     "apply_east_asia_font",

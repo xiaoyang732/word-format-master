@@ -48,3 +48,10 @@ python scripts/run_format_pipeline.py "D:/任务/索引实验报告/draft.docx" 
 页面图片已生成仍需逐页查看。完成视觉报告后，可用相同命令追加 `--resume --visual-report "D:/任务/视觉报告.json"` 接入最终 verify。视觉报告须按现有格式绑定最终 DOCX、渲染清单及所有页面；不接受渲染成功代替视觉通过。
 
 字数、引用对应可另用 `thesis_quality.py` 检查；它们不能证明事实、实验结论或文献真实性。Word/WPS 保存刷新域后的文档会改变摘要，须重新为最终文件建立有效验收证据。
+
+## 验收阶段一键修复与签收（Remediation & Fast Sign-Off）
+
+- **预生成待审视觉验收模板（硬门禁）**：`render_docx.py` 在生成 `render/render-manifest.json` 的同时，会在报告目录自动生成预填好 `output_sha256`、`manifest_sha256`、`renderer.method`、`reviewed_pages`、`checklist` 与 `model.supports_image_input=true` 的 `visual-report.template.json`，其初始 `status` 为 `"pending_visual_review"`（直接原样回传会被验证器拦截报错）。必须先调用图像查看工具逐页审阅 `page-*.png` 并核对 `checklist` 全部六项，确认无误后将 `status` 改为 `"passed"` 并填写真实 `summary`，再传入 `--visual-report <报告目录>/visual-report.template.json --resume` 完成最终签收。
+- **流水线内置内容质量门禁**：在 `run_format_pipeline.py` 中传入 `--check-quality` 及字数/摘要/文献参数（如 `--min-chinese-characters`、`--min-abstract-chinese-characters`、`--max-abstract-chinese-characters`、`--min-references`、`--min-recent-references`、`--recent-start-year`、`--require-all-references-cited`），即可在流水线内自动执行 `thesis_quality.py` 并将结果绑定至 `summary.json` 的 `checks.content`。
+- **`--resume` 参数自动继承**：执行 `run_format_pipeline.py ... --resume` 时，流水线会自动从 `pipeline-state.json` 继承已保存的 `--profile`/`--template`、`--mapping`、`--resolutions`、`--match-structure`、`--overwrite`、`--render`、`--render-method` 与内容质量门禁参数，避免漏传参数触发摘要不一致错误。
+- **结构化修复方案（`remediation`）**：当 `structure.json`、`verification.json`、`numbering.json`、`quality.json` 或 `summary.json` 处于 `failed` 或 `pending` 状态时，报告内置 `remediation`（及 `visual_defect_playbook`）字段，直接给出每种格式、结构、编号、内容或视觉版面问题的根因与单步修复指令。

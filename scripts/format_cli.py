@@ -14,7 +14,7 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "doctor":
 
     raise SystemExit(doctor_main(sys.argv[2:]))
 
-from json_output import ensure_protected_paths, write_json
+from json_output import ensure_not_in_skill_root, ensure_protected_paths, write_json
 from word_format import (
     apply_plan,
     audit_document,
@@ -78,6 +78,11 @@ def main():
     )
     p.add_argument("input")
     p.add_argument("--profile", required=True)
+    p.add_argument(
+        "--flexible-chapters",
+        action="store_true",
+        help="Allow multi-chapter or multi-subsection expansion within the sample's heading levels",
+    )
     p.add_argument("--output")
     p = commands.add_parser("audit")
     p.add_argument("input")
@@ -110,6 +115,11 @@ def main():
         action="store_true",
         help="Required for sample-based drafts: reject extra, missing or reordered parts",
     )
+    p.add_argument(
+        "--flexible-chapters",
+        action="store_true",
+        help="Allow multi-chapter or multi-subsection expansion within the sample's heading levels",
+    )
     p.add_argument("--output")
     p = commands.add_parser("apply")
     p.add_argument("--plan", required=True)
@@ -140,6 +150,26 @@ def main():
     )
     p.add_argument("--fields", help="JSON object mapping cover field labels/keys to values")
     p.add_argument("--replacements", help="JSON object mapping literal placeholder strings")
+    p.add_argument(
+        "--compact-spacers",
+        type=int,
+        default=0,
+        help="Remove up to N pure-empty spacer paragraphs on the cover without touching images/drawings",
+    )
+    p.add_argument("--report", help="Optional JSON report path")
+    p.add_argument("--overwrite", action="store_true")
+    p = commands.add_parser(
+        "refresh-fields",
+        help="Update TOC, REF, SEQ and STYLEREF fields via Word COM and strip cached page breaks",
+    )
+    p.add_argument("input", help="Input DOCX path")
+    p.add_argument("destination", nargs="?", help="Output DOCX path (omit when using --in-place)")
+    p.add_argument("--in-place", action="store_true", help="Refresh fields in place on input DOCX")
+    p.add_argument(
+        "--keep-last-rendered-page-breaks",
+        action="store_true",
+        help="Do not strip <w:lastRenderedPageBreak/> nodes after refreshing fields",
+    )
     p.add_argument("--report", help="Optional JSON report path")
     p.add_argument("--overwrite", action="store_true")
     p = commands.add_parser("verify")
@@ -153,18 +183,18 @@ def main():
         help="Defaults to the plan's renderer preference",
     )
     p.add_argument("--output")
-    for name in ("inspect", "profile", "check-structure", "audit", "template", "plan", "apply", "cover", "verify"):
-        path_option = "--report" if name in {"apply", "cover"} else "--output"
+    for name in ("inspect", "profile", "check-structure", "audit", "template", "plan", "apply", "cover", "refresh-fields", "verify"):
+        path_option = "--report" if name in {"apply", "cover", "refresh-fields"} else "--output"
         commands.choices[name].add_argument(
             "--summary", action="store_true",
             help=f"Print a compact summary after writing the full result to {path_option}",
         )
     args = parser.parse_args()
     try:
-        destination = args.report if args.command in {"apply", "cover"} else args.output
+        destination = args.report if args.command in {"apply", "cover", "refresh-fields"} else args.output
         summary = getattr(args, "summary", False)
         if summary and not destination:
-            path_option = "--report" if args.command in {"apply", "cover"} else "--output"
+            path_option = "--report" if args.command in {"apply", "cover", "refresh-fields"} else "--output"
             raise FormatError(f"--summary requires {path_option}")
         protected = [
             Path(v).resolve()
@@ -230,6 +260,13 @@ def main():
             if "profile_context" in request:
                 protected.append(request["profile_context"]["source"]["path"])
         ensure_protected_paths(destination, *protected)
+        for write_target in (
+            getattr(args, "destination", None),
+            getattr(args, "workspace", None),
+            args.input if getattr(args, "in_place", False) else None,
+        ):
+            if write_target:
+                ensure_not_in_skill_root(write_target)
         if args.command == "report":
             protected.extend([CATALOG, CATALOG.parents[1] / "references/report-generation.md"])
             if args.sample:
@@ -277,7 +314,9 @@ def main():
                 else template_profile(args.input)
             )
         elif args.command == "check-structure":
-            result = check_template_structure(args.input, profile)
+            result = check_template_structure(
+                args.input, profile, flexible_chapters=args.flexible_chapters
+            )
         elif args.command == "audit":
             if args.template:
                 draft = Path(args.input).resolve()
@@ -317,6 +356,7 @@ def main():
                     mapping=read_json(args.mapping) if args.mapping else None,
                     request_text=args.request_text,
                     match_structure=args.match_structure,
+                    flexible_chapters=args.flexible_chapters,
                 )
             else:
                 if args.mapping or args.resolutions or args.match_structure:
@@ -336,7 +376,18 @@ def main():
                 replace_existing_cover=args.replace_existing_cover,
                 use_section_break=not args.no_section_break,
                 include_declaration=args.include_declaration,
+                compact_spacers=args.compact_spacers,
                 overwrite=args.overwrite,
+            )
+        elif args.command == "refresh-fields":
+            from word_format.fields import refresh_document_fields
+
+            result = refresh_document_fields(
+                args.input,
+                args.destination,
+                in_place=args.in_place,
+                overwrite=args.overwrite,
+                strip_last_rendered_page_breaks=not args.keep_last_rendered_page_breaks,
             )
         else:
             result = verify_plan(

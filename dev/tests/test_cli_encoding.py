@@ -20,7 +20,7 @@ class CliEncodingTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.folder = Path(self.temp.name)
+        self.folder = Path(self.temp.name).resolve()
         self.source = self.folder / "论文表格.docx"
         self.output = self.folder / "排版结果.docx"
         doc = Document()
@@ -110,7 +110,7 @@ class CliEncodingTests(unittest.TestCase):
                 run = self.run_cli("format_cli.py", stage, *args, option, path, "--summary")
                 summary = self.assert_json_success(run)
                 self.assertEqual(summary["command"], stage)
-                self.assertEqual(Path(summary["artifact"]), path)
+                self.assertEqual(Path(summary["artifact"]).resolve(), path.resolve())
                 self.assertLess(len(run.stdout), 4000)
                 self.assertNotIn("正文中文表格", run.stdout)
                 full = json.loads(path.read_text(encoding="utf-8"))

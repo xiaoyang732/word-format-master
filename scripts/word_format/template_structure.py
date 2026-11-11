@@ -140,18 +140,45 @@ def extract_template_structure(document):
     return {"schema_version": "1.0", "match": "exact", "ordered_modules": modules}
 
 
-def _key(module):
+def _key(module, *, flexible_chapters=False):
+    outline_levels = tuple(module.get("outline_levels", []))
+    if module["kind"] == "chapters" and flexible_chapters:
+        outline_levels = tuple(sorted(set(outline_levels)))
     return (
         module["kind"],
         module.get("variant", ""),
-        tuple(module.get("outline_levels", [])) if module["kind"] == "chapters" else (),
-        module.get("separate_page", False),
+        outline_levels if module["kind"] == "chapters" else (),
+        module.get("separate_page", False) if module["kind"] != "cover" else True,
     )
 
 
+def _collapse_chapter_runs(modules, *, flexible_chapters=False):
+    if not flexible_chapters:
+        return list(modules)
+    collapsed = []
+    for module in modules:
+        item = copy.deepcopy(module)
+        if (
+            item.get("kind") == "chapters"
+            and collapsed
+            and collapsed[-1].get("kind") == "chapters"
+        ):
+            combined = list(collapsed[-1].get("outline_levels", [])) + list(
+                item.get("outline_levels", [])
+            )
+            collapsed[-1]["outline_levels"] = sorted(set(combined))
+        else:
+            if item.get("kind") == "chapters":
+                item["outline_levels"] = sorted(set(item.get("outline_levels", [])))
+            collapsed.append(item)
+    return collapsed
+
+
 def validate_template_structure(contract):
-    if not isinstance(contract, dict) or contract.get("match") != "exact":
-        raise FormatError("Template structure requires match: exact")
+    if not isinstance(contract, dict) or contract.get("match") not in {"exact", "flexible_chapters"}:
+        raise FormatError("Template structure requires match: exact or flexible_chapters")
+    if "flexible_chapters" in contract and not isinstance(contract["flexible_chapters"], bool):
+        raise FormatError("Template structure flexible_chapters must be boolean")
     if contract.get("schema_version") != "1.0":
         raise FormatError("Unsupported template structure version")
     modules = contract.get("ordered_modules")
@@ -174,9 +201,16 @@ def validate_template_structure(contract):
 
 def compare_template_structure(document, contract):
     validate_template_structure(contract)
-    expected = contract["ordered_modules"]
-    actual = extract_template_structure(document)["ordered_modules"]
-    expected_keys, actual_keys = list(map(_key, expected)), list(map(_key, actual))
+    flexible = bool(
+        contract.get("flexible_chapters") or contract.get("match") == "flexible_chapters"
+    )
+    expected = _collapse_chapter_runs(
+        contract["ordered_modules"], flexible_chapters=flexible
+    )
+    actual_raw = extract_template_structure(document)["ordered_modules"]
+    actual = _collapse_chapter_runs(actual_raw, flexible_chapters=flexible)
+    expected_keys = [_key(m, flexible_chapters=flexible) for m in expected]
+    actual_keys = [_key(m, flexible_chapters=flexible) for m in actual]
     differences = []
     matcher = SequenceMatcher(a=expected_keys, b=actual_keys, autojunk=False)
     for tag, a, b, c, d in matcher.get_opcodes():
@@ -191,12 +225,17 @@ def compare_template_structure(document, contract):
                 }
             )
     passed = expected_keys == actual_keys
-    return {
+    result = {
         "status": "passed" if passed else "failed",
-        "expected": copy.deepcopy(expected),
-        "actual": actual,
+        "expected": copy.deepcopy(contract["ordered_modules"]),
+        "actual": actual_raw,
         "differences": differences,
         "errors": []
         if passed
         else ["Thesis parts, languages, counts, order or chapter hierarchy differ from the sample"],
     }
+    if not passed:
+        from .remediation import diagnose_structure_remediation
+
+        result["remediation"] = diagnose_structure_remediation(result)
+    return result

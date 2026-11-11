@@ -29,6 +29,13 @@ Do not repair citations by editing fixed line numbers in a generated script. Use
 IDs, review placements, then let the citation workflow reject stale anchors or
 unknown reference IDs before inserting markers.
 
+Set `display` on every citation placement using the explicit requirements or the
+sample's `citation.display.set` rule for the corresponding body scope. Use
+`superscript` for raised citations and `inline` for citations on the text baseline.
+If the sample uses both in the same scope, check the examples and confirm the
+placement convention before choosing a display for new citations. Keep punctuation
+placement in `insert`. Omitting `display` defaults to `inline`.
+
 ## Sample-based structure: nothing added or omitted
 
 When the user supplies a thesis sample, its actual contents define the complete
@@ -174,3 +181,13 @@ drift and broken tables. A structural pass is neither a visual pass nor a
 validation of research claims. When reviewing a user-supplied test sample without
 authorization to edit it, keep it read-only and reproduce defects with synthetic
 fixtures.
+
+## Single-Pass Authoring & Acceptance Playbook
+
+- **Multi-authority extraction & conflict check**: When a task folder contains both a written requirements document (e.g. `考核要求.docx`) and a formatting sample (e.g. `格式范文.doc`), you MUST extract BOTH profiles (`format_cli.py profile requirements` and `format_cli.py profile template`) and compile or compare them (`format_cli.py template compile --profile req.json --profile tpl.json`). Never ignore the written requirements and never silently mix conflicting fonts, alignments, headers, or section page numbers.
+- **No custom formatter bypass**: Authoring scripts (`python-docx`) may ONLY create the raw semantic draft (`draft.docx`). Never import `word_format.*` internal modules in a scratch script to format or deliver a final document without running `run_format_pipeline.py` (or `format_cli.py plan → apply → verify`).
+- **Cover cloning & spacer compaction**: When a long thesis title wraps to 2 lines on a cloned sample cover, pass `--compact-spacers <N>` to `python scripts/format_cli.py cover` so pure-empty spacer paragraphs are compacted safely without ever deleting empty-text paragraphs that contain `<w:drawing>` / `<w:pict>` school logos or calligraphy banners. `format_cli.py cover` also strips red format-hint runs (such as `（小二号居中`) and resets compensating `firstLine` indentation on centered cover dates. Ensure the cover title and the abstract page title match character-for-character.
+- **Resilient citation placement & 100% reference coverage**: `citation.insert` placements accept `"text_contains"` (in addition to or instead of `"paragraph_index"` and `"paragraph_sha256"`) and automatically re-resolve shifted paragraph indices when earlier chapters are expanded. Every listed bibliography entry MUST be cited in the body (`--require-all-references-cited`), and all Chinese/English references must be real, verifiable publications (never fabricated).
+- **Built-in field refresh & per-level TOC sync**: Run `python scripts/format_cli.py refresh-fields <draft.docx> --in-place` before final formatting/rendering to update TOC, `REF`, `SEQ`, and `STYLEREF` fields via Word COM, automatically synchronize `toc 1..9` style fonts onto all TOC runs (including `<w:tab/>` dot-leader runs with `<w:rPr>` enforced at child index `0`), and strip cached `<w:lastRenderedPageBreak/>` markers.
+- **Flexible chapter counts & multi-table rules**: When the user asks to expand a sample-based draft to more chapters than the sample's chapter count while keeping front/back matter identical, pass `--flexible-chapters` to `format_cli.py check-structure`, `format_cli.py plan`, or `run_format_pipeline.py`. Sample body table rules (`table.alignment.set`, `table.header_repeat.set`, `table.three_line.apply`) automatically target all body tables (`all: True`).
+- **Pipeline content quality & visual sign-off gate**: Pass `--check-quality` and the task's quantitative bounds (`--min-chinese-characters`, `--min-abstract-chinese-characters`, `--max-abstract-chinese-characters`, `--min-references`, `--min-recent-references`, `--recent-start-year`, `--require-all-references-cited`) to `run_format_pipeline.py`. After `--render`, inspect every `page-1.png..page-N.png` via your image-reading tool, verify all 6 `checklist` items in `visual-report.template.json`, change `"status"` from `"pending_visual_review"` to `"passed"`, write a concrete `"summary"`, and run `run_format_pipeline.py ... --visual-report ".../visual-report.template.json" --resume`.

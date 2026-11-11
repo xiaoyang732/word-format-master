@@ -5,10 +5,29 @@ import os
 from pathlib import Path
 import tempfile
 
+SKILL_ROOT = Path(__file__).resolve().parents[1]
+PROTECTED_SKILL_SUBDIRS = ("templates", "scripts", "assets", "agents", "references")
+PROTECTED_SKILL_FILES = ("SKILL.md", "README.md", "SECURITY.md", "requirements.txt", "LICENSE.txt")
+
+
+def ensure_not_in_skill_root(destination):
+    if not destination:
+        return
+    path = Path(destination).resolve()
+    for filename in PROTECTED_SKILL_FILES:
+        target = (SKILL_ROOT / filename).resolve()
+        if path == target or (path.exists() and target.exists() and path.samefile(target)):
+            raise ValueError("严禁写入或覆盖技能安装目录（$SKILL_DIR）内的文件；请将输出写入任务专属目录")
+    for subdir in PROTECTED_SKILL_SUBDIRS:
+        folder = (SKILL_ROOT / subdir).resolve()
+        if path == folder or folder in path.parents:
+            raise ValueError("严禁写入或覆盖技能安装目录（$SKILL_DIR）内的文件；请将输出写入任务专属目录")
+
 
 def ensure_protected_paths(destination, *protected):
     if not destination:
         return
+    ensure_not_in_skill_root(destination)
     path = Path(destination).resolve()
     if path.suffix.lower() in {".doc", ".docx", ".dotx", ".docm", ".dotm"}:
         raise ValueError("JSON output must not overwrite or use a Word document path")

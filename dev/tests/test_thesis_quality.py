@@ -119,6 +119,41 @@ class ThesisQualityTests(unittest.TestCase):
         self.assertEqual(mapping["listed_reference_ids"], [1, 2])
         self.assertEqual(mapping["citations_without_matching_reference"], [])
 
+    def test_abstract_bounds_reference_recency_and_require_all_references_cited(self):
+        document = Document()
+        document.add_paragraph("论文标题", style="Title")
+        document.add_paragraph("摘  要", style="Heading 1")
+        document.add_paragraph("这是一段正好超过二十个汉字的中文摘要内容，用于测试摘要字数上下限。")
+        document.add_paragraph("关键词：大模型；文献综述")
+        document.add_paragraph("绪 论", style="Heading 1")
+        document.add_paragraph("正文同时引用了两篇文献[1,2]。")
+        document.add_paragraph("参考文献", style="Heading 1")
+        document.add_paragraph("[1] Vaswani A. Attention is all you need[C]. 2023.")
+        document.add_paragraph("[2] 张三. 大模型演进综述[J]. 计算机学报, 2024.")
+        document.add_paragraph("[3] 李四. 悬空未被引用的文献[J]. 软件学报, 2020.")
+        document.save(self.source)
+
+        # Fails when require_all_references_cited=True because [3] is uncited
+        report_uncited = analyze_thesis(
+            self.source,
+            minimum_chinese_characters=5,
+            minimum_abstract_chinese_characters=15,
+            maximum_abstract_chinese_characters=100,
+            minimum_references=3,
+            require_all_references_cited=True,
+            minimum_recent_references=2,
+            recent_start_year=2022,
+        )
+        self.assertEqual(report_uncited["status"], "failed")
+        self.assertEqual(report_uncited["checks"]["body_length"]["status"], "passed")
+        self.assertEqual(report_uncited["checks"]["abstract_length"]["status"], "passed")
+        self.assertEqual(report_uncited["checks"]["reference_requirements"]["status"], "passed")
+        self.assertEqual(report_uncited["checks"]["numeric_citation_mapping"]["status"], "failed")
+        self.assertEqual(
+            report_uncited["checks"]["numeric_citation_mapping"]["listed_but_uncited_reference_ids"],
+            [3],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

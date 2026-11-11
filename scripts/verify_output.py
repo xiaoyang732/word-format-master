@@ -52,7 +52,10 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         }
 
     requested_structure = spec.get("document_structure")
-    if isinstance(requested_structure, dict) and requested_structure.get("match") == "exact":
+    if isinstance(requested_structure, dict) and requested_structure.get("match") in {
+        "exact",
+        "flexible_chapters",
+    }:
         from word_format.template_structure import compare_template_structure
 
         comparison = compare_template_structure(document, requested_structure)
@@ -297,8 +300,21 @@ def validate_visual_report(report: dict[str, Any], page_count: int | None = None
     status = str(report.get("status") or "")
     if status == "skipped":
         return {"status": "skipped", "reason": str(report.get("reason") or "模型未执行视觉验收"), "model": model}
+    if status == "pending_visual_review":
+        return {
+            "status": "failed",
+            "errors": [
+                "视觉验收报告仍处于待审草稿状态（status=pending_visual_review）；必须先调用图像查看工具逐页查看全部 page-*.png，"
+                "核对封面单页收口、正文两端对齐、页眉横线、分节页码、目录收录项与页码一致性后，将 status 改为 passed 并填写真实检查结论"
+            ],
+        }
     if status not in {"passed", "failed"}:
         return {"status": "failed", "errors": ["视觉验收状态必须是 passed、failed 或 skipped"]}
+    if status == "passed" and str(report.get("summary") or "").strip().startswith("请先调用图像查看工具逐页检查全部"):
+        return {
+            "status": "failed",
+            "errors": ["视觉验收报告的 summary 仍为未修改的模板占位提示；请在逐页看图后填写真实的版面检查结论"],
+        }
     pages = report.get("reviewed_pages")
     if page_count is not None:
         if isinstance(page_count, bool) or not isinstance(page_count, int) or page_count < 1:

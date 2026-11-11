@@ -101,7 +101,11 @@ python scripts/format_cli.py verify --plan plan.json --report report.json --outp
 
 `spec.body` 仅修改章节正文和无模块标记的正文，不再改写共享 Normal 样式；摘要、致谢、附录需通过明确的模块或语义规则设置。`operations` 继续按显式选择范围应用。
 
-`citation.insert` 根据共享模块边界提取文献，在文献条目建立书签与原生编号，并在指定正文位置插入真实 REF 域。`reference_ids` 必须与 `citation_text` 中的编号顺序一致，例如 `ref-1, ref-2` 对应 `[1][2]`。每个 REF 输出完整的 `[编号]`，避免 WPS 忽略去装饰开关后出现双层括号。验收检查书签目标、编号序列、字段结果及原段落指纹，而非只检查文字是否出现。
+`citation.insert` 根据共享模块边界提取文献，在文献条目建立书签与原生编号，并在指定正文位置插入真实 REF 域。`reference_ids` 必须与 `citation_text` 中的编号顺序一致，例如 `ref-1, ref-2` 对应 `[1][2]`。每个 REF 输出完整的 `[编号]`。验收检查书签目标、编号序列、字段结果、显示格式及原段落指纹。
+
+每个 placement 的 `display` 可设为 `inline`（同行，默认）或 `superscript`（上标）。`insert` 独立控制插入点，例如 `before-terminal-punctuation` 或 `after-terminal-punctuation`。
+
+`citation.display.set` 接受正文段落选择器和 `{"value":"inline"}` 或 `{"value":"superscript"}`。它修改能匹配参考文献的单个数字标记 `[n]` 或指向参考文献书签的数字 REF 域，保留正文、域代码和文末文献。同一计划对同一段落同时插入和调整显示格式时，显示设置须一致。`inspect` 和引用任务中的 `citations` 列出标记、字符范围和实际显示格式。范围以 `text` 为准，有 `citation_source_text` 时以该字段为准。
 
 目前支持逐条列出的数字引用；组合及压缩范围如 `[1,2]`、`[1-3]` 必须改写成 `[1][2]`、`[1][2][3]`，作者年份制与含域、绘图、超链接等复杂插入锚点会明确拒绝。参考文献原有编号序列若与文献区域以外列表共用，或编号标记字体混用，需先明确分离/统一；不会为了插入引用而静默改变其他列表。增删、重排文献后在 Word/WPS 中更新域。
 

@@ -11,6 +11,7 @@ from pathlib import Path
 
 from docx import Document
 
+from .citation_display import DISPLAY_VALUES, CitationReader, citation_evidence
 from .contracts import (
     FormatError,
     json_hash,
@@ -170,6 +171,8 @@ def _selector(record):
         target["module"] = record["module"]
     if record.get("heading_level"):
         target["level"] = record["heading_level"]
+    elif record.get("toc_level"):
+        target["level"] = record["toc_level"]
     for field in ("semantic_role", "language"):
         if record.get(field):
             target[field] = record[field]
@@ -181,6 +184,9 @@ def _selector(record):
         match = re.match(r"\s*(图|表|Figure|Fig\.|Table)", record["text"], re.I)
         if match:
             target["contains"] = match[1]
+    elif record.get("module") == "cover" and record.get("semantic_role") == "cover_body":
+        if record.get("text", "").strip():
+            target["text"] = record["text"]
     return target
 
 
@@ -268,10 +274,15 @@ def template_profile(path):
     # Use the same effective readers as inspect, rather than inferred_spec's
     # representative paragraph or first-section heuristics.
     records = index.public()
-    usable_width_mm = min(
-        s.page_width.mm - s.left_margin.mm - s.right_margin.mm for s in document.sections
-    )
+    usable_widths = [
+        s.page_width.mm - s.left_margin.mm - s.right_margin.mm
+        for s in document.sections
+        if s.page_width is not None and s.left_margin is not None and s.right_margin is not None
+    ]
+    usable_width_mm = min(usable_widths, default=150.0)
     groups = defaultdict(list)
+    citation_groups = defaultdict(list)
+    citation_reader = CitationReader(index)
     snapshot = []
     unknown = set()
     malformed = set()
@@ -279,6 +290,10 @@ def template_profile(path):
         if record["kind"] != "paragraph" or record["part"] != "word/document.xml":
             continue
         p = index.elements[record["id"]]
+        marks = citation_reader.marks(record["id"])
+        if marks:
+            target = _selector(record)
+            citation_groups[json_hash(target)].extend((target, record["id"], mark) for mark in marks)
         values = {n: index.font_values(record["id"], n) for n in FONT_TAGS}
         values.update({n: read_paragraph(document, p, n) for n in PARAGRAPH_TAGS})
         snapshot.append(
@@ -287,12 +302,21 @@ def template_profile(path):
                 "format": values,
                 "direct_pPr": str(p.pPr.xml) if p.pPr is not None else None,
                 "direct_rPr": [str(r.rPr.xml) for r in p.iter(qn("w:r")) if r.rPr is not None],
+                **citation_evidence(p, marks, record["text"]),
             }
         )
-        properties = list(ppr_sources(document, p)) + list(rpr_sources(document, p))
+        covered = defaultdict(int)
+        controls = {run for mark in marks for run in mark.controls}
+        for mark in marks:
+            for run, start, end in mark.slices:
+                covered[run] += end - start
+        properties = [(pr, False) for pr in [*ppr_sources(document, p), *rpr_sources(document, p)]]
         for run in p.iter(qn("w:r")):
-            properties.extend(rpr_sources(document, p, run))
-        for pr in properties:
+            citation_only = run in controls or covered[run] and covered[run] == sum(
+                len(node.text or "") for node in run.findall(qn("w:t"))
+            )
+            properties.extend((pr, citation_only) for pr in rpr_sources(document, p, run))
+        for pr, citation_only in properties:
             if pr is None:
                 continue
             known = {
@@ -324,6 +348,8 @@ def template_profile(path):
                 "numPr",
                 "rPr",
             }
+            if citation_only:
+                known.add("vertAlign")
             unknown.update(n.tag.split("}")[-1] for n in pr if n.tag.split("}")[-1] not in known)
             expanded_unknown, expanded_malformed = _expanded_paragraph_evidence(pr)
             unknown.update(expanded_unknown)
@@ -450,6 +476,21 @@ def template_profile(path):
                     candidates=choices,
                     observed=unrepresentable,
                 )
+    for group in citation_groups.values():
+        evidence = defaultdict(list)
+        for target, anchor, mark in group:
+            evidence[mark.display].append({"anchor": anchor, "confidence": 1.0, **mark.evidence()})
+        candidates = [
+            {"target": target, "action": "citation.display.set", "params": {"value": value},
+             "evidence": items}
+            for value, items in evidence.items() if value in DISPLAY_VALUES
+        ]
+        if len(evidence) == len(candidates) == 1:
+            _rule(profile, candidates[0])
+        else:
+            _issue(profile, "Sample citations have mixed or unsupported display formatting",
+                   target=target, property="citation_display", candidates=candidates,
+                   observed=[item for items in evidence.values() for item in items])
     for section in analysis["document"]["sections"]:
         target = {"type": "section", "number": section["index"]}
         values = {k: section.get(k) for k in ("width_mm", "height_mm", "orientation")}
@@ -519,9 +560,12 @@ def template_profile(path):
         },
     )
     # Table readers can safely represent alignment and repeated header rows.
-    for record in records:
-        if record["kind"] != "table":
-            continue
+    # Group non-cover body tables so uniform sample table properties apply to all body tables.
+    table_records = [r for r in records if r["kind"] == "table"]
+    cover_tables = [r for r in table_records if r.get("module") == "cover"]
+    body_tables = [r for r in table_records if r.get("module") != "cover"]
+    for record in cover_tables:
+        ordinal = int(record["id"][1:]) + 1
         for action in ("table.alignment.set", "table.header_repeat.set"):
             cap = REGISTRY[action]
             value = cap.reader(index, index.ref(record["id"]), cap)
@@ -529,7 +573,7 @@ def template_profile(path):
                 _rule(
                     profile,
                     {
-                        "target": {"type": "table", "ordinal": int(record["id"][1:]) + 1},
+                        "target": {"type": "table", "ordinal": ordinal},
                         "action": action,
                         "params": {"value": value},
                         "evidence": [{"anchor": record["id"], "confidence": 1.0}],
@@ -547,7 +591,7 @@ def template_profile(path):
             _rule(
                 profile,
                 {
-                    "target": {"type": "table", "ordinal": int(record["id"][1:]) + 1},
+                    "target": {"type": "table", "ordinal": ordinal},
                     "action": cap.action,
                     "params": {"value": True},
                     "evidence": [{"anchor": record["id"], "confidence": 1.0}],
@@ -558,6 +602,77 @@ def template_profile(path):
             "Table borders, widths, styles and cell geometry require review",
             anchor=record["id"],
         )
+    if body_tables:
+        body_table_target = (
+            {"type": "table", "module": None, "all": True}
+            if cover_tables
+            else {"type": "table", "all": True}
+        )
+        for action in ("table.alignment.set", "table.header_repeat.set", "table.three_line.apply"):
+            cap = REGISTRY[action]
+            variants = defaultdict(list)
+            raw_vals = {}
+            unrepresentable = []
+            for record in body_tables:
+                value = cap.reader(index, index.ref(record["id"]), cap)
+                if action == "table.three_line.apply" and not value:
+                    key = json_hash(False)
+                    raw_vals[key] = False
+                    variants[key].append({"anchor": record["id"], "confidence": 1.0})
+                    continue
+                try:
+                    validated = cap.validator({"value": value})
+                    key = json_hash(validated)
+                    raw_vals[key] = validated
+                    variants[key].append({"anchor": record["id"], "confidence": 1.0})
+                except FormatError:
+                    unrepresentable.append({"anchor": record["id"], "value": value})
+            if unrepresentable:
+                for item in unrepresentable:
+                    _issue(
+                        profile,
+                        "Table property requires explicit interpretation",
+                        property=action,
+                        anchor=item["anchor"],
+                    )
+            elif len(variants) == 1:
+                only_key = next(iter(variants))
+                if action == "table.three_line.apply" and raw_vals[only_key] is False:
+                    pass
+                else:
+                    _rule(
+                        profile,
+                        {
+                            "target": copy.deepcopy(body_table_target),
+                            "action": action,
+                            "params": raw_vals[only_key],
+                            "evidence": variants[only_key],
+                        },
+                    )
+            else:
+                choices = [
+                    {
+                        "target": copy.deepcopy(body_table_target),
+                        "action": action,
+                        "params": raw_vals[k],
+                        "evidence": ev,
+                    }
+                    for k, ev in variants.items()
+                    if not (action == "table.three_line.apply" and raw_vals[k] is False)
+                ]
+                _issue(
+                    profile,
+                    "Nonuniform sample body table formatting",
+                    target=copy.deepcopy(body_table_target),
+                    property=action,
+                    candidates=choices,
+                )
+        for record in body_tables:
+            _issue(
+                profile,
+                "Table borders, widths, styles and cell geometry require review",
+                anchor=record["id"],
+            )
     _issue(
         profile,
         "Map header/footer content, formatting and fields explicitly, including empty variants; sample-specific text is not copied",
@@ -720,6 +835,7 @@ def profile_plan(
     mapping=None,
     request_text="",
     match_structure=False,
+    flexible_chapters=False,
 ):
     from .api import build_plan
     from .selectors import resolve_targets
@@ -743,7 +859,9 @@ def profile_plan(
     pending = []
     structure_contract = None
     if match_structure:
-        structure_result = check_template_structure(target_path, profile)
+        structure_result = check_template_structure(
+            target_path, profile, flexible_chapters=flexible_chapters
+        )
         structure_contract = structure_result["contract"]
         if structure_result["status"] != "passed":
             pending.append(
@@ -754,6 +872,7 @@ def profile_plan(
                 }
             )
     decisions = []
+    superseded_by_resolution = {}
     for issue in profile["issues"]:
         resolution = resolutions.get(issue["id"])
         if resolution is None:
@@ -792,6 +911,11 @@ def profile_plan(
                 {"action", "target", "params"},
                 "resolution rule",
             )
+            if decision == "replace" and isinstance(addition.get("target"), dict):
+                superseded_by_resolution[(addition["action"], json_hash(addition["target"]))] = (
+                    issue["id"],
+                    resolution["reason"],
+                )
             rules.append(
                 {
                     **addition,
@@ -843,6 +967,16 @@ def profile_plan(
         if isinstance(target, dict) and set(target) == {"preserve"}:
             text_value(target["preserve"], "preserved rule reason")
             preserved_rules.append({"rule": rule, "reason": target["preserve"]})
+            continue
+        if (
+            rule["id"] not in rule_mapping
+            and "-resolved-" not in str(rule["id"])
+            and (cap.action, json_hash(target)) in superseded_by_resolution
+        ):
+            issue_id, reason = superseded_by_resolution[(cap.action, json_hash(target))]
+            preserved_rules.append(
+                {"rule": rule, "reason": f"Superseded by resolution {issue_id}: {reason}"}
+            )
             continue
         if (
             rule["id"] not in rule_mapping
@@ -954,7 +1088,7 @@ def profile_plan(
     return build_plan(input_path, destination, request)
 
 
-def template_structure_contract(profile):
+def template_structure_contract(profile, *, flexible_chapters=False):
     """Read authority again; stale or edited snapshots cannot redefine its parts."""
     validate_profile_source(profile["source"])
     if profile["source"]["kind"] != "template":
@@ -963,15 +1097,17 @@ def template_structure_contract(profile):
     recorded = profile.get("snapshot", {}).get("structure_contract")
     if recorded is not None and recorded != contract:
         raise FormatError("Template structure snapshot changed; extract a fresh profile")
+    if flexible_chapters:
+        contract = {**contract, "flexible_chapters": True}
     return contract
 
 
-def check_template_structure(input_path, profile):
+def check_template_structure(input_path, profile, *, flexible_chapters=False):
     """Read-only preflight/final check for drafts authored from a sample."""
     validate_profile(profile)
     target = source_path(input_path)
     target_hash = sha256(target)
-    contract = template_structure_contract(profile)
+    contract = template_structure_contract(profile, flexible_chapters=flexible_chapters)
     result = compare_template_structure(Document(target), contract)
     validate_profile_source(profile["source"])
     if sha256(target) != target_hash:

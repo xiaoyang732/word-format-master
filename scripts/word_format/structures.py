@@ -1671,6 +1671,196 @@ def _set_managed_num_pr(paragraph, num_id: int) -> None:
     ppr.append(num_pr)
 
 
+def normalize_universal_chinese_base(document: Document) -> Document:
+    """Normalize a python-docx Document into a clean universal Chinese academic baseline.
+
+    Cleans Office/python-docx default theme font language (ja-JP -> zh-CN),
+    replaces Japanese/Western theme fonts (MS Mincho / MS Gothic / Cambria / Calibri)
+    in theme1.xml with 宋体 / Times New Roman, neutralizes theme accent1/accent2 blue
+    colors (#365F91 / #4F81BD) in styles.xml, and standardizes docDefaults, Normal,
+    Heading 1..3, toc 1..3, header, and footer styles.
+    """
+    from .properties import element, write_font, write_paragraph
+
+    # 1. settings.xml: w:themeFontLang -> zh-CN / en-US
+    try:
+        settings_el = document.settings.element
+        lang_el = settings_el.find(qn("w:themeFontLang"))
+        if lang_el is None:
+            lang_el = OxmlElement("w:themeFontLang")
+            settings_el.append(lang_el)
+        lang_el.set(qn("w:val"), "en-US")
+        lang_el.set(qn("w:eastAsia"), "zh-CN")
+        lang_el.set(qn("w:bidi"), "ar-SA")
+    except AttributeError:
+        pass
+
+    # 2. theme1.xml: replace ja-JP MS Mincho/Gothic and Cambria/Calibri with 宋体 / Times New Roman
+    for part in document.part.package.parts:
+        if str(part.partname) == "/word/theme/theme1.xml":
+            blob_str = part.blob.decode("utf-8")
+            blob_str = re.sub(r'typeface="ＭＳ 明朝"', 'typeface="宋体"', blob_str)
+            blob_str = re.sub(r'typeface="ＭＳ ゴシック"', 'typeface="宋体"', blob_str)
+            blob_str = re.sub(r'typeface="Cambria"', 'typeface="Times New Roman"', blob_str)
+            blob_str = re.sub(r'typeface="Calibri"', 'typeface="Times New Roman"', blob_str)
+            blob_str = re.sub(
+                r'(<a:font\s+script="Hans"\s+typeface=")[^"]*(")',
+                r"\g<1>宋体\2",
+                blob_str,
+            )
+            blob_str = re.sub(
+                r'(<a:font\s+script="Jpan"\s+typeface=")[^"]*(")',
+                r"\g<1>宋体\2",
+                blob_str,
+            )
+            part._blob = blob_str.encode("utf-8")
+            if hasattr(document.part, "_wfm_theme_part"):
+                delattr(document.part, "_wfm_theme_part")
+
+    # 3. styles.xml: docDefaults -> 宋体 + Times New Roman, 12pt (小四), black
+    styles_el = document.styles.element
+    doc_defaults = element(styles_el, "docDefaults")
+    rpr_default = element(doc_defaults, "rPrDefault")
+    rpr_def_inner = element(rpr_default, "rPr")
+    write_font(rpr_def_inner, "font_east_asia", "宋体")
+    write_font(rpr_def_inner, "font_latin", "Times New Roman")
+    write_font(rpr_def_inner, "font_size_pt", 12.0)
+    write_font(rpr_def_inner, "color", "000000")
+    lang_def = element(rpr_def_inner, "lang")
+    lang_def.set(qn("w:val"), "en-US")
+    lang_def.set(qn("w:eastAsia"), "zh-CN")
+
+    ppr_default = element(doc_defaults, "pPrDefault")
+    ppr_def_inner = element(ppr_default, "pPr")
+    write_paragraph(ppr_def_inner, "space_before_pt", 0.0)
+    write_paragraph(ppr_def_inner, "space_after_pt", 0.0)
+    write_paragraph(
+        ppr_def_inner,
+        "line_spacing",
+        {"kind": "multiple", "value": 1.25, "unit": "multiple"},
+    )
+
+    # 4. Neutralize themefonts, blue colors, and tblStylePr shading across all styles in styles.xml
+    for st in styles_el.findall(qn("w:style")):
+        for rpr in st.iter(qn("w:rPr")):
+            rf = rpr.find(qn("w:rFonts"))
+            if rf is not None:
+                for attr in (
+                    "asciiTheme",
+                    "hAnsiTheme",
+                    "eastAsiaTheme",
+                    "cstheme",
+                ):
+                    rf.attrib.pop(qn("w:" + attr), None)
+                rf.set(qn("w:ascii"), "Times New Roman")
+                rf.set(qn("w:hAnsi"), "Times New Roman")
+                if not rf.get(qn("w:eastAsia")) or rf.get(qn("w:eastAsia")) in {
+                    "ＭＳ 明朝",
+                    "ＭＳ ゴシック",
+                    "Cambria",
+                    "Calibri",
+                }:
+                    rf.set(qn("w:eastAsia"), "宋体")
+            col = rpr.find(qn("w:color"))
+            if col is not None:
+                for attr in ("themeColor", "themeTint", "themeShade"):
+                    col.attrib.pop(qn("w:" + attr), None)
+                col.set(qn("w:val"), "000000")
+        for tbl_style_pr in list(st.findall(qn("w:tblStylePr"))):
+            for shd in list(tbl_style_pr.iter(qn("w:shd"))):
+                shd.getparent().remove(shd)
+
+    # 5. Configure Normal, Heading 1..3, toc 1..3, header, footer
+    normal_st = get_or_create_paragraph_style(document, "Normal")
+    normal_rpr = element(normal_st.element, "rPr")
+    write_font(normal_rpr, "font_east_asia", "宋体")
+    write_font(normal_rpr, "font_latin", "Times New Roman")
+    write_font(normal_rpr, "font_size_pt", 12.0)
+    write_font(normal_rpr, "color", "000000")
+    normal_ppr = element(normal_st.element, "pPr")
+    write_paragraph(normal_ppr, "alignment", "justify")
+    write_paragraph(normal_ppr, "space_before_pt", 0.0)
+    write_paragraph(normal_ppr, "space_after_pt", 0.0)
+    write_paragraph(
+        normal_ppr,
+        "line_spacing",
+        {"kind": "multiple", "value": 1.25, "unit": "multiple"},
+    )
+
+    heading_specs = {
+        "Heading 1": ("黑体", 15.0, True, "center", 0),
+        "Heading 2": ("黑体", 14.0, True, "left", 1),
+        "Heading 3": ("黑体", 12.0, True, "left", 2),
+    }
+    for h_name, (ea_font, sz_pt, is_bold, align, out_lvl) in heading_specs.items():
+        st = get_or_create_paragraph_style(document, h_name)
+        rpr = element(st.element, "rPr")
+        write_font(rpr, "font_east_asia", ea_font)
+        write_font(rpr, "font_latin", "Times New Roman")
+        write_font(rpr, "font_size_pt", sz_pt)
+        write_font(rpr, "bold", is_bold)
+        write_font(rpr, "italic", False)
+        write_font(rpr, "color", "000000")
+        ppr = element(st.element, "pPr")
+        write_paragraph(ppr, "alignment", align)
+        write_paragraph(ppr, "space_before_pt", 0.0)
+        write_paragraph(ppr, "space_after_pt", 0.0)
+        write_paragraph(
+            ppr, "line_spacing", {"kind": "multiple", "value": 1.25, "unit": "multiple"}
+        )
+        write_paragraph(ppr, "first_line_indent", {"value": 0, "unit": "chars"})
+        write_paragraph(ppr, "left_indent", {"value": 0, "unit": "chars"})
+        write_paragraph(ppr, "outline_level", out_lvl)
+
+    for lvl in (1, 2, 3):
+        st = None
+        for cand_name in (f"toc {lvl}", f"TOC {lvl}", f"目录 {lvl}"):
+            try:
+                st = document.styles[cand_name]
+                break
+            except KeyError:
+                pass
+        if st is None:
+            st = document.styles.add_style(f"toc {lvl}", WD_STYLE_TYPE.PARAGRAPH)
+            st.base_style = normal_st
+        rpr = element(st.element, "rPr")
+        write_font(rpr, "font_east_asia", "宋体")
+        write_font(rpr, "font_latin", "Times New Roman")
+        write_font(rpr, "font_size_pt", 12.0)
+        write_font(rpr, "bold", False)
+        write_font(rpr, "italic", False)
+        write_font(rpr, "color", "000000")
+        ppr = element(st.element, "pPr")
+        write_paragraph(ppr, "alignment", "left")
+        write_paragraph(ppr, "space_before_pt", 0.0)
+        write_paragraph(ppr, "space_after_pt", 0.0)
+        write_paragraph(
+            ppr, "line_spacing", {"kind": "multiple", "value": 1.25, "unit": "multiple"}
+        )
+        write_paragraph(ppr, "first_line_indent", {"value": 0, "unit": "chars"})
+        write_paragraph(
+            ppr, "left_indent", {"value": float((lvl - 1) * 2), "unit": "chars"}
+        )
+        write_paragraph(
+            ppr,
+            "tabs",
+            [{"alignment": "right", "position": 8306, "unit": "twips", "leader": "dot"}],
+        )
+
+    for hf_name in ("Header", "Footer", "header", "footer"):
+        try:
+            st = document.styles[hf_name]
+        except KeyError:
+            continue
+        rpr = element(st.element, "rPr")
+        write_font(rpr, "font_east_asia", "宋体")
+        write_font(rpr, "font_latin", "Times New Roman")
+        write_font(rpr, "font_size_pt", 9.0)
+        write_font(rpr, "color", "000000")
+
+    return document
+
+
 def apply_numbered_lists(document: Document, tokens: dict[str, Any]) -> list[str]:
     numbered = (tokens or {}).get("numbered", {})
     if not numbered:

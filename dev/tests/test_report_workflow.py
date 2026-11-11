@@ -22,7 +22,7 @@ class ReportWorkflowTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.work = Path(self.temp.name)
+        self.work = Path(self.temp.name).resolve()
 
     def cli(self, *args):
         return subprocess.run(
@@ -68,7 +68,7 @@ class ReportWorkflowTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         data = json.loads(result.stdout)
         self.assertIsNone(data["template_id"])
-        self.assertEqual(Path(data["source"]["path"]), sample)
+        self.assertEqual(Path(data["source"]["path"]).resolve(), sample.resolve())
         self.assertEqual(Path(data["draft"]).read_bytes(), sample.read_bytes())
 
     def test_existing_workspace_and_unknown_template_are_rejected_without_writes(self):

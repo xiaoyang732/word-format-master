@@ -7,17 +7,21 @@ from parse_requirements import CN_SIZE_PT, FONT_NAMES, measure_to_mm
 MEASURE = r"(\d+(?:\.\d+)?)\s*(厘米|毫米|英寸|磅|cm|mm|inches|inch|in|pt)"
 LANGUAGE_PREFIX = r"(?:(?:中文|英文)\s*|(?:Chinese|English)\s+)?"
 ROLES = [
-    (LANGUAGE_PREFIX + r"(?:(?:内容)?摘要正文|abstract\s+body)", "abstract"),
-    (r"(?:设计[（(]论文[）)]|论文|中文|英文)题目", "abstract_title"),
+    (LANGUAGE_PREFIX + r"(?:(?:内容)?摘要(?:正文|内容)|abstract\s+body)", "abstract"),
+    (r"(?:设计[（(]论文[）)]|论文|中文|英文)(?:题目|标题)", "abstract_title"),
     (
         LANGUAGE_PREFIX
-        + r"(?:[“\"]?(?:内容)?摘要[”\"]?(?:标题|字样)|[“\"](?:内容)?摘要[”\"]|^\s*(?:内容)?摘要(?=\s*[（(])|\bAbstract\b(?!\s+body))",
+        + r"(?:[“\"]?(?:内容)?摘要[”\"]?(?:标题|字样)|[“\"](?:内容)?摘要[”\"]|^\s*(?:内容)?摘要(?=\s*[（(：:])|\bAbstract\b(?!\s+body))",
         "abstract_heading",
     ),
     (r"(?:诚信声明|原创性声明|独创性声明)(?:标题|字样)?", "declaration_heading"),
     (
         r"(?:目录标题|[“\"]目录[”\"](?:字样)?|目录(?=\s*(?:另起一页|单独开一页|单独成页|新起一页)))",
         "toc_heading",
+    ),
+    (
+        r"(?:([一二三四五六七八九1-9])级)?(?:目录(?:内容|条目|正文|项)|目录(?!\s*(?:标题|字样|另起一页|单独开一页|单独成页|新起一页))|\btoc(?:\s*([1-9]))?\b)",
+        "toc",
     ),
     (
         r"(?:符号说明(?:标题|字样)?|主要符号表(?:标题|字样)?|[“\"]符号说明[”\"](?:字样)?)",
@@ -35,8 +39,8 @@ ROLES = [
     (r"页眉(?!距)|header(?!\s+distance)", "header"),
     (r"页脚(?!距)|footer(?!\s+distance)", "footer"),
     (r"([一二三四五六七八九1-9])级标题|heading\s*([1-9])", "heading"),
-    (r"正文|body(?:\s+text)?|(?<=[，,])\s*内容(?=采用|用)|^\s*内容(?=采用|用)", "body"),
-    (r"章节题目|章节标题|标题(?=\s*(?:加黑|加粗))", "chapter_heading"),
+    (r"正文(?:内容)?|body(?:\s+text)?|(?<=[，,])\s*内容(?=采用|用)|^\s*内容(?=采用|用)", "body"),
+    (r"章节题目|章节标题|标题(?=\s*(?:加黑|加粗|：|:))", "chapter_heading"),
     (r"参考文献|references|bibliography", "reference"),
     (LANGUAGE_PREFIX + r"(?:关键词|keywords)", "keywords"),
     (r"图题|图注|figure\s+caption", "figure"),
@@ -133,6 +137,12 @@ def parse_blocks(blocks):
                     selected["level"] = (
                         int(raw) if raw.isdigit() else "一二三四五六七八九".index(raw) + 1
                     )
+                elif role == "toc":
+                    raw = match.group(1) or match.group(2)
+                    if raw:
+                        selected["level"] = (
+                            int(raw) if raw.isdigit() else "一二三四五六七八九".index(raw) + 1
+                        )
                 elif role == "abstract":
                     selected = {"type": "paragraph", "semantic_role": "abstract_body", "all": True}
                 elif role in {"abstract_title", "abstract_heading"}:
@@ -307,6 +317,13 @@ def parse_blocks(blocks):
                             ),
                         ]
                     )
+                patterns.append(
+                    (
+                        r"首行空\s*(?:两|二|2)\s*(?:格|字符)",
+                        "paragraph.first_line_indent.set",
+                        lambda m: {"value": 2.0, "unit": "chars"},
+                    )
+                )
                 for label, name in [("段前|space before", "before"), ("段后|space after", "after")]:
                     patterns.append(
                         (
@@ -348,7 +365,7 @@ def parse_blocks(blocks):
                         )
             residual = "".join(remaining)
             residual = re.sub(
-                r"(?:使用|采用|设置为|设置|字体|字号|纸张|中文|西文|英文|为|要求|格式|font|size|paper)|[\s，,：:、()（）.]+",
+                r"(?:使用|采用|设置为|设置|字体|字号|纸张|中文|西文|英文|为|要求|格式|放置|书写|font|size|paper)|[\s，,：:、()（）.]+",
                 "",
                 residual,
                 flags=re.I,

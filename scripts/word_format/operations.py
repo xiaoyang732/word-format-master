@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from docx.enum.style import WD_STYLE_TYPE
 from docx.table import Table
 
@@ -34,7 +36,26 @@ def ensure_style(index, ref):
     return style
 
 
+def _sync_toc_style_element(index, ref):
+    if ref["kind"] != "paragraph":
+        return None
+    record = index.records.get(ref["id"], {})
+    if record.get("role") != "toc":
+        return None
+    from .properties import paragraph_style
+
+    style = paragraph_style(index.document, index.elements[ref["id"]])
+    if style is None:
+        return None
+    normalized = (style.name or "").lower().replace(" ", "")
+    if re.fullmatch(r"(?:toc|目录)[1-9]", normalized):
+        return style
+    return None
+
+
 def set_font_property(index, ref, params, name):
+    import re
+
     if ref["kind"] == "style":
         style = ensure_style(index, ref)
         write_style_font(index.document, style, name, params["value"])
@@ -46,13 +67,23 @@ def set_font_property(index, ref, params, name):
         else list(text_runs(p))
     )
     for run in runs:
-        # Empty runs may contain bookmarks/fields. Do not create formatting on them.
-        if any(t.text for t in run.findall(qn("w:t"))):
+        # Empty runs may contain bookmarks/fields. Do not create formatting on them,
+        # except pure tab runs (<w:tab/>) such as TOC dot-leaders when formatting a paragraph.
+        has_text = any(t.text for t in run.findall(qn("w:t")))
+        has_tab_only = (
+            ref["kind"] == "paragraph"
+            and run.find(qn("w:tab")) is not None
+            and all(c.tag in {qn("w:rPr"), qn("w:tab")} for c in run)
+        )
+        if has_text or has_tab_only:
             write_font(element(run, "rPr"), name, params["value"])
     if ref["kind"] == "paragraph" or not any(
         t.text for run in runs for t in run.findall(qn("w:t"))
     ):
         write_font(element(element(p, "pPr"), "rPr"), name, params["value"])
+    toc_style = _sync_toc_style_element(index, ref)
+    if toc_style is not None:
+        write_style_font(index.document, toc_style, name, params["value"])
 
 
 def set_east_asia_font(index, ref, params):
@@ -83,6 +114,18 @@ def set_paragraph_property(index, ref, params, name):
     node = ensure_style(index, ref).element if ref["kind"] == "style" else index.elements[ref["id"]]
     value = params if name == "line_spacing" or name.endswith("indent") else params["value"]
     write_paragraph(element(node, "pPr"), name, value)
+    toc_style = _sync_toc_style_element(index, ref)
+    if toc_style is not None and name in {
+        "alignment",
+        "space_before_pt",
+        "space_after_pt",
+        "line_spacing",
+        "first_line_indent",
+        "left_indent",
+        "right_indent",
+        "hanging_indent",
+    }:
+        write_paragraph(element(toc_style.element, "pPr"), name, value)
 
 
 def set_alignment(index, ref, params):
@@ -154,6 +197,14 @@ def set_tabs(index, ref, params):
     else:
         paragraph = node
     write_effective_tabs(index.document, paragraph, element(node, "pPr"), params["value"])
+    toc_style = _sync_toc_style_element(index, ref)
+    if toc_style is not None:
+        from .inspect import _style_paragraph
+
+        style_p = _style_paragraph(toc_style.name, index.document)
+        write_effective_tabs(
+            index.document, style_p, element(toc_style.element, "pPr"), params["value"]
+        )
 
 
 def assign_style(index, ref, params):

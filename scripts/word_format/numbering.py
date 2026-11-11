@@ -100,6 +100,29 @@ def effective_numbering(document, paragraph):
     return num_id, ilvl if ilvl is not None else 0, abstract, num
 
 
+def sequence_number(numbering, counters):
+    """Read one list occurrence, including a native level/start override."""
+    if numbering is None:
+        return None
+    num_id, ilvl, abstract, num = numbering
+    level = next((node for node in abstract.findall(qn("w:lvl"))
+                  if node.get(qn("w:ilvl")) == str(ilvl)), None) if abstract is not None else None
+    override = next((node for node in num.findall(qn("w:lvlOverride"))
+                     if node.get(qn("w:ilvl")) == str(ilvl)), None) if num is not None else None
+    if override is not None and override.find(qn("w:lvl")) is not None:
+        level = override.find(qn("w:lvl"))
+
+    def value(parent, name):
+        node = parent.find(qn("w:" + name)) if parent is not None else None
+        return node.get(qn("w:val")) if node is not None else None
+
+    start = int(value(override, "startOverride") or value(level, "start") or 1)
+    key = (num_id, ilvl)
+    counters[key] = counters.get(key, start - 1) + 1
+    return {"id": num_id, "level": ilvl, "value": counters[key],
+            "format": value(level, "numFmt"), "marker": value(level, "lvlText")}
+
+
 def level_spec(level):
     result = {}
     for tag, key in (

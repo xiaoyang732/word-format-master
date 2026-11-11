@@ -68,9 +68,21 @@ def xml_value(node) -> str:
 
 def element(parent, name: str):
     child = parent.find(qn("w:" + name))
+    is_leading_pr = name in {"pPr", "rPr", "tblPr", "trPr", "tcPr"} and parent.tag in {
+        qn("w:p"),
+        qn("w:r"),
+        qn("w:tbl"),
+        qn("w:tr"),
+        qn("w:tc"),
+    }
     if child is None:
         child = OxmlElement("w:" + name)
-        parent.append(child)
+        if is_leading_pr:
+            parent.insert(0, child)
+        else:
+            parent.append(child)
+    elif is_leading_pr and parent.index(child) != 0:
+        parent.insert(0, child)
     return child
 
 
@@ -78,7 +90,9 @@ def sanitize_properties(pr, property_name: str):
     clone = copy.deepcopy(pr)
     if clone is None:
         return ""
-    tags = FONT_TAGS.get(property_name, PARAGRAPH_TAGS.get(property_name, ()))
+    tags = ("vertAlign",) if property_name == "citation_display" else FONT_TAGS.get(
+        property_name, PARAGRAPH_TAGS.get(property_name, ())
+    )
     for tag in tags:
         node = clone.find(qn("w:" + tag))
         if node is None:

@@ -114,6 +114,14 @@ def read_complex_state(index, name):
         managed = [
             p for p in doc.paragraphs if paragraph_style_name(doc, p._p).startswith("WFM TOC")
         ]
+        native_entries = [
+            p
+            for p in doc.paragraphs
+            if re.fullmatch(
+                r"(?:toc|目录)[1-9]",
+                paragraph_style_name(doc, p._p).lower().replace(" ", ""),
+            )
+        ]
         trailing = [
             p
             for p in managed
@@ -165,9 +173,16 @@ def read_complex_state(index, name):
         return {
             "titles": [p.text for p in title_paragraphs],
             "title_formats": formats(title_paragraphs),
-            "field_formats": formats([p for p in managed if p.style.name == "WFM TOC Field"]),
+            "field_formats": formats(
+                [p for p in managed if p.style.name == "WFM TOC Field"] or native_entries
+            ),
+            "entry_formats": formats(native_entries),
             "break_formats": formats(trailing),
-            "codes": [n.text or "" for p in managed for n in p._p.iter(qn("w:instrText"))],
+            "codes": [
+                n.text or ""
+                for p in (managed or native_entries)
+                for n in p._p.iter(qn("w:instrText"))
+            ],
             "trailing_break": bool(trailing),
             "heading_count": len(headings(doc)),
             "results_by_level": {str(level): result_status(doc, level) for level in range(1, 10)},
@@ -541,9 +556,29 @@ def atomic_projection(document, index, refs, cap):
     Text runs are flattened to character tokens so harmless splitting does not
     conceal bookmark/hyperlink/object changes or adjacent-character formatting.
     """
+    if cap.property == "citation_display":
+        from .citation_display import CitationReader
+
+        reader = CitationReader(index)
+        refs = [
+            {**ref, "ranges": [(mark.start, mark.end) for mark in marks],
+             "controls": {run for mark in marks for run in mark.controls}}
+            for ref in refs if (marks := reader.marks(ref["id"]))
+        ]
     targets = {
         index.elements.get(r["id"]): r for r in refs if index.elements.get(r["id"]) is not None
     }
+    if cap.property in FONT_TAGS or cap.property in PARAGRAPH_TAGS:
+        from .properties import paragraph_style
+
+        for r in refs:
+            if r["kind"] == "paragraph" and index.records.get(r["id"], {}).get("role") == "toc":
+                p_elem = index.elements.get(r["id"])
+                style = paragraph_style(document, p_elem) if p_elem is not None else None
+                if style is not None:
+                    norm = (style.name or "").lower().replace(" ", "")
+                    if re.fullmatch(r"(?:toc|目录)[1-9]", norm):
+                        targets.setdefault(style.element, {"kind": "style", "id": "style:" + style.name})
     new_style_names = {
         r["id"][6:].casefold() for r in refs if r["kind"] == "style" and r.get("xml_sha256") is None
     }
@@ -587,7 +622,8 @@ def atomic_projection(document, index, refs, cap):
                 tokens = []
                 original_format = xml_value(rpr) if rpr is not None and len(rpr) else ""
                 selected_format = (
-                    sanitize_properties(rpr, prop) if prop in FONT_TAGS else original_format
+                    sanitize_properties(rpr, prop)
+                    if prop in FONT_TAGS or prop == "citation_display" else original_format
                 )
                 attributes = tuple(sorted(child.attrib.items()))
                 for sub in child:
@@ -595,12 +631,27 @@ def atomic_projection(document, index, refs, cap):
                         continue
                     if sub.tag == qn("w:t"):
                         for char in sub.text or "":
-                            selected = ref.get("start", 0) <= offset < ref.get("end", 10**12)
+                            selected = (
+                                any(start <= offset < end for start, end in ref["ranges"])
+                                if prop == "citation_display"
+                                else ref.get("start", 0) <= offset < ref.get("end", 10**12)
+                            )
                             fmt = selected_format if selected else original_format
                             tokens.append(("char", char, fmt, attributes))
                             offset += 1
                     else:
-                        tokens.append(("object", xml_value(sub), xml_value(rpr)))
+                        is_formatted_tab = (
+                            ref["kind"] == "paragraph"
+                            and prop in FONT_TAGS
+                            and sub.tag == qn("w:tab")
+                            and all(c.tag in {qn("w:rPr"), qn("w:tab")} for c in child)
+                        )
+                        fmt = (
+                            selected_format
+                            if (child in ref.get("controls", ()) or is_formatted_tab)
+                            else xml_value(rpr)
+                        )
+                        tokens.append(("object", xml_value(sub), fmt))
                 return tokens
             if child.tag == qn("w:pPr"):
                 return []
@@ -830,7 +881,8 @@ def structural_snapshot(index, cap, params, refs):
         toc_nodes = {
             index.elements[oid]: index.records[oid]["heading_level"]
             for oid in index.top_ids
-            if index.records[oid].get("outline_level") is None
+            if index.records[oid].get("role") == "heading"
+            and index.records[oid].get("outline_level") is None
             and index.records[oid].get("heading_level")
             and index.records[oid]["heading_level"] <= params.get("max_heading_level", 3)
         }

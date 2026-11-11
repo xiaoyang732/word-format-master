@@ -351,6 +351,26 @@ def render_document(
         staged_manifest = stage / "render-manifest.json"
         staged_manifest.write_text(json.dumps(page_manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         os.replace(staged_manifest, manifest_path)
+    from word_format.remediation import build_visual_report_template
+
+    manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    template_review_path = (
+        target.parent / "visual-report.template.json"
+        if target.name == "render"
+        else target / "visual-report.template.json"
+    )
+    if template_review_path.resolve() != input_path:
+        visual_template = build_visual_report_template(
+            source_sha256=source_sha256,
+            manifest_path=str(manifest_path),
+            manifest_sha256=manifest_sha256,
+            selected_method=selected,
+            page_count=len(pages),
+        )
+        template_review_path.write_text(
+            json.dumps(visual_template, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
     return {
         "status": "rendered",
         "requested_method": method,
@@ -359,6 +379,7 @@ def render_document(
         "page_count": len(pages),
         "pages": [str(page) for page in pages],
         "manifest": str(manifest_path),
+        "visual_report_template": str(template_review_path),
         "pdf": str(final_pdf) if emit_pdf else None,
     }
 

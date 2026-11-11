@@ -135,8 +135,11 @@ def annotate(index):
         elif record.get("module") == "references":
             if MODULE_MARKERS["references"].fullmatch(text):
                 record["semantic_role"] = "reference_heading"
-            elif record.get("role") in {"list", "body", "module_body"}:
+            elif record.get("role") in {"reference", "list", "body", "module_body"}:
                 record["semantic_role"] = "reference_item"
+        elif record.get("role") == "toc":
+            if MODULE_MARKERS["toc"].fullmatch(text):
+                record["semantic_role"] = "toc_heading"
         elif MODULE_MARKERS["references"].fullmatch(text):
             record["semantic_role"] = "reference_heading"
         elif MODULE_MARKERS["declaration"].fullmatch(text):

@@ -14,6 +14,7 @@ from document_structure import (
     validate_module_order,
 )
 
+from .citation_display import DISPLAY_VALUES
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .namespaces import qn
 
@@ -388,24 +389,40 @@ def validate_section(section, data):
                 {
                     "paragraph_index",
                     "paragraph_sha256",
+                    "text_contains",
                     "reference_ids",
                     "citation_text",
+                    "display",
                     "insert",
                     "spacing",
                     "confidence",
                     "reason",
                     "char_offset",
                 },
-                {"paragraph_index", "paragraph_sha256", "reference_ids", "citation_text"},
+                {"reference_ids", "citation_text"},
                 "citation placement",
             )
-            number(placement["paragraph_index"], 0, 1000000, "paragraph_index", True)
+            if (
+                "paragraph_index" not in placement
+                and "paragraph_sha256" not in placement
+                and "text_contains" not in placement
+            ):
+                raise FormatError(
+                    "citation placement requires paragraph_index, paragraph_sha256, or text_contains"
+                )
+            if "paragraph_index" in placement and placement["paragraph_index"] is not None:
+                number(placement["paragraph_index"], 0, 1000000, "paragraph_index", True)
             if not isinstance(placement["reference_ids"], list) or not placement["reference_ids"]:
                 raise FormatError("reference_ids must be a nonempty array")
             for value in placement["reference_ids"]:
                 text_value(value, "reference ID")
-            text_value(placement["paragraph_sha256"], "paragraph_sha256")
+            if "paragraph_sha256" in placement and placement["paragraph_sha256"] is not None:
+                text_value(placement["paragraph_sha256"], "paragraph_sha256")
+            if "text_contains" in placement and placement["text_contains"] is not None:
+                text_value(placement["text_contains"], "text_contains")
             text_value(placement["citation_text"], "citation_text")
+            if placement.get("display", "inline") not in tuple(DISPLAY_VALUES):
+                raise FormatError("citation display must be inline or superscript")
             if "confidence" in placement:
                 number(placement["confidence"], 0, 1, "confidence")
     else:

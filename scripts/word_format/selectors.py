@@ -183,16 +183,42 @@ def resolve_targets(index, target, allowed):
         candidates = [r for r in candidates if r["id"] == target["id"]]
     for field in ("role", "module", "part", "semantic_role", "language", "module_occurrence"):
         if field in target:
-            candidates = [r for r in candidates if r.get(field) == target[field]]
+            val = target[field]
+            if field == "semantic_role" and val in {"reference_item", "reference_entry"}:
+                candidates = [
+                    r for r in candidates if r.get(field) in {"reference_item", "reference_entry"}
+                ]
+            elif (
+                field == "role"
+                and val == "reference"
+                and target.get("module") == "references"
+            ):
+                candidates = [
+                    r
+                    for r in candidates
+                    if r.get("role") == "reference"
+                    or (
+                        r.get("module") == "references"
+                        and r.get("semantic_role") in {"reference_item", "reference_entry"}
+                    )
+                ]
+            else:
+                candidates = [r for r in candidates if r.get(field) == val]
     if "level" in target:
         level = number(target["level"], 1, 9, "level", True)
-        candidates = [r for r in candidates if r.get("heading_level") == level]
+        candidates = [
+            r
+            for r in candidates
+            if (r.get("toc_level") if r.get("role") == "toc" else r.get("heading_level")) == level
+        ]
     chapter = target.get("chapter_id")
     if "chapter_text" in target:
         matches = [
             r
             for r in index.records.values()
-            if r.get("heading_level") == 1 and r.get("text") == target["chapter_text"]
+            if r.get("role") == "heading"
+            and r.get("heading_level") == 1
+            and r.get("text") == target["chapter_text"]
         ]
         if len(matches) != 1:
             raise FormatError(
@@ -200,7 +226,11 @@ def resolve_targets(index, target, allowed):
             )
         chapter = matches[0]["id"]
     if chapter:
-        if chapter not in index.records or index.records[chapter].get("heading_level") != 1:
+        if (
+            chapter not in index.records
+            or index.records[chapter].get("role") != "heading"
+            or index.records[chapter].get("heading_level") != 1
+        ):
             raise FormatError("chapter_id must reference a level-1 heading", "needs_clarification")
         candidates = [r for r in candidates if r.get("chapter_id") == chapter]
     if "table_id" in target:
@@ -231,6 +261,16 @@ def resolve_targets(index, target, allowed):
         and not any(k in target for k in ("id", "ids", "part"))
     ):
         candidates = [r for r in candidates if r.get("top_level")]
+    if (
+        kind == "paragraph"
+        and target.get("module") == "cover"
+        and target.get("semantic_role") == "cover_body"
+        and "text" not in target
+        and not any(k in target for k in ("id", "ids"))
+    ):
+        non_empty = [r for r in candidates if r.get("text", "").strip()]
+        if non_empty:
+            candidates = non_empty
     for field in ("text", "contains"):
         if field in target:
             value = text_value(target[field], field)
