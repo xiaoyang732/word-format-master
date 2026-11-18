@@ -17,8 +17,8 @@ MAX_PARTS = 5000  # Maximum number of parts in a DOCX zip archive
 MAX_UNCOMPRESSED = 250 * 1024 * 1024  # 250 MiB uncompressed size limit
 
 # Rendering
-RENDER_METHODS = {"auto", "word", "libreoffice"}
-RENDER_ORDER = ["word", "libreoffice"]
+RENDER_METHODS = {"auto", "word", "wps", "libreoffice"}
+RENDER_ORDER = ("word", "wps", "libreoffice")
 VISUAL_MODEL_SELECTIONS = {"auto", "current", "custom"}
 SUPPORTED_SPEC_SCHEMA_VERSIONS = {"1.0"}
 

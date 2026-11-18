@@ -72,52 +72,67 @@ def _find_word(runtime_root: Path) -> Path | None:
     return _existing_file(candidates)
 
 
-def _word_application_com_server() -> Path | None:
-    """Resolve the executable registered for the Windows Word.Application COM class.
-
-    WPS Office registers this class for Word-compatible automation on some
-    Windows systems. Its ExportAsFixedFormat implementation can render DOCX
-    files even when WINWORD.EXE is not installed.
-    """
+def _com_local_server_executable(prog_ids: tuple[str, ...]) -> tuple[str, Path] | None:
+    """Resolve the first existing executable registered for any of ``prog_ids``."""
     if os.name != "nt":
         return None
     try:
         import winreg
     except ImportError:
         return None
-    clsid = None
-    for root, subkey in (
-        (winreg.HKEY_CURRENT_USER, r"Software\Classes\Word.Application\CLSID"),
-        (winreg.HKEY_LOCAL_MACHINE, r"Software\Classes\Word.Application\CLSID"),
-        (winreg.HKEY_CLASSES_ROOT, r"Word.Application\CLSID"),
-    ):
-        try:
-            with winreg.OpenKey(root, subkey) as key:
-                value, _ = winreg.QueryValueEx(key, None)
-                if value:
-                    clsid = str(value)
-                    break
-        except OSError:
+    for prog_id in prog_ids:
+        clsid = None
+        for root, subkey in (
+            (winreg.HKEY_CURRENT_USER, rf"Software\Classes\{prog_id}\CLSID"),
+            (winreg.HKEY_LOCAL_MACHINE, rf"Software\Classes\{prog_id}\CLSID"),
+            (winreg.HKEY_CLASSES_ROOT, rf"{prog_id}\CLSID"),
+        ):
+            try:
+                with winreg.OpenKey(root, subkey) as key:
+                    value, _ = winreg.QueryValueEx(key, None)
+                    if value:
+                        clsid = str(value)
+                        break
+            except OSError:
+                continue
+        if not clsid:
             continue
-    if not clsid:
-        return None
-    for root, prefix in (
-        (winreg.HKEY_CURRENT_USER, r"Software\Classes\CLSID"),
-        (winreg.HKEY_LOCAL_MACHINE, r"Software\Classes\CLSID"),
-        (winreg.HKEY_CLASSES_ROOT, "CLSID"),
-    ):
-        try:
-            with winreg.OpenKey(root, rf"{prefix}\{clsid}\LocalServer32") as key:
-                command, _ = winreg.QueryValueEx(key, None)
-        except OSError:
-            continue
-        # A COM local server commonly has `"C:\\path\\app.exe" /Automation`.
-        match = re.match(r'\s*"([^"]+\.exe)"|\s*(.+?\.exe)(?:\s|$)', str(command), re.IGNORECASE)
-        executable = match.group(1) or match.group(2) if match else None
-        if executable:
-            path = Path(executable)
-            if path.is_file():
-                return path.resolve()
+        for root, prefix in (
+            (winreg.HKEY_CURRENT_USER, r"Software\Classes\CLSID"),
+            (winreg.HKEY_LOCAL_MACHINE, r"Software\Classes\CLSID"),
+            (winreg.HKEY_CLASSES_ROOT, "CLSID"),
+        ):
+            try:
+                with winreg.OpenKey(root, rf"{prefix}\{clsid}\LocalServer32") as key:
+                    command, _ = winreg.QueryValueEx(key, None)
+            except OSError:
+                continue
+            # A COM local server commonly has `"C:\\path\\app.exe" /Automation`.
+            match = re.match(
+                r'\s*"([^"]+\.exe)"|\s*(.+?\.exe)(?:\s|$)', str(command), re.IGNORECASE
+            )
+            executable = match.group(1) or match.group(2) if match else None
+            if executable:
+                path = Path(executable)
+                if path.is_file():
+                    return prog_id, path.resolve()
+    return None
+
+
+def _word_application_com_server() -> Path | None:
+    """Resolve the executable registered for the Windows Word.Application COM class."""
+    found = _com_local_server_executable(("Word.Application",))
+    return found[1] if found else None
+
+
+def _find_wps() -> tuple[str, Path] | None:
+    """Resolve WPS Writer COM automation server (KWPS.Application / WPS.Application)."""
+    found = _com_local_server_executable(("KWPS.Application", "WPS.Application"))
+    if found is not None:
+        return found
+    registered_word = _word_application_com_server()
+    if registered_word is not None and registered_word.name.casefold() == "wps.exe":
+        return "Word.Application", registered_word
     return None
 
 
@@ -224,19 +239,33 @@ def detect_renderers(runtime_root: str | Path) -> dict[str, Any]:
         # Installed WINWORD does not prove that Word.Application starts Word.
         word = None
         word_method = "Word.Application registration mismatch"
-    elif not word:
+    elif not word and registered and registered.name.casefold() == "winword.exe":
         word = registered
-        if word:
-            word_method = "Windows Word.Application COM"
+        word_method = "Windows Word.Application COM"
+    wps_found = _find_wps()
+    wps_prog_id = wps_found[0] if wps_found else None
+    wps_path = wps_found[1] if wps_found else None
+    wps_entry = _runtime_entry(
+        "wps",
+        "WPS Office",
+        wps_path,
+        f"Windows {wps_prog_id} COM" if wps_prog_id else "Windows WPS COM",
+    )
+    wps_entry["prog_id"] = wps_prog_id
     libreoffice = _find_libreoffice(root)
-    preferred = "word" if word else "libreoffice" if libreoffice else None
+    preferred = (
+        "word" if word else "wps" if wps_path else "libreoffice" if libreoffice else None
+    )
     pdf_rasterizer = detect_pdf_rasterizer()
     word_entry = _runtime_entry("word", word_name, word, word_method)
     word_entry["registered_server"] = str(registered) if registered else None
     word_entry["diagnostic"] = word_method
     return {
         "word": word_entry,
-        "libreoffice": _runtime_entry("libreoffice", "LibreOffice", libreoffice, "installed or managed runtime"),
+        "wps": wps_entry,
+        "libreoffice": _runtime_entry(
+            "libreoffice", "LibreOffice", libreoffice, "installed or managed runtime"
+        ),
         "preferred": preferred,
         "renderer_ready": preferred is not None,
         "pdf_rasterizer": pdf_rasterizer,

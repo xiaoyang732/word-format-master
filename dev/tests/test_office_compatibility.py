@@ -221,9 +221,10 @@ class OfficeCompatibilityTests(unittest.TestCase):
             ],
         )
         instructions = [
-            n.get(qn("w:instr")) for n in result.sections[0].header._element.iter(qn("w:fldSimple"))
+            n.text.strip()
+            for n in result.sections[0].header._element.iter(qn("w:instrText"))
         ]
-        self.assertEqual(instructions, ["STYLEREF 1"])
+        self.assertEqual(instructions, ["STYLEREF 1 \\* CHARFORMAT"])
 
     def test_custom_style_with_heading_like_name_is_not_builtin(self):
         from word_format.headers import style_reference
@@ -671,6 +672,147 @@ class OfficeCompatibilityTests(unittest.TestCase):
         self.assertIn((ref_id, "font_size_pt"), props)
         self.assertIn((ref_id, "first_line_indent"), props)
         self.assertIn((ref_id, "line_spacing_pt"), props)
+
+    def test_numbering_order_repair_handles_document_without_numbering_part(self):
+        doc = Document()
+        for rel_id, rel in list(doc.part.rels.items()):
+            if "numbering" in rel.reltype:
+                doc.part.rels.pop(rel_id)
+        doc.add_paragraph("无编号部件文档")
+        result = self.execute(
+            doc,
+            [{"action": "numbering.order.repair", "target": {"type": "document"}, "params": {}}],
+        )
+        self.assertEqual(result.paragraphs[0].text, "无编号部件文档")
+
+    def test_caption_position_set_allows_id_shift_during_verify_plan(self):
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls
+
+        doc = Document()
+        doc.add_paragraph("图 1 架构示意图")
+        fig_p = doc.add_paragraph()
+        fig_p._p.append(parse_xml(f'<w:r {nsdecls("w")}><w:drawing/></w:r>'))
+        doc.add_paragraph("后续正文")
+        result = self.execute(
+            doc,
+            [
+                {
+                    "action": "caption.position.set",
+                    "target": {"type": "document"},
+                    "params": {"role": "figure", "position": "below"},
+                },
+                {
+                    "action": "font.size.set",
+                    "target": {"type": "paragraph", "contains": "图 1"},
+                    "params": {"value": 10.5},
+                },
+            ],
+        )
+        self.assertIn("图 1", result.paragraphs[1].text)
+
+    def test_wps_backend_isolation_for_detection_conversion_and_refresh(self):
+        import runtime_detection
+        from word_format.doc_loader import _convert_legacy_word_file
+
+        with (
+            patch.object(
+                runtime_detection,
+                "_find_word",
+                return_value=Path(r"C:\Program Files\Microsoft Office\root\Office16\WINWORD.EXE"),
+            ),
+            patch.object(
+                runtime_detection,
+                "_word_application_com_server",
+                return_value=Path(r"C:\Users\demo\AppData\Local\Kingsoft\WPS Office\wps.exe"),
+            ),
+            patch.object(
+                runtime_detection,
+                "_find_wps",
+                return_value=(
+                    "KWPS.Application",
+                    Path(r"C:\Users\demo\AppData\Local\Kingsoft\WPS Office\wps.exe"),
+                ),
+            ),
+            patch.object(runtime_detection, "_find_libreoffice", return_value=None),
+        ):
+            detected = runtime_detection.detect_renderers(self.folder)
+            self.assertFalse(detected["word"]["available"])
+            self.assertTrue(detected["wps"]["available"])
+            self.assertEqual(detected["preferred"], "wps")
+
+        staged_wps = self.folder / "legacy.wps"
+        staged_wps.write_bytes(b"\xd0\xcf\x11\xe0LEGACY-WPS")
+        converted_out = self.folder / "converted.docx"
+        sample_doc = Document()
+        sample_doc.add_paragraph("WPS converted")
+        sample_docx_bytes = self.folder / "backing.docx"
+        sample_doc.save(sample_docx_bytes)
+
+        calls = []
+
+        def fake_wps_convert(src, dst):
+            calls.append(("wps", src.suffix.lower()))
+            dst.write_bytes(sample_docx_bytes.read_bytes())
+
+        with (
+            patch(
+                "word_format.doc_loader.detect_renderers",
+                return_value={
+                    "word": {"available": True},
+                    "wps": {"available": True},
+                    "libreoffice": {"available": False},
+                },
+            ),
+            patch("word_format.doc_loader._wps_com_to_docx", side_effect=fake_wps_convert),
+            patch(
+                "word_format.doc_loader._word_com_to_docx",
+                side_effect=AssertionError("word should not precede wps for .wps files"),
+            ),
+        ):
+            _convert_legacy_word_file(staged_wps, converted_out)
+        self.assertEqual(calls, [("wps", ".wps")])
+
+        # Auto refresh falls back to WPS when Word is unavailable.
+        sample_doc.save(self.source)
+        with (
+            patch(
+                "runtime_detection.detect_renderers",
+                return_value={"word": {"available": False}, "wps": {"available": True}},
+            ),
+            patch(
+                "office_automation.automate_wps",
+                return_value={
+                    "application": {"name": "WPS Office", "version": "12.0"},
+                    "fields": [],
+                    "field_update_errors": [],
+                    "pagination_stable": True,
+                    "update_passes": 1,
+                    "coverage": {"story_types": [1]},
+                },
+            ),
+        ):
+            refreshed = refresh_document_fields(self.source, self.output, overwrite=True)
+        self.assertEqual(refreshed["method"], "wps_com")
+        self.assertEqual(refreshed["refresh_status"], "wps_refreshed")
+
+    def test_shipped_course_report_template_is_clean_of_personal_metadata_and_nameless_styles(self):
+        import zipfile
+        from xml.etree import ElementTree as ET
+
+        tpl = ROOT / "templates/reference/general-course-report/通用课程报告模板.docx"
+        with zipfile.ZipFile(tpl) as zf:
+            core = ET.fromstring(zf.read("docProps/core.xml"))
+            for elem in core.iter():
+                if elem.tag.endswith(("lastModifiedBy", "creator")):
+                    self.assertFalse((elem.text or "").strip(), f"Metadata leaked in {elem.tag}")
+            styles = ET.fromstring(zf.read("word/styles.xml"))
+            ns = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
+            for st in styles.findall("w:style", ns):
+                self.assertIsNotNone(st.find("w:name", ns))
+        doc = Document(tpl)
+        self.assertEqual(sequence_warnings(doc.styles.element), [])
+        self.assertEqual(sequence_warnings(doc.part.numbering_part.element), [])
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ if __name__ == "__main__" and len(sys.argv) > 1 and sys.argv[1] == "doctor":
 
     raise SystemExit(doctor_main(sys.argv[2:]))
 
+from config import RENDER_METHODS
 from json_output import ensure_not_in_skill_root, ensure_protected_paths, write_json
 from word_format import (
     apply_plan,
@@ -160,11 +161,17 @@ def main():
     p.add_argument("--overwrite", action="store_true")
     p = commands.add_parser(
         "refresh-fields",
-        help="Update TOC, REF, SEQ and STYLEREF fields via Word COM and strip cached page breaks",
+        help="Update TOC, REF, SEQ and STYLEREF fields via Word/WPS COM and strip cached page breaks",
     )
     p.add_argument("input", help="Input DOCX path")
     p.add_argument("destination", nargs="?", help="Output DOCX path (omit when using --in-place)")
     p.add_argument("--in-place", action="store_true", help="Refresh fields in place on input DOCX")
+    p.add_argument(
+        "--method",
+        choices=["auto", "word", "wps"],
+        default="auto",
+        help="COM engine for field refresh (default: auto prefers Word, falls back to WPS when Word is absent)",
+    )
     p.add_argument(
         "--keep-last-rendered-page-breaks",
         action="store_true",
@@ -179,7 +186,7 @@ def main():
     p.add_argument("--render-manifest", help="render_docx.py render-manifest.json")
     p.add_argument(
         "--render-method",
-        choices=["auto", "word", "libreoffice"],
+        choices=sorted(RENDER_METHODS),
         help="Defaults to the plan's renderer preference",
     )
     p.add_argument("--output")
@@ -388,6 +395,7 @@ def main():
                 in_place=args.in_place,
                 overwrite=args.overwrite,
                 strip_last_rendered_page_breaks=not args.keep_last_rendered_page_breaks,
+                method=args.method,
             )
         else:
             result = verify_plan(

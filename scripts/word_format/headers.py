@@ -145,6 +145,7 @@ def editable_header(index, ref, variant):
 
 
 def set_content(index, ref, params):
+    cached_heading = ""
     if params["mode"] == "chapter_title":
         name = params["style_name"]
         style = next((
@@ -156,14 +157,19 @@ def set_content(index, ref, params):
                 "STYLEREF requires an existing paragraph style", "needs_clarification"
             )
         sid = style.style_id
-        if not any(
-            p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")) is not None
-            and p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")).get(qn("w:val")) == sid
+        matching_headings = [
+            p
             for p in index.document.element.body.iter(qn("w:p"))
-        ):
+            if p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")) is not None
+            and p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")).get(qn("w:val")) == sid
+        ]
+        if not matching_headings:
             raise FormatError(
                 "STYLEREF style has no body heading to reference", "needs_clarification"
             )
+        cached_heading = "".join(
+            t.text or "" for t in matching_headings[0].iter(qn("w:t"))
+        ).strip()
     container = editable_header(index, ref, params["variant"])
     page_paragraphs = [
         p for p in page_number_paragraphs(container._element) if p.getparent() is container._element
@@ -190,14 +196,20 @@ def set_content(index, ref, params):
     if params["mode"] == "text":
         p.add_run(params["text"])
     else:
-        p.add_run(params["prefix"])
-        field = OxmlElement("w:fldSimple")
-        field.set(qn("w:instr"), f"STYLEREF {style_reference(style)}")
-        field.set(qn("w:dirty"), "true")
-        field.append(OxmlElement("w:r"))
-        p._p.append(field)
+        if params["prefix"]:
+            p.add_run(params["prefix"])
+        from .fields import complex_field_runs
+
+        for run in complex_field_runs(
+            f"STYLEREF {style_reference(style)} \\* CHARFORMAT",
+            cached_text=cached_heading,
+        ):
+            p._p.append(run)
     if saved_rpr is not None:
         for run in p._p.iter(qn("w:r")):
+            existing_rpr = run.find(qn("w:rPr"))
+            if existing_rpr is not None:
+                run.remove(existing_rpr)
             run.insert(0, copy.deepcopy(saved_rpr))
     for paragraph in page_paragraphs:
         container._element.append(paragraph)

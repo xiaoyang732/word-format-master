@@ -131,15 +131,20 @@ def refresh_document_fields(
     overwrite: bool = False,
     strip_last_rendered_page_breaks: bool = True,
     timeout: int = 120,
+    method: str = "auto",
 ) -> dict:
-    """Update TOC, REF, SEQ, and STYLEREF fields via Word COM and strip cached page-break markers."""
+    """Update TOC, REF, SEQ, and STYLEREF fields via Word/WPS COM and strip cached page-break markers."""
     import os
     from pathlib import Path
     import shutil
     import uuid
+    from config import DEFAULT_RUNTIME_ROOT
     from docx import Document
+    from runtime_detection import detect_renderers
     from .contracts import FormatError, SCHEMA_VERSION, output_path, sha256, source_path
 
+    if method not in {"auto", "word", "wps"}:
+        raise FormatError("Field refresh method must be auto, word, or wps")
     src_path = source_path(input_path)
     src_hash = sha256(src_path)
     if in_place:
@@ -155,24 +160,40 @@ def refresh_document_fields(
                 "Output already exists; choose a new filename or explicitly request overwrite"
             )
 
+    selected_backend = method
+    if selected_backend == "auto":
+        runtime = detect_renderers(DEFAULT_RUNTIME_ROOT)
+        selected_backend = (
+            "wps"
+            if not runtime.get("word", {}).get("available")
+            and runtime.get("wps", {}).get("available")
+            else "word"
+        )
+    backend_label = "Word" if selected_backend == "word" else "WPS"
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = out_path.with_name(f".{out_path.stem}.{uuid.uuid4().hex}.docx")
     shutil.copy2(src_path, temp_path)
     try:
-        from office_automation import automate_word
+        from office_automation import automate_word, automate_wps
         from .office_validation import field_errors
 
+        runner = automate_word if selected_backend == "word" else automate_wps
         try:
-            office = automate_word(temp_path, mode="refresh", timeout=timeout)
+            office = runner(temp_path, mode="refresh", timeout=timeout)
         except RuntimeError as exc:
-            raise FormatError(f"Word field refresh failed; output not published: {exc}") from exc
+            raise FormatError(f"{backend_label} field refresh failed; output not published: {exc}") from exc
         errors = field_errors(office)
         if errors:
-            raise FormatError(f"Word field refresh returned {len(errors)} erroneous field result(s): {errors[:5]}")
+            raise FormatError(
+                f"{backend_label} field refresh returned {len(errors)} erroneous field result(s): {errors[:5]}"
+            )
         if not office["pagination_stable"] or any(
             item["pass"] == office["update_passes"] for item in office["field_update_errors"]
         ):
-            raise FormatError("Word field updates or pagination did not stabilize; output not published")
+            raise FormatError(
+                f"{backend_label} field updates or pagination did not stabilize; output not published"
+            )
         removed_breaks = 0
         document = Document(temp_path)
         _sync_toc_entry_runs_from_styles(document)
@@ -195,8 +216,8 @@ def refresh_document_fields(
         "input": {"path": str(src_path), "sha256": src_hash},
         "output": str(out_path),
         "output_sha256": sha256(out_path),
-        "method": "word_com",
-        "refresh_status": "word_refreshed",
+        "method": "word_com" if selected_backend == "word" else "wps_com",
+        "refresh_status": "word_refreshed" if selected_backend == "word" else "wps_refreshed",
         "application": office["application"],
         "coverage": office["coverage"],
         "stripped_last_rendered_page_breaks": removed_breaks,

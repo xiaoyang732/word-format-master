@@ -9,6 +9,7 @@ import subprocess
 import sys
 import time
 
+from config import RENDER_METHODS
 from json_output import ensure_not_in_skill_root, ensure_protected_paths, write_json
 from pipeline_state import PipelineState, digest, task_lock
 from word_format.templates import load_template
@@ -56,7 +57,7 @@ def run_pipeline(input_path, output_path, *, template=None, profile=None, resolu
                 overwrite = True
             if not render and (saved_id.get("render") or visual_report):
                 render = bool(saved_id.get("render"))
-            if render_method == "auto" and saved_id.get("render_method") in {"word", "libreoffice"}:
+            if render_method == "auto" and saved_id.get("render_method") in (RENDER_METHODS - {"auto"}):
                 render_method = saved_id["render_method"]
             saved_q = saved_id.get("quality_targets")
             if isinstance(saved_q, dict):
@@ -99,7 +100,7 @@ def run_pipeline(input_path, output_path, *, template=None, profile=None, resolu
         raise ValueError("resolutions and match_structure require a profile")
     if not 0 <= render_retries <= 3 or render_timeout < 1:
         raise ValueError("渲染重试次数须为 0–3，超时须大于 0")
-    if render_method not in {"auto", "word", "libreoffice"}:
+    if render_method not in RENDER_METHODS:
         raise ValueError("Unknown renderer")
     if visual_report and not render:
         raise ValueError("视觉验收报告需要 --render 及有效渲染证据")
@@ -339,7 +340,7 @@ def main():
         parser.add_argument("--" + name, type=int)
     parser.add_argument("--render-retries", type=int, default=0)
     parser.add_argument("--render-timeout", type=int, default=300)
-    parser.add_argument("--render-method", choices=["auto", "word", "libreoffice"], default="auto")
+    parser.add_argument("--render-method", choices=sorted(RENDER_METHODS), default="auto")
     args = vars(parser.parse_args())
     try:
         run_pipeline(args.pop("input"), args.pop("output"), **args)

@@ -5,13 +5,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from config import RENDER_METHODS
+
 from .contracts import FormatError, number, require_keys, sha256, text_value
+
+CONCRETE_RENDERERS = RENDER_METHODS - {"auto"}
 
 
 def verify_visual_evidence(output, report, manifest_path=None, requested_method="auto"):
     from verify_output import validate_visual_report
 
-    if requested_method not in {"auto", "word", "libreoffice"}:
+    if requested_method not in RENDER_METHODS:
         raise FormatError("Unknown visual renderer")
     if not isinstance(report, dict):
         raise FormatError("Visual report must be an object")
@@ -66,7 +70,7 @@ def verify_visual_evidence(output, report, manifest_path=None, requested_method=
     if manifest["source_sha256"] != output_hash or report.get("output_sha256") != output_hash:
         raise FormatError("Visual evidence does not match the current output SHA-256")
     selected = manifest["selected_method"]
-    if selected not in {"word", "libreoffice"} or (
+    if selected not in CONCRETE_RENDERERS or (
         requested_method != "auto" and requested_method != selected
     ):
         raise FormatError("Visual evidence used a different renderer than requested")

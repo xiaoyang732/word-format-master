@@ -594,8 +594,9 @@ def _validate_report_checks(plan, report):
         in {
             "toc.configure",
             "heading.numbering.configure",
+            "heading.scheme.configure",
             "section.break.next_page.insert",
-            "caption.position.configure",
+            "caption.position.set",
             "page_number.configure",
         }
         for item in plan["operations"]

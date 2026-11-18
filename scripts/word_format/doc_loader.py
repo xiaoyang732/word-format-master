@@ -26,6 +26,8 @@ OOXML_TEMPLATE_SUFFIXES = frozenset({".docx", ".dotx"})
 LEGACY_WORD_SUFFIXES = frozenset({".doc", ".dot", ".wps"})
 SUPPORTED_WORD_SUFFIXES = OOXML_TEMPLATE_SUFFIXES | LEGACY_WORD_SUFFIXES
 _LEGACY_CACHE_DIR = Path(tempfile.gettempdir()) / "word-format-master-doc-cache"
+_MAX_CACHE_FILES = 64
+_MAX_CACHE_BYTES = 128 * 1024 * 1024
 
 _DOTX_CONTENT_TYPE = (
     b"application/vnd.openxmlformats-officedocument.wordprocessingml.template.main+xml"
@@ -56,12 +58,45 @@ def _rewrite_dotx_bytes(path: Path) -> bytes:
     return buffer.getvalue()
 
 
+def _prune_legacy_cache(cache_dir: Path, *, keep: Path | None = None) -> None:
+    """Bound the temporary converted-DOCX cache by file count and total bytes."""
+    try:
+        entries = []
+        for candidate in cache_dir.glob("*.docx"):
+            if candidate.name.startswith(".") or (keep is not None and candidate == keep):
+                continue
+            try:
+                stat = candidate.stat()
+                entries.append((stat.st_mtime, stat.st_size, candidate))
+            except OSError:
+                continue
+        entries.sort(key=lambda item: item[0], reverse=True)
+        total_bytes = sum(item[1] for item in entries)
+        while entries and (len(entries) > _MAX_CACHE_FILES or total_bytes > _MAX_CACHE_BYTES):
+            _, size, oldest = entries.pop()
+            total_bytes -= size
+            try:
+                oldest.unlink(missing_ok=True)
+            except OSError:
+                pass
+    except OSError:
+        pass
+
+
 def _word_com_to_docx(staged_source: Path, output_docx: Path) -> None:
     from office_automation import automate_word
 
     automate_word(staged_source, output_docx, mode="convert", timeout=120)
     if not _is_valid_ooxml_docx(output_docx):
         raise RuntimeError("Microsoft Word did not produce a readable DOCX")
+
+
+def _wps_com_to_docx(staged_source: Path, output_docx: Path) -> None:
+    from office_automation import automate_wps
+
+    automate_wps(staged_source, output_docx, mode="convert", timeout=120)
+    if not _is_valid_ooxml_docx(output_docx):
+        raise RuntimeError("WPS Office did not produce a readable DOCX")
 
 
 def _libreoffice_to_docx(staged_source: Path, output_docx: Path, executable: Path) -> None:
@@ -106,20 +141,30 @@ def _convert_legacy_word_file(staged_source: Path, output_docx: Path) -> None:
     """Convert a staged read-only legacy Word file (.doc/.dot/.wps) to output_docx."""
     runtime = detect_renderers(DEFAULT_RUNTIME_ROOT)
     errors: list[str] = []
-    if os.name == "nt" and runtime.get("word", {}).get("available"):
-        try:
-            _word_com_to_docx(staged_source, output_docx)
-            return
-        except Exception as exc:  # noqa: BLE001
-            errors.append(str(exc))
+    suffix = staged_source.suffix.lower()
+    com_order = ("wps", "word") if suffix == ".wps" else ("word", "wps")
+    if os.name == "nt":
+        for backend in com_order:
+            if not runtime.get(backend, {}).get("available"):
+                continue
+            converter = _wps_com_to_docx if backend == "wps" else _word_com_to_docx
+            try:
+                converter(staged_source, output_docx)
+                return
+            except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+                errors.append(str(exc))
     lo_entry = runtime.get("libreoffice") or {}
     if lo_entry.get("available") and lo_entry.get("path"):
         try:
             _libreoffice_to_docx(staged_source, output_docx, Path(lo_entry["path"]))
             return
-        except Exception as exc:  # noqa: BLE001
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
             errors.append(str(exc))
-    detail = "; ".join(errors) if errors else "Microsoft Word or LibreOffice not found"
+    detail = (
+        "; ".join(errors)
+        if errors
+        else "Microsoft Word, WPS Office, or LibreOffice not found"
+    )
     raise FormatError(
         f"Cannot read legacy {staged_source.suffix.upper()} file without a local converter ({detail})",
         "unsupported",
@@ -188,6 +233,7 @@ def ensure_readable_docx_path(path: str | Path) -> Path:
 
     if sha256(source) != original_hash:
         raise FormatError("Legacy source file changed during read-only conversion")
+    _prune_legacy_cache(cache_dir, keep=cached_docx)
     return cached_docx
 
 

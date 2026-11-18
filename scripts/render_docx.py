@@ -19,7 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 from xml.etree import ElementTree
 
-from config import DEFAULT_RUNTIME_ROOT, RENDER_METHODS, SKILL_DIR
+from config import DEFAULT_RUNTIME_ROOT, RENDER_METHODS, RENDER_ORDER
 from runtime_detection import detect_pdf_rasterizer, detect_renderers
 
 
@@ -29,7 +29,7 @@ def resolve_renderer(runtime: dict[str, Any], requested: str) -> tuple[str, dict
         raise ValueError(f"不支持的渲染方式：{requested}")
     selected = runtime.get("preferred") if requested == "auto" else requested
     if not selected:
-        raise RuntimeError("未检测到 Microsoft Word 或 LibreOffice")
+        raise RuntimeError("未检测到 Microsoft Word、WPS Office 或 LibreOffice")
     entry = runtime.get(selected) or {}
     if not entry.get("available"):
         name = entry.get("name") or selected
@@ -67,6 +67,12 @@ def _word_to_pdf(source: Path, output_pdf: Path) -> dict[str, Any]:
     from office_automation import automate_word
 
     return automate_word(source, output_pdf, mode="render")
+
+
+def _wps_to_pdf(source: Path, output_pdf: Path) -> dict[str, Any]:
+    from office_automation import automate_wps
+
+    return automate_wps(source, output_pdf, mode="render")
 
 
 def _libreoffice_to_pdf(source: Path, output_pdf: Path, executable: Path) -> None:
@@ -244,8 +250,10 @@ def render_document(
     runtime = detect_renderers(runtime_root)
     selected, entry = resolve_renderer(runtime, method)
     candidates = [(selected, entry)]
-    if method == "auto" and selected == "word" and runtime.get("libreoffice", {}).get("available"):
-        candidates.append(("libreoffice", runtime["libreoffice"]))
+    if method == "auto":
+        for fallback_id in RENDER_ORDER:
+            if fallback_id != selected and runtime.get(fallback_id, {}).get("available"):
+                candidates.append((fallback_id, runtime[fallback_id]))
     final_pdf = target / f"{input_path.stem}.pdf"
     # Convert an immutable task-local copy and rasterize into a staging folder.
     # Failed renders leave previous page images untouched and publish no manifest.
@@ -258,9 +266,12 @@ def render_document(
         office_evidence = None
         for candidate_method, candidate_entry in candidates:
             temporary_pdf.unlink(missing_ok=True)
+            office_evidence = None
             try:
                 if candidate_method == "word":
                     office_evidence = _word_to_pdf(snapshot, temporary_pdf)
+                elif candidate_method == "wps":
+                    _wps_to_pdf(snapshot, temporary_pdf)
                 else:
                     _libreoffice_to_pdf(snapshot, temporary_pdf, Path(candidate_entry["path"]))
                 selected, entry = candidate_method, candidate_entry

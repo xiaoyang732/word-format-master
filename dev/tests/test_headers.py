@@ -162,8 +162,13 @@ class HeaderTests(unittest.TestCase):
             self.op("header.font.latin.set", {"value": "Times New Roman"}),
         ])
         self.assertTrue(doc.settings.odd_and_even_pages_header_footer)
-        field = doc.sections[1].header._element.find(".//" + qn("w:fldSimple"))
-        self.assertEqual(field.get(qn("w:instr")), 'STYLEREF 1')
+        instr_nodes = list(doc.sections[1].header._element.iter(qn("w:instrText")))
+        self.assertEqual([n.text.strip() for n in instr_nodes], ["STYLEREF 1 \\* CHARFORMAT"])
+        instr_run = instr_nodes[0].getparent()
+        self.assertEqual(
+            instr_run.find("./" + qn("w:rPr") + "/" + qn("w:rFonts")).get(qn("w:eastAsia")),
+            "SimSun",
+        )
         self.assertEqual(self.text(doc.sections[1].even_page_header), "Thesis title")
 
     def test_first_page_blank_only_selected_section(self):

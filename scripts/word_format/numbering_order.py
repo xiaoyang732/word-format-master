@@ -48,8 +48,16 @@ def integrity(root):
     return errors
 
 
+def _existing_numbering_root(document):
+    from .structures import _get_numbering_element
+
+    return _get_numbering_element(document, create=False)
+
+
 def repair(index, ref, params):
-    root = index.document.part.numbering_part.element
+    root = _existing_numbering_root(index.document)
+    if root is None:
+        return ["Document has no numbering part; no sequence repair needed"]
     errors = integrity(root)
     if errors:
         raise FormatError(
@@ -62,7 +70,9 @@ def repair(index, ref, params):
 
 
 def read(index, ref, cap):
-    root = index.document.part.numbering_part.element
+    root = _existing_numbering_root(index.document)
+    if root is None:
+        return {"sequence_warnings": [], "integrity_errors": []}
     return {"sequence_warnings": sequence_warnings(root), "integrity_errors": integrity(root)}
 
 
@@ -71,7 +81,12 @@ def verify(actual, params, cap):
 
 
 def projection(index):
-    root = copy.deepcopy(index.document.part.numbering_part.element)
+    existing = _existing_numbering_root(index.document)
+    if existing is None:
+        return "", {
+            str(part.partname): part.blob for part in index.document.part.package.parts
+        }
+    root = copy.deepcopy(existing)
     normalize(root)
     return xml_value(root), {
         str(part.partname): part.blob
