@@ -1,7 +1,7 @@
 [project]
 name = "word-format-master"
 version = "1.4.0"
-description = "Deterministic Word document generation and formatting engine"
+description = "Deterministic Word (.docx) thesis and report generation, formatting, and verification engine"
 requires-python = ">=3.10"
 dependencies = [
     "python-docx>=1.1.0",

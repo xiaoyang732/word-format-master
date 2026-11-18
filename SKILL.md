@@ -1,11 +1,11 @@
 ---
 name: word-format-master
-description: Word 论文与报告生成及格式修改工具。支持使用用户模板、格式要求或内置模板从零生成排好版的论文与报告，也支持按用户需求修改或检查已有论文格式，保留原文并另存新文件。
+description: Word（.docx）论文与报告生成及格式修改工具。支持按学校模板、书面格式要求或内置模板从零生成排好版的毕业论文与课程报告，也支持对照规范或样例修改、检查已有文档格式，完整保留原文并另存新文件。
 slug: docx-format-master
 version: 1.4.0
 license: MIT
 displayName: 论文排版大师 (Word/DOCX)
-summary: 用你的模板或内置模板从零生成 Word 论文，或按需求修改已有论文格式。
+summary: 按学校模板、格式要求或内置模板从零生成 Word 论文与报告，或按需求修改、检查已有文档格式。
 ---
 
 # 论文排版大师 (Word/DOCX)

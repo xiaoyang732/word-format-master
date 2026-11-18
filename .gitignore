@@ -15,17 +15,7 @@ htmlcov/
 Thumbs.db
 output/
 
-# Keep reproducible tests and tools; exclude local documents and artifacts.
-/dev/*
-!/dev/tests/
-!/dev/scripts/
-/dev/scripts/*
-!/dev/scripts/validate_project.py
-!/dev/scripts/smoke_test.py
-!/dev/ci/
-!/dev/tools/
-!/dev/docs/
-/dev/docs/*
-!/dev/docs/development.md
+# Exclude all local development tests, tools, reports, docs, and caches from Git.
+/dev/
 /_dev/
 /.agents/

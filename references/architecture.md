@@ -42,7 +42,7 @@
 
 `templates/builtin/` 是新模板入口的权威数据，`assets/presets.json` 是旧 spec 接口的冻结兼容数据；两者不互相补值。
 `templates/reports.json` 登记真实报告 DOCX、默认 ID、来源和格式说明及文件指纹；它不属于格式规则 JSON，也不从旧 presets 补值。路径相对于登记文件解析，项目迁移目录后仍可使用。
-`references/` 保存当前接口与执行契约。必要的 `dev/tests/`、`dev/tools/`、验证工具与 CI 配置纳入版本管理，保证新克隆仓库可复现验证；报告、缓存、未启用模板及生成产物集中于 `dev/` 并由 `.gitignore` 排除。运行发布包通过 `dev/tools/build_release.py` 的独立清单构建，不携带开发资料。
+`references/` 保存当前接口与执行契约。本地回归测试、验证脚本、发布构建工具及生成产物集中于 `dev/` 并由 `.gitignore` 排除；运行发布包通过独立清单构建，不携带开发资料。
 
 - Format Profile：`schema_version: 1.0`，见 [format-profile.md](format-profile.md)。
 - Format Spec：`schema_version: 1.0`，见 [format-spec.md](format-spec.md)。
