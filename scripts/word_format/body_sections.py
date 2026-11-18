@@ -1,6 +1,9 @@
 """Resolve body boundaries from the common document semantics, never section ordinals."""
 
+from __future__ import annotations
+
 import copy
+from typing import Any
 
 from .contracts import FormatError
 from .inspect import DocumentIndex
@@ -8,13 +11,15 @@ from .namespaces import qn
 from .properties import element
 
 
-def order_scoped_pagination(operations):
+def order_scoped_pagination(operations: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Build the TOC before determining the body boundary in a combined plan."""
-    def scoped(item):
+    def scoped(item: dict[str, Any]) -> bool:
         params = item.get("params")
-        return (
-            item.get("action") == "page_number.configure" and isinstance(params, dict)
-            and params.get("enabled") and params.get("scope") == "body"
+        return bool(
+            item.get("action") == "page_number.configure"
+            and isinstance(params, dict)
+            and params.get("enabled")
+            and params.get("scope") == "body"
             and "start_section" not in params
         )
 
@@ -24,13 +29,18 @@ def order_scoped_pagination(operations):
         return operations
     ordinary = [item for item in operations if not scoped(item)]
     last_toc = next(
-        i for i in range(len(ordinary) - 1, -1, -1)
+        i
+        for i in range(len(ordinary) - 1, -1, -1)
         if ordinary[i].get("action") == "toc.configure"
     )
-    return ordinary[:last_toc + 1] + [item for item in operations if scoped(item)] + ordinary[last_toc + 1:]
+    return (
+        ordinary[: last_toc + 1]
+        + [item for item in operations if scoped(item)]
+        + ordinary[last_toc + 1 :]
+    )
 
 
-def body_start(document):
+def body_start(document: Any) -> Any:
     index = DocumentIndex(document)
     headings = [
         index.elements[oid]
@@ -43,7 +53,7 @@ def body_start(document):
     return headings[0]
 
 
-def boundary_preparation(document):
+def boundary_preparation(document: Any) -> tuple[Any, Any, Any] | None:
     """Return the exact clone insertion authorized by scope=body, if required."""
     first = body_start(document)
     previous = first.getprevious()
@@ -66,7 +76,7 @@ def boundary_preparation(document):
     raise FormatError("Containing body section not found")
 
 
-def ensure_body_boundary(document):
+def ensure_body_boundary(document: Any) -> None:
     preparation = boundary_preparation(document)
     if preparation is None:
         return
@@ -82,7 +92,7 @@ def ensure_body_boundary(document):
                 br.getparent().remove(br)
 
 
-def body_section_index(document):
+def body_section_index(document: Any) -> int:
     try:
         first = body_start(document)
     except FormatError:

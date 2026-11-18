@@ -5,9 +5,13 @@ and CT_TrPr permit repeated choices and must never be sorted by a fixed table.
 Unknown extension children are retained in place.
 """
 
+from __future__ import annotations
+
+from typing import Any
+
 from .namespaces import qn
 
-SEQUENCES = {
+SEQUENCES: dict[str, str] = {
     "numbering": "numPicBullet abstractNum num numIdMacAtCleanup",
     "abstractNum": "nsid multiLevelType tmpl name styleLink numStyleLink lvl",
     "lvl": "start numFmt lvlRestart pStyle isLgl suff lvlText lvlPicBulletId legacy lvlJc pPr rPr",
@@ -49,7 +53,7 @@ SEQUENCES = {
 }
 
 
-def insert_child(parent, child):
+def insert_child(parent: Any, child: Any) -> Any:
     """Insert one owned child before its known successors without reordering peers."""
     order = SEQUENCES.get(parent.tag.rsplit("}", 1)[-1], "").split()
     positions = {qn("w:" + name): position for position, name in enumerate(order)}
@@ -63,9 +67,9 @@ def insert_child(parent, child):
     return child
 
 
-def sequence_warnings(root):
+def sequence_warnings(root: Any) -> list[str]:
     """Return local rule warnings, without claiming full ECMA schema validation."""
-    warnings = []
+    warnings: list[str] = []
     for parent in root.iter():
         order = SEQUENCES.get(parent.tag.rsplit("}", 1)[-1])
         if not order:

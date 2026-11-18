@@ -184,7 +184,7 @@ try {
         }
         $app = $candidate
         $progUsed = $progId
-        if ($existingIds.Count -eq 0 -and $created.Count -ge 1) {
+        if ($created.Count -ge 1) {
           $owned = $true
           $ownedProcesses = $created
         }

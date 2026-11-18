@@ -1,158 +1,239 @@
 """Native numeric citation fields and independent XML evidence/protection."""
+
 from __future__ import annotations
 
 import copy
 import re
+from typing import Any
 
 from docx.oxml import OxmlElement
 
 from .citation_display import DISPLAY_VALUES, run_display, write_display
 from .contracts import FormatError
 from .namespaces import qn
-from .properties import element, strip_text_prefix, xml_value
 from .ooxml import insert_child
+from .properties import element, strip_text_prefix, xml_value
 
-PREFIX = re.compile(r'^\s*(?:\[\s*\d+\s*\]|［\s*\d+\s*］|\d+[.)、])\s*')
+PREFIX = re.compile(r"^\s*(?:\[\s*\d+\s*\]|［\s*\d+\s*］|\d+[.)、])\s*")
+MAX_CITATION_NUMBER = 100000
 
 
-def numeric_tokens(text):
+def numeric_tokens(text: str) -> tuple[list[int], list[re.Match[str]]]:
     """One complete native label per REF, portable across Word and WPS."""
-    group=r'\[([1-9]\d*)\]'
-    if not re.fullmatch(group+r'(?:\s*[,，、;；]?\s*'+group+r')*',text):
-        raise FormatError('Dynamic numeric citations require a complete label per reference, e.g. [1][2]; grouped ranges/author-date are unsupported','unsupported')
-    tokens=list(re.finditer(group,text))
-    numbers=[int(t[1]) for t in tokens]
-    if any(n>100000 for n in numbers):raise ValueError('Invalid numeric reference')
-    return numbers,tokens
+    group = r"\[([1-9]\d*)\]"
+    if not re.fullmatch(group + r"(?:\s*[,，、;；]?\s*" + group + r")*", text):
+        raise FormatError(
+            "Dynamic numeric citations require a complete label per reference, "
+            "e.g. [1][2]; grouped ranges/author-date are unsupported",
+            "unsupported",
+        )
+    tokens = list(re.finditer(group, text))
+    numbers = [int(t[1]) for t in tokens]
+    if any(n > MAX_CITATION_NUMBER for n in numbers):
+        raise ValueError("Invalid numeric reference")
+    return numbers, tokens
 
 
-def _marker(document, prefix):
-    ids = [int(n.get(qn('w:id'))) for n in document.element.iter(qn('w:bookmarkStart'))
-           if (n.get(qn('w:id')) or '').isdigit()]
-    names = {n.get(qn('w:name')) for n in document.element.iter(qn('w:bookmarkStart'))}
-    number = max(ids, default=0)+1
-    while prefix+str(number) in names:
+def _marker(document: Any, prefix: str) -> tuple[int, str]:
+    ids = [
+        int(n.get(qn("w:id")))
+        for n in document.element.iter(qn("w:bookmarkStart"))
+        if (n.get(qn("w:id")) or "").isdigit()
+    ]
+    names = {n.get(qn("w:name")) for n in document.element.iter(qn("w:bookmarkStart"))}
+    number = max(ids, default=0) + 1
+    while prefix + str(number) in names:
         number += 1
-    return number, prefix+str(number)
+    return number, prefix + str(number)
 
 
-def _bookmark(document, paragraph):
-    existing = next((n for n in paragraph.iter(qn('w:bookmarkStart'))
-                     if (n.get(qn('w:name')) or '').startswith('WFMRef_')), None)
+def _bookmark(document: Any, paragraph: Any) -> str:
+    existing = next(
+        (
+            n
+            for n in paragraph.iter(qn("w:bookmarkStart"))
+            if (n.get(qn("w:name")) or "").startswith("WFMRef_")
+        ),
+        None,
+    )
     if existing is not None:
-        return existing.get(qn('w:name'))
-    ident, name = _marker(document,'WFMRef_')
-    start=OxmlElement('w:bookmarkStart');start.set(qn('w:id'),str(ident));start.set(qn('w:name'),name)
-    end=OxmlElement('w:bookmarkEnd');end.set(qn('w:id'),str(ident))
-    paragraph.insert(1 if paragraph.pPr is not None else 0,start)
+        return existing.get(qn("w:name"))
+    ident, name = _marker(document, "WFMRef_")
+    start = OxmlElement("w:bookmarkStart")
+    start.set(qn("w:id"), str(ident))
+    start.set(qn("w:name"), name)
+    end = OxmlElement("w:bookmarkEnd")
+    end.set(qn("w:id"), str(ident))
+    paragraph.insert(1 if paragraph.pPr is not None else 0, start)
     paragraph.append(end)
     return name
 
 
-def _number_references(document, references):
+def _number_references(document: Any, references: list[dict[str, Any]]) -> None:
     """One native sequence; retain reference typography and paragraph style."""
-    from .structures import _get_numbering_element, _numbering_max_id
-    from .properties import PARAGRAPH_TAGS, read_paragraph, write_paragraph, write_effective_tabs
     from .numbering import effective_numbering
+    from .properties import PARAGRAPH_TAGS, read_paragraph, write_effective_tabs, write_paragraph
+    from .structures import _get_numbering_element, _numbering_max_id
 
-    retained=[]
-    targets={document.paragraphs[r['paragraph_index']]._p for r in references}
-    native_ids=set();marker_fonts=[]
+    retained: list[dict[str, Any]] = []
+    targets = {document.paragraphs[r["paragraph_index"]]._p for r in references}
+    native_ids: set[str] = set()
+    marker_fonts: list[Any] = []
+
     for ref in references:
-        p=document.paragraphs[ref['paragraph_index']]._p
-        native=effective_numbering(document,p)
+        p = document.paragraphs[ref["paragraph_index"]]._p
+        native = effective_numbering(document, p)
         if native:
             native_ids.add(native[0])
-            level=next((n for n in native[2].findall(qn('w:lvl')) if n.get(qn('w:ilvl'))==str(native[1])),None) if native[2] is not None else None
-            override=next((n for n in native[3].findall(qn('w:lvlOverride')) if n.get(qn('w:ilvl'))==str(native[1])),None)
-            if override is not None and override.find(qn('w:lvl')) is not None:level=override.find(qn('w:lvl'))
-            marker_fonts.append(level.find(qn('w:rPr')) if level is not None else None)
-        elif PREFIX.match(document.paragraphs[ref['paragraph_index']].text):
-            runs=document.paragraphs[ref['paragraph_index']].runs
+            level = (
+                next(
+                    (
+                        n
+                        for n in native[2].findall(qn("w:lvl"))
+                        if n.get(qn("w:ilvl")) == str(native[1])
+                    ),
+                    None,
+                )
+                if native[2] is not None
+                else None
+            )
+            override = next(
+                (
+                    n
+                    for n in native[3].findall(qn("w:lvlOverride"))
+                    if n.get(qn("w:ilvl")) == str(native[1])
+                ),
+                None,
+            )
+            if override is not None and override.find(qn("w:lvl")) is not None:
+                level = override.find(qn("w:lvl"))
+            marker_fonts.append(level.find(qn("w:rPr")) if level is not None else None)
+        elif PREFIX.match(document.paragraphs[ref["paragraph_index"]].text):
+            runs = document.paragraphs[ref["paragraph_index"]].runs
             marker_fonts.append(runs[0]._r.rPr if runs else None)
-        retained.append({k:read_paragraph(document,p,k) for k in PARAGRAPH_TAGS
-                         if k not in {'numbering_suppressed','outline_level','hanging_indent'}})
-    for p in document.element.iter(qn('w:p')):
-        if p in targets:continue
-        native=effective_numbering(document,p)
+        retained.append(
+            {
+                k: read_paragraph(document, p, k)
+                for k in PARAGRAPH_TAGS
+                if k not in {"numbering_suppressed", "outline_level", "hanging_indent"}
+            }
+        )
+
+    for p in document.element.iter(qn("w:p")):
+        if p in targets:
+            continue
+        native = effective_numbering(document, p)
         if native and native[0] in native_ids:
-            raise FormatError('Reference numbering shares a sequence outside bibliography; explicit separation required','unsupported')
-    if len({xml_value(pr) for pr in marker_fonts})>1:
-        raise FormatError('Reference numbering has mixed marker typography; explicit normalization required','unsupported')
+            raise FormatError(
+                "Reference numbering shares a sequence outside bibliography; "
+                "explicit separation required",
+                "unsupported",
+            )
+    if len({xml_value(pr) for pr in marker_fonts}) > 1:
+        raise FormatError(
+            "Reference numbering has mixed marker typography; explicit normalization required",
+            "unsupported",
+        )
 
-    root=_get_numbering_element(document,create=True)
-    aid=_numbering_max_id(root,'abstractNum','abstractNumId')+1
-    nid=max(0,_numbering_max_id(root,'num','numId'))+1
-    abstract=OxmlElement('w:abstractNum');abstract.set(qn('w:abstractNumId'),str(aid))
-    element(abstract,'multiLevelType').set(qn('w:val'),'singleLevel')
-    level=element(abstract,'lvl');level.set(qn('w:ilvl'),'0')
-    for tag,value in [('start','1'),('numFmt','decimal'),('lvlText','[%1]'),('suff','space')]:
-        element(level,tag).set(qn('w:val'),value)
-    if marker_fonts and marker_fonts[0] is not None:level.append(copy.deepcopy(marker_fonts[0]))
+    root = _get_numbering_element(document, create=True)
+    aid = _numbering_max_id(root, "abstractNum", "abstractNumId") + 1
+    nid = max(0, _numbering_max_id(root, "num", "numId")) + 1
+    abstract = OxmlElement("w:abstractNum")
+    abstract.set(qn("w:abstractNumId"), str(aid))
+    element(abstract, "multiLevelType").set(qn("w:val"), "singleLevel")
+    level = element(abstract, "lvl")
+    level.set(qn("w:ilvl"), "0")
+    for tag, value in (
+        ("start", "1"),
+        ("numFmt", "decimal"),
+        ("lvlText", "[%1]"),
+        ("suff", "space"),
+    ):
+        element(level, tag).set(qn("w:val"), value)
+    if marker_fonts and marker_fonts[0] is not None:
+        level.append(copy.deepcopy(marker_fonts[0]))
     insert_child(root, abstract)
-    num=OxmlElement('w:num');num.set(qn('w:numId'),str(nid))
-    element(num,'abstractNumId').set(qn('w:val'),str(aid));insert_child(root,num)
-    for ref,values in zip(references,retained):
-        paragraph=document.paragraphs[ref['paragraph_index']]
-        prefix=PREFIX.match(paragraph.text)
+
+    num = OxmlElement("w:num")
+    num.set(qn("w:numId"), str(nid))
+    element(num, "abstractNumId").set(qn("w:val"), str(aid))
+    insert_child(root, num)
+
+    for ref, values in zip(references, retained):
+        paragraph = document.paragraphs[ref["paragraph_index"]]
+        prefix = PREFIX.match(paragraph.text)
         if prefix:
-            strip_text_prefix(paragraph._p,prefix.end())
-        np=element(paragraph._p.get_or_add_pPr(),'numPr')
-        for child in list(np):np.remove(child)
-        element(np,'ilvl').set(qn('w:val'),'0')
-        element(np,'numId').set(qn('w:val'),str(nid))
-        for key,value in values.items():
-            if read_paragraph(document,paragraph._p,key)==value:continue
-            pr=paragraph._p.get_or_add_pPr()
-            if key=='tabs':write_effective_tabs(document,paragraph._p,pr,value)
-            elif key=='first_line_indent' and value['value']<0:
-                write_paragraph(pr,'hanging_indent',{**value,'value':-value['value']})
-            else:write_paragraph(pr,key,value)
+            strip_text_prefix(paragraph._p, prefix.end())
+        np = element(paragraph._p.get_or_add_pPr(), "numPr")
+        for child in list(np):
+            np.remove(child)
+        element(np, "ilvl").set(qn("w:val"), "0")
+        element(np, "numId").set(qn("w:val"), str(nid))
+        for key, value in values.items():
+            if read_paragraph(document, paragraph._p, key) == value:
+                continue
+            pr = paragraph._p.get_or_add_pPr()
+            if key == "tabs":
+                write_effective_tabs(document, paragraph._p, pr, value)
+            elif key == "first_line_indent" and value["value"] < 0:
+                write_paragraph(pr, "hanging_indent", {**value, "value": -value["value"]})
+            else:
+                write_paragraph(pr, key, value)
 
 
-def _run(text=None, pr=None):
-    node=OxmlElement('w:r')
-    if pr is not None:node.append(copy.deepcopy(pr))
+def _run(text: str | None = None, pr: Any = None) -> Any:
+    node = OxmlElement("w:r")
+    if pr is not None:
+        node.append(copy.deepcopy(pr))
     if text:
-        t=element(node,'t');t.set(qn('xml:space'),'preserve');t.text=text
+        t = element(node, "t")
+        t.set(qn("xml:space"), "preserve")
+        t.text = text
     return node
 
 
-def _field(name, number, pr):
+def _field(name: str, number: int, pr: Any) -> list[Any]:
     from .fields import complex_field_runs
 
-    return complex_field_runs(f'REF {name} \\n \\h \\* MERGEFORMAT', f'[{number}]', pr)
+    return complex_field_runs(f"REF {name} \\n \\h \\* MERGEFORMAT", f"[{number}]", pr)
 
 
-def _insert(paragraph, offset, nodes):
+def _insert(paragraph: Any, offset: int, nodes: list[Any]) -> None:
     """Split ordinary text only. Validation rejects complex anchors beforehand."""
-    cursor=0
+    cursor = 0
     for run in paragraph.runs:
-        length=len(run.text)
-        if offset <= cursor+length:
-            before,after=run.text[:offset-cursor],run.text[offset-cursor:]
-            suffix=copy.deepcopy(run._r)
+        length = len(run.text)
+        if offset <= cursor + length:
+            before = run.text[: offset - cursor]
+            after = run.text[offset - cursor :]
+            suffix = copy.deepcopy(run._r)
             for child in list(suffix):
-                if child.tag!=qn('w:rPr'):suffix.remove(child)
+                if child.tag != qn("w:rPr"):
+                    suffix.remove(child)
             if after:
-                text=element(suffix,'t');text.text=after;text.set(qn('xml:space'),'preserve')
-            run.text=before
-            anchor=run._r
+                text = element(suffix, "t")
+                text.text = after
+                text.set(qn("xml:space"), "preserve")
+            run.text = before
+            anchor = run._r
             for node in nodes:
-                anchor.addnext(node);anchor=node
-            if after:anchor.addnext(suffix)
+                anchor.addnext(node)
+                anchor = node
+            if after:
+                anchor.addnext(suffix)
             return
-        cursor+=length
-    for node in nodes:paragraph._p.append(node)
+        cursor += length
+    for node in nodes:
+        paragraph._p.append(node)
 
 
-def _can_insert_at_offset(paragraph, offset: int) -> bool:
+def _can_insert_at_offset(paragraph: Any, offset: int) -> bool:
     if any(
-        c.tag not in {qn('w:pPr'), qn('w:r'), qn('w:bookmarkStart'), qn('w:bookmarkEnd')}
+        c.tag not in {qn("w:pPr"), qn("w:r"), qn("w:bookmarkStart"), qn("w:bookmarkEnd")}
         for c in paragraph._p
     ):
         return False
-    allowed_run_children = {qn('w:rPr'), qn('w:t'), qn('w:fldChar'), qn('w:instrText')}
+    allowed_run_children = {qn("w:rPr"), qn("w:t"), qn("w:fldChar"), qn("w:instrText")}
     if any(c.tag not in allowed_run_children for r in paragraph.runs for c in r._r):
         return False
     depth = 0
@@ -161,14 +242,14 @@ def _can_insert_at_offset(paragraph, offset: int) -> bool:
     for run in paragraph.runs:
         has_field_nodes = False
         for child in run._r:
-            if child.tag == qn('w:fldChar'):
+            if child.tag == qn("w:fldChar"):
                 has_field_nodes = True
-                kind = child.get(qn('w:fldCharType'))
-                if kind == 'begin':
+                kind = child.get(qn("w:fldCharType"))
+                if kind == "begin":
                     depth += 1
-                elif kind == 'end':
+                elif kind == "end":
                     depth = max(0, depth - 1)
-            elif child.tag == qn('w:instrText'):
+            elif child.tag == qn("w:instrText"):
                 has_field_nodes = True
         length = len(run.text)
         if not found_target and offset <= cursor + length:
@@ -179,23 +260,23 @@ def _can_insert_at_offset(paragraph, offset: int) -> bool:
     return depth == 0
 
 
-def resolve_citation_params(document, citations):
+def resolve_citation_params(document: Any, citations: dict[str, Any]) -> dict[str, Any]:
     from citation_workflow import extract_citation_data
 
-    if not citations or not citations.get('placements'):
+    if not citations or not citations.get("placements"):
         return citations
     candidates, _ = extract_citation_data(document)
-    by_index = {c['paragraph_index']: c for c in candidates}
+    by_index = {c["paragraph_index"]: c for c in candidates}
     resolved_placements = []
-    for p in citations['placements']:
+    for p in citations["placements"]:
         placement = copy.deepcopy(p)
-        idx = placement.get('paragraph_index')
-        sha = placement.get('paragraph_sha256')
-        contains = placement.get('text_contains')
+        idx = placement.get("paragraph_index")
+        sha = placement.get("paragraph_sha256")
+        contains = placement.get("text_contains")
         if idx is not None and idx in by_index:
-            actual_sha = by_index[idx]['paragraph_sha256']
-            if sha is None and (not contains or contains in by_index[idx]['text']):
-                placement['paragraph_sha256'] = actual_sha
+            actual_sha = by_index[idx]["paragraph_sha256"]
+            if sha is None and (not contains or contains in by_index[idx]["text"]):
+                placement["paragraph_sha256"] = actual_sha
                 resolved_placements.append(placement)
                 continue
             if sha == actual_sha:
@@ -203,282 +284,447 @@ def resolve_citation_params(document, citations):
                 continue
         matches = []
         if sha:
-            matches = [c for c in candidates if c['paragraph_sha256'] == sha]
+            matches = [c for c in candidates if c["paragraph_sha256"] == sha]
         if not matches and contains:
-            matches = [c for c in candidates if contains in c['text']]
+            matches = [c for c in candidates if contains in c["text"]]
         if len(matches) == 1:
-            placement['paragraph_index'] = matches[0]['paragraph_index']
-            placement['paragraph_sha256'] = matches[0]['paragraph_sha256']
+            placement["paragraph_index"] = matches[0]["paragraph_index"]
+            placement["paragraph_sha256"] = matches[0]["paragraph_sha256"]
         resolved_placements.append(placement)
-    return {**citations, 'placements': resolved_placements}
+    return {**citations, "placements": resolved_placements}
 
 
-def insert_citations(document, citations):
-    from citation_workflow import extract_citation_data, paragraph_sha256, _citation_offset
+def insert_citations(document: Any, citations: dict[str, Any]) -> list[str]:
+    from citation_workflow import _citation_offset, extract_citation_data, paragraph_sha256
 
-    if not citations:return []
+    if not citations:
+        return []
     citations = resolve_citation_params(document, citations)
-    candidates,references=extract_citation_data(document)
-    valid={p['paragraph_index'] for p in candidates}
-    ids={r['id']:r for r in references}
-    validated=[];seen=set()
-    for placement in citations['placements']:
-        index=placement.get('paragraph_index')
+    candidates, references = extract_citation_data(document)
+    valid = {p["paragraph_index"] for p in candidates}
+    ids = {r["id"]: r for r in references}
+    validated = []
+    seen: set[int] = set()
+
+    for placement in citations["placements"]:
+        index = placement.get("paragraph_index")
         if index not in valid or index in seen:
-            raise ValueError('Citation must select one unambiguous body paragraph')
-        seen.add(index);paragraph=document.paragraphs[index]
-        if placement.get('paragraph_sha256')!=paragraph_sha256(paragraph.text):
-            raise ValueError('Citation paragraph fingerprint mismatch')
-        targets=placement['reference_ids']
-        if any(r not in ids for r in targets) or len(set(targets))!=len(targets):
-            raise ValueError('Citation references are invalid')
-        display=placement['citation_text'].strip()
-        numbers,tokens=numeric_tokens(display)
-        expected=[int(ids[r]['id'].split('-')[-1]) for r in targets]
-        if numbers!=expected:
-            raise ValueError('Citation display numbers do not match reference_ids')
-        if display in paragraph.text:raise ValueError('Citation text already exists')
-        spacing=placement.get('spacing','none')
-        if spacing not in {'none','space-before','space-after','spaces-around'}:
-            raise ValueError('Invalid citation spacing')
-        if placement.get('display', 'inline') not in tuple(DISPLAY_VALUES):
-            raise ValueError('Invalid citation display')
-        offset=_citation_offset(paragraph.text,placement)
+            raise ValueError("Citation must select one unambiguous body paragraph")
+        seen.add(index)
+        paragraph = document.paragraphs[index]
+        if placement.get("paragraph_sha256") != paragraph_sha256(paragraph.text):
+            raise ValueError("Citation paragraph fingerprint mismatch")
+        targets = placement["reference_ids"]
+        if any(r not in ids for r in targets) or len(set(targets)) != len(targets):
+            raise ValueError("Citation references are invalid")
+        display = placement["citation_text"].strip()
+        numbers, tokens = numeric_tokens(display)
+        expected = [int(ids[r]["id"].split("-")[-1]) for r in targets]
+        if numbers != expected:
+            raise ValueError("Citation display numbers do not match reference_ids")
+        if display in paragraph.text:
+            raise ValueError("Citation text already exists")
+        spacing = placement.get("spacing", "none")
+        if spacing not in {"none", "space-before", "space-after", "spaces-around"}:
+            raise ValueError("Invalid citation spacing")
+        if placement.get("display", "inline") not in tuple(DISPLAY_VALUES):
+            raise ValueError("Invalid citation display")
+        offset = _citation_offset(paragraph.text, placement)
         if not _can_insert_at_offset(paragraph, offset):
-            raise FormatError('Complex citation anchor is unsupported','unsupported')
-        validated.append((paragraph,placement,display,tokens,offset,spacing))
-    if not validated:return []
-    _number_references(document,references)
-    bookmarks={r['id']:_bookmark(document,document.paragraphs[r['paragraph_index']]._p) for r in references}
-    for paragraph,placement,display,tokens,offset,spacing in validated:
+            raise FormatError("Complex citation anchor is unsupported", "unsupported")
+        validated.append((paragraph, placement, display, tokens, offset, spacing))
+
+    if not validated:
+        return []
+
+    _number_references(document, references)
+    bookmarks = {
+        r["id"]: _bookmark(document, document.paragraphs[r["paragraph_index"]]._p)
+        for r in references
+    }
+    for paragraph, placement, display, tokens, offset, spacing in validated:
         original_pr = paragraph.runs[0]._r.rPr if paragraph.runs else None
-        pr = copy.deepcopy(original_pr) if original_pr is not None else OxmlElement('w:rPr')
-        write_display(pr, placement.get('display', 'inline'))
-        ident,name=_marker(document,f'WFMCite_{placement["paragraph_index"]}_')
-        start=OxmlElement('w:bookmarkStart');start.set(qn('w:id'),str(ident));start.set(qn('w:name'),name)
-        end=OxmlElement('w:bookmarkEnd');end.set(qn('w:id'),str(ident))
-        nodes=[start]
-        if spacing in {'space-before','spaces-around'}:nodes.append(_run(' ',original_pr))
-        cursor=0
+        pr = copy.deepcopy(original_pr) if original_pr is not None else OxmlElement("w:rPr")
+        write_display(pr, placement.get("display", "inline"))
+        ident, name = _marker(document, f"WFMCite_{placement['paragraph_index']}_")
+        start = OxmlElement("w:bookmarkStart")
+        start.set(qn("w:id"), str(ident))
+        start.set(qn("w:name"), name)
+        end = OxmlElement("w:bookmarkEnd")
+        end.set(qn("w:id"), str(ident))
+        nodes = [start]
+        if spacing in {"space-before", "spaces-around"}:
+            nodes.append(_run(" ", original_pr))
+        cursor = 0
         for token in tokens:
             if token.start() > cursor:
-                nodes.append(_run(display[cursor:token.start()],pr))
-            number=int(token[1]);name=bookmarks['ref-'+str(number)]
-            nodes.extend(_field(name,number,pr));cursor=token.end()
+                nodes.append(_run(display[cursor : token.start()], pr))
+            number = int(token[1])
+            bookmark_name = bookmarks["ref-" + str(number)]
+            nodes.extend(_field(bookmark_name, number, pr))
+            cursor = token.end()
         if cursor < len(display):
-            nodes.append(_run(display[cursor:],pr))
-        if spacing in {'space-after','spaces-around'}:nodes.append(_run(' ',original_pr))
-        nodes.append(end);_insert(paragraph,offset,nodes)
-    return [f'Inserted {len(validated)} AI-approved citation placement(s) as dynamic REF fields with native references']
+            nodes.append(_run(display[cursor:], pr))
+        if spacing in {"space-after", "spaces-around"}:
+            nodes.append(_run(" ", original_pr))
+        nodes.append(end)
+        _insert(paragraph, offset, nodes)
+
+    return [
+        f"Inserted {len(validated)} AI-approved citation placement(s) as dynamic REF fields with native references"
+    ]
 
 
-def read_state(document):
+def read_state(document: Any) -> dict[str, Any]:
     """Independent reader of actual fields, targets and native numbering."""
-    from .inspect import paragraph_text
+    from .inspect import DocumentIndex, paragraph_text
     from .numbering import effective_numbering, sequence_number
 
-    from .inspect import DocumentIndex
-    index=DocumentIndex(document)
-    ref_nodes=index.reference_nodes()
-    kept=list(document.paragraphs)
-    bookmarks={}
-    for i,p in enumerate(kept):
-        for start in p._p.iter(qn('w:bookmarkStart')):
-            name=start.get(qn('w:name'))
-            ends=[n for n in p._p.iter(qn('w:bookmarkEnd')) if n.get(qn('w:id'))==start.get(qn('w:id'))]
-            bookmarks.setdefault(name,[]).append({'paragraph':i,'paired':len(ends)==1})
-    paragraphs=[];counters={};reference_rows=[]
-    for i,p in enumerate(kept):
-        if p._p in ref_nodes and p.text.strip():reference_rows.append(i)
-        stack=[];fields=[];offset=0
+    index = DocumentIndex(document)
+    ref_nodes = index.reference_nodes()
+    kept = list(document.paragraphs)
+    bookmarks: dict[str | None, list[dict[str, Any]]] = {}
+
+    for i, p in enumerate(kept):
+        for start in p._p.iter(qn("w:bookmarkStart")):
+            name = start.get(qn("w:name"))
+            ends = [
+                n
+                for n in p._p.iter(qn("w:bookmarkEnd"))
+                if n.get(qn("w:id")) == start.get(qn("w:id"))
+            ]
+            bookmarks.setdefault(name, []).append({"paragraph": i, "paired": len(ends) == 1})
+
+    paragraphs = []
+    counters: dict[Any, Any] = {}
+    reference_rows: list[int] = []
+
+    for i, p in enumerate(kept):
+        if p._p in ref_nodes and p.text.strip():
+            reference_rows.append(i)
+        stack: list[dict[str, Any]] = []
+        fields: list[dict[str, Any]] = []
+        offset = 0
         for node in p._p.iter():
-            if node.tag==qn('w:fldChar'):
-                kind=node.get(qn('w:fldCharType'))
-                if kind=='begin':
-                    stack.append({'code':'','text':'','result':False,'start':None,'displays':[],
-                                  'controls':set(), 'space_preserved':True})
-                elif kind=='separate' and stack:
+            if node.tag == qn("w:fldChar"):
+                kind = node.get(qn("w:fldCharType"))
+                if kind == "begin":
+                    stack.append(
+                        {
+                            "code": "",
+                            "text": "",
+                            "result": False,
+                            "start": None,
+                            "displays": [],
+                            "controls": set(),
+                            "space_preserved": True,
+                        }
+                    )
+                elif kind == "separate" and stack:
                     stack[-1].update(result=True, start=offset)
-                if stack and kind in {'begin', 'separate', 'end'}:
-                    stack[-1]['controls'].add(run_display(document, p._p, node.getparent()))
-                if kind=='end' and stack:
+                if stack and kind in {"begin", "separate", "end"}:
+                    stack[-1]["controls"].add(run_display(document, p._p, node.getparent()))
+                if kind == "end" and stack:
                     field = stack.pop()
-                    field['controls'] = sorted(field['controls'])
+                    field["controls"] = sorted(field["controls"])
                     fields.append(field)
-            elif node.tag==qn('w:instrText') and stack:
-                stack[-1]['code'] += node.text or ''
-                stack[-1]['space_preserved'] &= node.get(qn('xml:space')) == 'preserve'
-                stack[-1]['controls'].add(run_display(document, p._p, node.getparent()))
-            elif node.tag==qn('w:t'):
-                text = node.text or ''
-                if text and stack and stack[-1]['result']:
-                    stack[-1]['text'] += text
+            elif node.tag == qn("w:instrText") and stack:
+                stack[-1]["code"] += node.text or ""
+                stack[-1]["space_preserved"] &= node.get(qn("xml:space")) == "preserve"
+                stack[-1]["controls"].add(run_display(document, p._p, node.getparent()))
+            elif node.tag == qn("w:t"):
+                text = node.text or ""
+                if text and stack and stack[-1]["result"]:
+                    stack[-1]["text"] += text
                     display = run_display(document, p._p, node.getparent())
-                    if display not in stack[-1]['displays']:
-                        stack[-1]['displays'].append(display)
+                    if display not in stack[-1]["displays"]:
+                        stack[-1]["displays"].append(display)
                 offset += len(text)
+
         numbering = sequence_number(effective_numbering(document, p._p), counters)
-        spans=[];active=None;offset=0
+        spans = []
+        active: dict[str, Any] | None = None
+        offset = 0
         for node in p._p:
-            if node.tag==qn('w:bookmarkStart') and node.get(qn('w:name'),'').startswith('WFMCite_'):
-                origin=re.fullmatch(r'WFMCite_(\d+)_\d+',node.get(qn('w:name'),''))
-                active={'id':node.get(qn('w:id')),'start':offset,'text':'','segments':[],
-                        'origin':int(origin[1]) if origin else None}
-            elif node.tag==qn('w:bookmarkEnd') and active and node.get(qn('w:id'))==active['id']:
-                spans.append(active);active=None
-            text=''.join(t.text or '' for t in node.iter(qn('w:t')))
+            if node.tag == qn("w:bookmarkStart") and node.get(qn("w:name"), "").startswith(
+                "WFMCite_"
+            ):
+                origin = re.fullmatch(r"WFMCite_(\d+)_\d+", node.get(qn("w:name"), ""))
+                active = {
+                    "id": node.get(qn("w:id")),
+                    "start": offset,
+                    "text": "",
+                    "segments": [],
+                    "origin": int(origin[1]) if origin else None,
+                }
+            elif (
+                node.tag == qn("w:bookmarkEnd")
+                and active
+                and node.get(qn("w:id")) == active["id"]
+            ):
+                spans.append(active)
+                active = None
+            text = "".join(t.text or "" for t in node.iter(qn("w:t")))
             if active and text:
-                active['segments'].append({'start':offset, 'end':offset+len(text),
-                                           'display':run_display(document, p._p, node)})
-                active['text'] += text
-            offset+=len(text)
-        paragraphs.append({'text':paragraph_text(p._p),'fields':fields,'numbering':numbering,'spans':spans})
-    return {'paragraphs':paragraphs,'bookmarks':bookmarks,'reference_rows':reference_rows}
+                active["segments"].append(
+                    {
+                        "start": offset,
+                        "end": offset + len(text),
+                        "display": run_display(document, p._p, node),
+                    }
+                )
+                active["text"] += text
+            offset += len(text)
+
+        paragraphs.append(
+            {
+                "text": paragraph_text(p._p),
+                "fields": fields,
+                "numbering": numbering,
+                "spans": spans,
+            }
+        )
+
+    return {"paragraphs": paragraphs, "bookmarks": bookmarks, "reference_rows": reference_rows}
 
 
-def verify_state(state,params):
+def verify_state(state: dict[str, Any], params: dict[str, Any]) -> bool:
     """Require matching REF codes, cached values and real bibliography targets."""
-    rows=state['paragraphs'];bookmarks=state['bookmarks']
-    from citation_workflow import paragraph_sha256, _citation_offset
-    ref_rows=state['reference_rows']
-    for p in params['placements']:
-        spacing=p.get('spacing','none')
-        expected=(' ' if spacing in {'space-before','spaces-around'} else '')+p['citation_text'].strip()+(' ' if spacing in {'space-after','spaces-around'} else '')
-        selected=[]
+    from citation_workflow import _citation_offset, paragraph_sha256
+
+    rows = state["paragraphs"]
+    bookmarks = state["bookmarks"]
+    ref_rows = state["reference_rows"]
+
+    for p in params["placements"]:
+        spacing = p.get("spacing", "none")
+        expected = (
+            (" " if spacing in {"space-before", "spaces-around"} else "")
+            + p["citation_text"].strip()
+            + (" " if spacing in {"space-after", "spaces-around"} else "")
+        )
+        selected = []
         for row in rows:
-            for span in row['spans']:
-                if span['origin']!=p['paragraph_index'] or span['text']!=expected:continue
-                original=row['text'][:span['start']]+row['text'][span['start']+len(span['text']):]
-                if paragraph_sha256(original)==p['paragraph_sha256'] and _citation_offset(original,p)==span['start']:
+            for span in row["spans"]:
+                if span["origin"] != p["paragraph_index"] or span["text"] != expected:
+                    continue
+                original = (
+                    row["text"][: span["start"]]
+                    + row["text"][span["start"] + len(span["text"]) :]
+                )
+                if (
+                    paragraph_sha256(original) == p["paragraph_sha256"]
+                    and _citation_offset(original, p) == span["start"]
+                ):
                     selected.append((row, span))
-        if len(selected)!=1:return False
-        row, span = selected[0]
-        citation_text = p['citation_text'].strip()
-        try:numbers,tokens=numeric_tokens(citation_text)
-        except ValueError:return False
-        if numbers!=[int(r.split('-')[-1]) for r in p['reference_ids']]:return False
-        start = span['start'] + int(spacing in {'space-before', 'spaces-around'})
-        end = start + len(citation_text)
-        expected_display = p.get('display', 'inline')
-        if any(segment['display'] != expected_display for segment in span['segments']
-               if segment['start'] < end and segment['end'] > start):
+        if len(selected) != 1:
             return False
+
+        row, span = selected[0]
+        citation_text = p["citation_text"].strip()
+        try:
+            numbers, tokens = numeric_tokens(citation_text)
+        except ValueError:
+            return False
+        if numbers != [int(r.split("-")[-1]) for r in p["reference_ids"]]:
+            return False
+
+        start = span["start"] + int(spacing in {"space-before", "spaces-around"})
+        end = start + len(citation_text)
+        expected_display = p.get("display", "inline")
+        if any(
+            segment["display"] != expected_display
+            for segment in span["segments"]
+            if segment["start"] < end and segment["end"] > start
+        ):
+            return False
+
         for token in tokens:
-            number=int(token[1])
-            if not 1<=number<=len(ref_rows):return False
-            target=ref_rows[number-1]
-            if not rows[target]['numbering'] or rows[target]['numbering']['format']!='decimal' or rows[target]['numbering']['value']!=number:return False
-            found=False
-            for field in row['fields']:
-                if not field['space_preserved']:
+            number = int(token[1])
+            if not 1 <= number <= len(ref_rows):
+                return False
+            target = ref_rows[number - 1]
+            if (
+                not rows[target]["numbering"]
+                or rows[target]["numbering"]["format"] != "decimal"
+                or rows[target]["numbering"]["value"] != number
+            ):
+                return False
+
+            found = False
+            for field in row["fields"]:
+                if not field["space_preserved"]:
                     continue
-                if (field['start'] != start + token.start() or field['displays'] != [expected_display]
-                        or field['controls'] != [expected_display]):
+                if (
+                    field["start"] != start + token.start()
+                    or field["displays"] != [expected_display]
+                    or field["controls"] != [expected_display]
+                ):
                     continue
-                code=re.fullmatch(r'\s*REF\s+(\w+)\s+(.*?)\s*',field['code'])
-                if not code:continue
-                switches=code[2].split()
-                if switches[-2:]==[r'\*','MERGEFORMAT']:switches=switches[:-2]
-                elif 'display' in p:continue
-                if sorted(switches)!=[r'\h',r'\n']:continue
-                ends=bookmarks.get(code[1],[])
-                if len(ends)==1 and ends[0]=={'paragraph':target,'paired':True} and field['text']==f'[{number}]':found=True
-            if not found:return False
+                code = re.fullmatch(r"\s*REF\s+(\w+)\s+(.*?)\s*", field["code"])
+                if not code:
+                    continue
+                switches = code[2].split()
+                if switches[-2:] == [r"\*", "MERGEFORMAT"]:
+                    switches = switches[:-2]
+                elif "display" in p:
+                    continue
+                if sorted(switches) != [r"\h", r"\n"]:
+                    continue
+                ends = bookmarks.get(code[1], [])
+                if (
+                    len(ends) == 1
+                    and ends[0] == {"paragraph": target, "paired": True}
+                    and field["text"] == f"[{number}]"
+                ):
+                    found = True
+            if not found:
+                return False
     return True
 
 
-def snapshot(index,params,baseline=None):
+def snapshot(
+    index: Any,
+    params: dict[str, Any],
+    baseline: tuple[set[Any], set[str | None], set[Any]] | None = None,
+) -> tuple[
+    list[tuple[Any, list[Any]]],
+    dict[str, Any],
+    tuple[set[Any], set[str | None], set[Any]],
+    dict[Any, str] | None,
+]:
     """Mask only validated newly generated citation spans/reference numbering."""
     from citation_workflow import extract_citation_data
+
     from .inspect import paragraph_text
 
-    document=index.document
+    document = index.document
     if baseline is None:
-        _,refs=extract_citation_data(document)
-        reference_nodes={document.paragraphs[r['paragraph_index']]._p for r in refs}
-        old_names={n.get(qn('w:name')) for n in document.element.iter(qn('w:bookmarkStart'))}
-        target_nodes={
-            document.paragraphs[p['paragraph_index']]._p
-            for p in params['placements']
-            if isinstance(p.get('paragraph_index'), int)
-            and 0 <= p['paragraph_index'] < len(document.paragraphs)
+        _, refs = extract_citation_data(document)
+        reference_nodes = {document.paragraphs[r["paragraph_index"]]._p for r in refs}
+        old_names = {n.get(qn("w:name")) for n in document.element.iter(qn("w:bookmarkStart"))}
+        target_nodes = {
+            document.paragraphs[p["paragraph_index"]]._p
+            for p in params["placements"]
+            if isinstance(p.get("paragraph_index"), int)
+            and 0 <= p["paragraph_index"] < len(document.paragraphs)
         }
-    else:reference_nodes,old_names,target_nodes=baseline
-    paragraphs=[]
-    for p in document.element.body.iter(qn('w:p')):
-        clone=copy.deepcopy(p)
-        removing=None
+    else:
+        reference_nodes, old_names, target_nodes = baseline
+
+    paragraphs = []
+    for p in document.element.body.iter(qn("w:p")):
+        clone = copy.deepcopy(p)
+        removing = None
         for child in list(clone):
-            if child.tag==qn('w:bookmarkStart'):
-                name=child.get(qn('w:name'),'')
-                if p in target_nodes and name.startswith('WFMCite_') and name not in old_names:
-                    removing=child.get(qn('w:id'));clone.remove(child);continue
-                if p in reference_nodes and name.startswith('WFMRef_') and name not in old_names:
-                    ident=child.get(qn('w:id'));clone.remove(child)
-                    for end in list(clone.findall(qn('w:bookmarkEnd'))):
-                        if end.get(qn('w:id'))==ident:clone.remove(end)
+            if child.tag == qn("w:bookmarkStart"):
+                name = child.get(qn("w:name"), "")
+                if p in target_nodes and name.startswith("WFMCite_") and name not in old_names:
+                    removing = child.get(qn("w:id"))
+                    clone.remove(child)
+                    continue
+                if p in reference_nodes and name.startswith("WFMRef_") and name not in old_names:
+                    ident = child.get(qn("w:id"))
+                    clone.remove(child)
+                    for end in list(clone.findall(qn("w:bookmarkEnd"))):
+                        if end.get(qn("w:id")) == ident:
+                            clone.remove(end)
                     continue
             if removing is not None:
-                if child.tag==qn('w:bookmarkEnd') and child.get(qn('w:id'))==removing:removing=None
+                if child.tag == qn("w:bookmarkEnd") and child.get(qn("w:id")) == removing:
+                    removing = None
                 clone.remove(child)
+
+        effective: dict[str, Any] = {}
         if p in reference_nodes:
             from .properties import PARAGRAPH_TAGS, read_paragraph
-            effective={k:read_paragraph(document,p,k) for k in PARAGRAPH_TAGS if k!='numbering_suppressed'}
-            pr=clone.find(qn('w:pPr'))
+
+            effective = {
+                k: read_paragraph(document, p, k)
+                for k in PARAGRAPH_TAGS
+                if k != "numbering_suppressed"
+            }
+            pr = clone.find(qn("w:pPr"))
             if pr is not None:
-                tags={qn('w:'+tag) for tagset in PARAGRAPH_TAGS.values() for tag in tagset}
+                tags = {qn("w:" + tag) for tagset in PARAGRAPH_TAGS.values() for tag in tagset}
                 for child in list(pr):
-                    if child.tag in tags:pr.remove(child)
-                if len(pr)==0 and not pr.attrib:clone.remove(pr)
-            prefix=PREFIX.match(paragraph_text(clone))
-            if prefix:strip_text_prefix(clone,prefix.end())
-        tokens=[]
+                    if child.tag in tags:
+                        pr.remove(child)
+                if len(pr) == 0 and not pr.attrib:
+                    clone.remove(pr)
+            prefix = PREFIX.match(paragraph_text(clone))
+            if prefix:
+                strip_text_prefix(clone, prefix.end())
+
+        tokens: list[Any] = []
         for child in clone:
-            if child.tag==qn('w:r'):
-                pr=child.find(qn('w:rPr'))
-                props=xml_value(pr) if pr is not None and len(pr) else ''
+            if child.tag == qn("w:r"):
+                pr = child.find(qn("w:rPr"))
+                props = xml_value(pr) if pr is not None and len(pr) else ""
                 for node in child:
-                    if node.tag==qn('w:rPr'):continue
-                    if node.tag==qn('w:t'):tokens.extend((c,props) for c in node.text or '')
-                    else:tokens.append(xml_value(node))
-            else:tokens.append(xml_value(child))
-        if p in reference_nodes:tokens.append(('effective_reference_paragraph',effective))
-        paragraphs.append((p,tokens))
+                    if node.tag == qn("w:rPr"):
+                        continue
+                    if node.tag == qn("w:t"):
+                        tokens.extend((c, props) for c in node.text or "")
+                    else:
+                        tokens.append(xml_value(node))
+            else:
+                tokens.append(xml_value(child))
+        if p in reference_nodes:
+            tokens.append(("effective_reference_paragraph", effective))
+        paragraphs.append((p, tokens))
+
     # Preserve existing definitions by identity; legal insertion precedes old nums.
-    numbering=next((p.element for p in document.part.package.parts if str(p.partname)=='/word/numbering.xml'),[])
+    numbering = next(
+        (
+            p.element
+            for p in document.part.package.parts
+            if str(p.partname) == "/word/numbering.xml"
+        ),
+        [],
+    )
     if baseline is None:
-        old_numbering={_numbering_key(n):xml_value(n) for n in numbering}
+        old_numbering = {_numbering_key(n): xml_value(n) for n in numbering}
         if len(old_numbering) != len(numbering):
-            raise FormatError('Duplicate numbering definition identity')
-    else:old_numbering=None
-    parts={str(p.partname):p.blob for p in document.part.package.parts
-           if str(p.partname) not in {'/word/document.xml','/word/numbering.xml'}}
-    tree=copy.deepcopy(document.element)
-    for p in list(tree.iter(qn('w:p'))):p.getparent().replace(p,OxmlElement('w:p'))
-    parts['document_nonparagraph_structure']=xml_value(tree)
-    return paragraphs,parts,(reference_nodes,old_names,target_nodes),old_numbering
+            raise FormatError("Duplicate numbering definition identity")
+    else:
+        old_numbering = None
+
+    parts: dict[str, Any] = {
+        str(p.partname): p.blob
+        for p in document.part.package.parts
+        if str(p.partname) not in {"/word/document.xml", "/word/numbering.xml"}
+    }
+    tree = copy.deepcopy(document.element)
+    for p in list(tree.iter(qn("w:p"))):
+        p.getparent().replace(p, OxmlElement("w:p"))
+    parts["document_nonparagraph_structure"] = xml_value(tree)
+    return paragraphs, parts, (reference_nodes, old_names, target_nodes), old_numbering
 
 
-def verify_preservation(index,params,before):
-    if not verify_state(read_state(index.document),params):
-        raise FormatError('Citation fields, display or bookmarks do not match the request')
-    after=snapshot(index,params,before[2])
-    if before[:2]!=after[:2]:
-        raise FormatError('Citation changed unrelated content, objects or formatting')
-    old=before[3];numbering=index.document.part.numbering_part.element
-    current={_numbering_key(n):xml_value(n) for n in numbering}
-    if len(current)!=len(numbering) or any(current.get(key)!=value for key,value in old.items()):
-        raise FormatError('Citation changed an existing numbering definition')
-    added=[n for n in numbering if _numbering_key(n) not in old]
-    abstracts=[n for n in added if n.tag==qn('w:abstractNum')]
-    nums=[n for n in added if n.tag==qn('w:num')]
-    if len(added)!=2 or len(abstracts)!=1 or len(nums)!=1:
-        raise FormatError('Citation added unexpected numbering definitions')
-    link=nums[0].find(qn('w:abstractNumId'))
-    if link is None or link.get(qn('w:val'))!=abstracts[0].get(qn('w:abstractNumId')):
-        raise FormatError('Citation numbering link is invalid')
+def verify_preservation(index: Any, params: dict[str, Any], before: Any) -> None:
+    if not verify_state(read_state(index.document), params):
+        raise FormatError("Citation fields, display or bookmarks do not match the request")
+    after = snapshot(index, params, before[2])
+    if before[:2] != after[:2]:
+        raise FormatError("Citation changed unrelated content, objects or formatting")
+    old = before[3]
+    numbering = index.document.part.numbering_part.element
+    current = {_numbering_key(n): xml_value(n) for n in numbering}
+    if len(current) != len(numbering) or any(
+        current.get(key) != value for key, value in old.items()
+    ):
+        raise FormatError("Citation changed an existing numbering definition")
+    added = [n for n in numbering if _numbering_key(n) not in old]
+    abstracts = [n for n in added if n.tag == qn("w:abstractNum")]
+    nums = [n for n in added if n.tag == qn("w:num")]
+    if len(added) != 2 or len(abstracts) != 1 or len(nums) != 1:
+        raise FormatError("Citation added unexpected numbering definitions")
+    link = nums[0].find(qn("w:abstractNumId"))
+    if link is None or link.get(qn("w:val")) != abstracts[0].get(qn("w:abstractNumId")):
+        raise FormatError("Citation numbering link is invalid")
 
 
-def _numbering_key(node):
+def _numbering_key(node: Any) -> tuple[str, str | None, str | None]:
     """Include the node type so numId and abstractNumId may share a number."""
-    return node.tag, node.get(qn('w:abstractNumId')), node.get(qn('w:numId'))
+    return node.tag, node.get(qn("w:abstractNumId")), node.get(qn("w:numId"))

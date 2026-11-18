@@ -1,21 +1,26 @@
 """Explicit repair of confirmed numbering sequence defects in existing documents."""
 
+from __future__ import annotations
+
 import copy
+from typing import Any
 
 from .contracts import FormatError, require_keys
 from .namespaces import qn
 from .ooxml import SEQUENCES, sequence_warnings
 from .properties import xml_value
 
-OWNED_CONTAINERS = {"numbering", "abstractNum", "lvl", "num", "pPr", "pBdr", "numPr"}
+OWNED_CONTAINERS: frozenset[str] = frozenset(
+    {"numbering", "abstractNum", "lvl", "num", "pPr", "pBdr", "numPr"}
+)
 
 
-def validate(params):
+def validate(params: dict[str, Any]) -> dict[str, Any]:
     require_keys(params, set(), label="numbering order repair")
     return {}
 
 
-def normalize(root):
+def normalize(root: Any) -> None:
     for parent in root.iter():
         name = parent.tag.rsplit("}", 1)[-1]
         if name not in OWNED_CONTAINERS:
@@ -29,9 +34,9 @@ def normalize(root):
         parent[:] = children
 
 
-def integrity(root):
-    errors = []
-    ids = {}
+def integrity(root: Any) -> list[str]:
+    errors: list[str] = []
+    ids: dict[str, set[str | None]] = {}
     for tag, attribute in (("abstractNum", "abstractNumId"), ("num", "numId")):
         values = [node.get(qn("w:" + attribute)) for node in root.findall(qn("w:" + tag))]
         if len(set(values)) != len(values) or any(value is None for value in values):
@@ -48,13 +53,13 @@ def integrity(root):
     return errors
 
 
-def _existing_numbering_root(document):
+def _existing_numbering_root(document: Any) -> Any:
     from .structures import _get_numbering_element
 
     return _get_numbering_element(document, create=False)
 
 
-def repair(index, ref, params):
+def repair(index: Any, ref: dict[str, Any], params: dict[str, Any]) -> list[str]:
     root = _existing_numbering_root(index.document)
     if root is None:
         return ["Document has no numbering part; no sequence repair needed"]
@@ -69,18 +74,18 @@ def repair(index, ref, params):
     ]
 
 
-def read(index, ref, cap):
+def read(index: Any, ref: dict[str, Any], cap: Any) -> dict[str, list[str]]:
     root = _existing_numbering_root(index.document)
     if root is None:
         return {"sequence_warnings": [], "integrity_errors": []}
     return {"sequence_warnings": sequence_warnings(root), "integrity_errors": integrity(root)}
 
 
-def verify(actual, params, cap):
+def verify(actual: dict[str, list[str]], params: dict[str, Any], cap: Any) -> bool:
     return not actual["sequence_warnings"] and not actual["integrity_errors"]
 
 
-def projection(index):
+def projection(index: Any) -> tuple[str, dict[str, bytes]]:
     existing = _existing_numbering_root(index.document)
     if existing is None:
         return "", {
