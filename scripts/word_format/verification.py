@@ -775,6 +775,27 @@ def atomic_projection(document, index, refs, cap):
                     pr.remove(hd)
                 if pr is not None and not len(pr) and not pr.attrib:
                     pr.getparent().remove(pr)
+            elif cap.property == "row_cant_split":
+                for row in clone.findall(qn("w:tr")):
+                    pr = row.find(qn("w:trPr"))
+                    if pr is None:
+                        continue
+                    for node in list(pr.findall(qn("w:cantSplit"))):
+                        pr.remove(node)
+                    if not len(pr) and not pr.attrib:
+                        row.remove(pr)
+            elif cap.property == "header_keep_with_next":
+                rows = clone.findall(qn("w:tr"))
+                if rows:
+                    for cell in rows[0].findall(qn("w:tc")):
+                        for p in cell.findall(qn("w:p")):
+                            pr = p.find(qn("w:pPr"))
+                            if pr is None:
+                                continue
+                            for kn in list(pr.findall(qn("w:keepNext"))):
+                                pr.remove(kn)
+                            if not len(pr) and not pr.attrib:
+                                p.remove(pr)
             elif cap.property == "three_line":
                 pr = clone.find(qn("w:tblPr"))
                 if pr is not None:

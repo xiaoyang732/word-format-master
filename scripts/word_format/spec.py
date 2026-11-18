@@ -68,6 +68,17 @@ PAGE = {
     "header_distance_mm": "page.header_distance.set",
     "footer_distance_mm": "page.footer_distance.set",
 }
+TABLE_ACTIONS = {
+    "alignment": "table.alignment.set",
+    "repeat_header_row": "table.header_repeat.set",
+    "prevent_row_split": "table.row_cant_split.set",
+    "keep_header_with_first_row": "table.header_keep_with_next.set",
+    "three_line_table": "table.three_line.apply",
+}
+TABLE_BOOL_KEYS = frozenset(
+    {"three_line_table", "repeat_header_row", "prevent_row_split", "keep_header_with_first_row"}
+)
+TABLE_ALLOWED_KEYS = frozenset({"font_size_pt", "font_east_asia", "font_latin", *TABLE_ACTIONS})
 
 
 def _has_soft_break(element):
@@ -539,22 +550,9 @@ def validate_spec(spec):
         if tokens.get("position") not in {None, "above", "below"}:
             raise FormatError("Caption position must be above/below")
     tables = spec.get("tables", {})
-    require_keys(
-        tables,
-        {
-            "font_size_pt",
-            "font_east_asia",
-            "font_latin",
-            "alignment",
-            "three_line_table",
-            "repeat_header_row",
-        },
-        label="tables",
-    )
-    validate_tokens(
-        {k: v for k, v in tables.items() if k not in {"three_line_table", "repeat_header_row"}}
-    )
-    for key in ("three_line_table", "repeat_header_row"):
+    require_keys(tables, TABLE_ALLOWED_KEYS, label="tables")
+    validate_tokens({k: v for k, v in tables.items() if k not in TABLE_BOOL_KEYS})
+    for key in TABLE_BOOL_KEYS:
         if key in tables:
             boolean(tables[key], key)
     structure = spec.get("document_structure", {})
@@ -870,11 +868,7 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
         if r["kind"] == "table":
             if r.get("module") == "cover":
                 continue
-            for key, action in (
-                ("alignment", "table.alignment.set"),
-                ("repeat_header_row", "table.header_repeat.set"),
-                ("three_line_table", "table.three_line.apply"),
-            ):
+            for key, action in TABLE_ACTIONS.items():
                 if key in tables:
                     add(action, [oid], {"value": tables[key]})
         if r.get("role") == "table_text":
@@ -1124,11 +1118,9 @@ def legacy_paths():
         paths[f"captions.{role}.label"] = "selector metadata (caption matching)"
     for key in ("font_east_asia", "font_latin", "font_size_pt"):
         paths["tables." + key] = FONT[key]
+    paths.update({f"tables.{key}": action for key, action in TABLE_ACTIONS.items()})
     paths.update(
         {
-            "tables.alignment": "table.alignment.set",
-            "tables.repeat_header_row": "table.header_repeat.set",
-            "tables.three_line_table": "table.three_line.apply",
             "headers_footers.header.enabled": "header_footer.configure",
             "headers_footers.header.text": "header_footer.configure",
             "headers_footers.footer.enabled": "header_footer.configure",

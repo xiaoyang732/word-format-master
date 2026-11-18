@@ -31,6 +31,24 @@ from .spec import FONT, PAGE, PARA
 from .template_structure import compare_template_structure, extract_template_structure
 
 
+TABLE_DIRECT_ACTIONS = ("table.alignment.set", "table.header_repeat.set")
+TABLE_ENABLE_ONLY_ACTIONS = (
+    "table.three_line.apply",
+    "table.row_cant_split.set",
+    "table.header_keep_with_next.set",
+)
+BODY_TABLE_ACTIONS = (*TABLE_DIRECT_ACTIONS, *TABLE_ENABLE_ONLY_ACTIONS)
+
+
+def _normalize_table_reader_value(action: str, raw_value):
+    """Map reader state to (applicable, normalized_value) for uniform profile rules."""
+    if action == "table.header_keep_with_next.set":
+        if not raw_value.get("applicable"):
+            return False, None
+        return True, bool(raw_value.get("enabled"))
+    return True, raw_value
+
+
 def _profile(source):
     return {
         "schema_version": "1.0",
@@ -607,7 +625,7 @@ def template_profile(path):
     body_tables = [r for r in table_records if r.get("module") != "cover"]
     for record in cover_tables:
         ordinal = int(record["id"][1:]) + 1
-        for action in ("table.alignment.set", "table.header_repeat.set"):
+        for action in TABLE_DIRECT_ACTIONS:
             cap = REGISTRY[action]
             value = cap.reader(index, index.ref(record["id"]), cap)
             try:
@@ -627,17 +645,21 @@ def template_profile(path):
                     property=action,
                     anchor=record["id"],
                 )
-        cap = REGISTRY["table.three_line.apply"]
-        if cap.reader(index, index.ref(record["id"]), cap):
-            _rule(
-                profile,
-                {
-                    "target": {"type": "table", "ordinal": ordinal},
-                    "action": cap.action,
-                    "params": {"value": True},
-                    "evidence": [{"anchor": record["id"], "confidence": 1.0}],
-                },
+        for action in TABLE_ENABLE_ONLY_ACTIONS:
+            cap = REGISTRY[action]
+            applicable, enabled = _normalize_table_reader_value(
+                action, cap.reader(index, index.ref(record["id"]), cap)
             )
+            if applicable and enabled:
+                _rule(
+                    profile,
+                    {
+                        "target": {"type": "table", "ordinal": ordinal},
+                        "action": cap.action,
+                        "params": {"value": True},
+                        "evidence": [{"anchor": record["id"], "confidence": 1.0}],
+                    },
+                )
         _issue(
             profile,
             "Table borders, widths, styles and cell geometry require review",
@@ -649,14 +671,19 @@ def template_profile(path):
             if cover_tables
             else {"type": "table", "all": True}
         )
-        for action in ("table.alignment.set", "table.header_repeat.set", "table.three_line.apply"):
+        for action in BODY_TABLE_ACTIONS:
             cap = REGISTRY[action]
             variants = defaultdict(list)
             raw_vals = {}
             unrepresentable = []
+            enable_only = action in TABLE_ENABLE_ONLY_ACTIONS
             for record in body_tables:
-                value = cap.reader(index, index.ref(record["id"]), cap)
-                if action == "table.three_line.apply" and not value:
+                applicable, value = _normalize_table_reader_value(
+                    action, cap.reader(index, index.ref(record["id"]), cap)
+                )
+                if not applicable:
+                    continue
+                if enable_only and not value:
                     key = json_hash(False)
                     raw_vals[key] = False
                     variants[key].append({"anchor": record["id"], "confidence": 1.0})
@@ -668,6 +695,8 @@ def template_profile(path):
                     variants[key].append({"anchor": record["id"], "confidence": 1.0})
                 except FormatError:
                     unrepresentable.append({"anchor": record["id"], "value": value})
+            if not variants and not unrepresentable:
+                continue
             if unrepresentable:
                 for item in unrepresentable:
                     _issue(
@@ -678,7 +707,7 @@ def template_profile(path):
                     )
             elif len(variants) == 1:
                 only_key = next(iter(variants))
-                if action == "table.three_line.apply" and raw_vals[only_key] is False:
+                if enable_only and raw_vals[only_key] is False:
                     pass
                 else:
                     _rule(
@@ -699,7 +728,7 @@ def template_profile(path):
                         "evidence": ev,
                     }
                     for k, ev in variants.items()
-                    if not (action == "table.three_line.apply" and raw_vals[k] is False)
+                    if not (enable_only and raw_vals[k] is False)
                 ]
                 _issue(
                     profile,

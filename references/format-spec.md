@@ -111,7 +111,9 @@ do not impose the legacy conventional stage ordering.
 ### Tables
 
 - `three_line_table`: boolean (applies standard academic three-line table: 1.5pt top/bottom borders, 0.75pt header bottom border, no vertical borders). Tables classified as cover content are excluded so form grids and cover metadata remain intact.
-- `repeat_header_row`: boolean (sets `w:tblHeader` and `w:cantSplit` on row 0)
+- `repeat_header_row`: boolean (sets `w:tblHeader` on row 0)
+- `prevent_row_split`: boolean (sets `w:cantSplit` across every `<w:tr>` row to prevent mid-row page splits)
+- `keep_header_with_first_row`: boolean (sets paragraph `w:keepNext` on row 0 cells when the table has at least 2 rows so headers do not strand at page bottoms)
 - `alignment`: `left`, `center`, or `right`
 - `font_size_pt`, `font_east_asia`, `font_latin`: table cell typography
 

@@ -751,3 +751,60 @@ def strip_text_prefix(paragraph, count):
             remaining -= removed
     if remaining:
         raise FormatError("Numbering prefix could not be mapped to text nodes", "unsupported")
+
+
+def read_table_row_cant_split(tbl) -> bool:
+    """Return True when every row in the table enables <w:cantSplit/>."""
+    rows = tbl.findall(qn("w:tr"))
+    if not rows:
+        return False
+    return all(
+        (node := row.find("./" + qn("w:trPr") + "/" + qn("w:cantSplit"))) is not None
+        and node.get(qn("w:val"), "1") not in {"0", "false", "off"}
+        for row in rows
+    )
+
+
+def write_table_row_cant_split(tbl, enabled: bool) -> None:
+    """Apply or clear <w:cantSplit/> across every <w:tr> of a table."""
+    rows = tbl.findall(qn("w:tr"))
+    if not rows:
+        raise FormatError("Table has no rows", "unsupported")
+    for row in rows:
+        if enabled:
+            pr = element(row, "trPr")
+            element(pr, "cantSplit").set(qn("w:val"), "1")
+        else:
+            pr = row.find(qn("w:trPr"))
+            if pr is None:
+                continue
+            for node in list(pr.findall(qn("w:cantSplit"))):
+                pr.remove(node)
+            if not len(pr) and not pr.attrib:
+                row.remove(pr)
+
+
+def read_table_header_keep_with_next(document, tbl) -> dict[str, bool]:
+    """Return applicability (>=2 rows) and effective keepNext state of row 0 paragraphs."""
+    rows = tbl.findall(qn("w:tr"))
+    header_paragraphs = (
+        [p for cell in rows[0].findall(qn("w:tc")) for p in cell.findall(qn("w:p"))]
+        if rows
+        else []
+    )
+    enabled = bool(header_paragraphs) and all(
+        bool(read_paragraph(document, p, "keep_with_next")) for p in header_paragraphs
+    )
+    return {"applicable": len(rows) >= 2, "enabled": enabled}
+
+
+def write_table_header_keep_with_next(tbl, enabled: bool) -> None:
+    """Keep row 0 attached to row 1 on multi-row tables; never bind 1-row tables to body text."""
+    rows = tbl.findall(qn("w:tr"))
+    if not rows:
+        raise FormatError("Table has no rows", "unsupported")
+    if enabled and len(rows) < 2:
+        return
+    for cell in rows[0].findall(qn("w:tc")):
+        for paragraph in cell.findall(qn("w:p")):
+            write_paragraph(element(paragraph, "pPr"), "keep_with_next", bool(enabled))

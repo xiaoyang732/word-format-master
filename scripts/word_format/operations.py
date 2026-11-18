@@ -21,6 +21,8 @@ from .properties import (
     write_effective_tabs,
     write_paragraph,
     write_style_font,
+    write_table_header_keep_with_next,
+    write_table_row_cant_split,
 )
 
 
@@ -302,6 +304,16 @@ def set_repeat_header(index, ref, params):
         element(pr, "tblHeader").set(qn("w:val"), "1")
     elif node is not None:
         pr.remove(node)
+
+
+def set_table_row_cant_split(index, ref, params):
+    """Enable or disable <w:cantSplit/> across all rows of the targeted table."""
+    write_table_row_cant_split(index.elements[ref["id"]], bool(params["value"]))
+
+
+def set_table_header_keep_with_next(index, ref, params):
+    """Bind table row 0 paragraphs to row 1 via keepNext on multi-row tables."""
+    write_table_header_keep_with_next(index.elements[ref["id"]], bool(params["value"]))
 
 
 def set_table_alignment(index, ref, params):

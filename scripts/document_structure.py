@@ -123,6 +123,12 @@ _MEASUREMENT_PREFIX_RE = re.compile(
     r"(?:cm|mm|ms|px)(?![A-Za-z]))",
     re.I,
 )
+_CALENDAR_DATE_PREFIX_RE = re.compile(r"^\s*(?:19|20)\d{2}\s*[年./-]")
+
+
+def is_measurement_or_date_prefix(text: str) -> bool:
+    """Return True when leading digits introduce a date, year, or measurement."""
+    return bool(_MEASUREMENT_PREFIX_RE.match(text) or _CALENDAR_DATE_PREFIX_RE.match(text))
 
 
 def normalized_style_name(value: Any) -> str:

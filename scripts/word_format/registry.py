@@ -20,7 +20,14 @@ from .keywords import (
     validate_keyword_separator,
 )
 from .namespaces import qn
-from .properties import effective_range_bounds, paragraph_style_name, read_font, read_paragraph
+from .properties import (
+    effective_range_bounds,
+    paragraph_style_name,
+    read_font,
+    read_paragraph,
+    read_table_header_keep_with_next,
+    read_table_row_cant_split,
+)
 
 
 @dataclass(frozen=True)
@@ -236,6 +243,10 @@ def read_atomic(index, ref, cap):
     if cap.property == "repeat_header":
         child = p.find("./" + qn("w:tr") + "/" + qn("w:trPr") + "/" + qn("w:tblHeader"))
         return child is not None and child.get(qn("w:val"), "1") not in {"0", "false"}
+    if cap.property == "row_cant_split":
+        return read_table_row_cant_split(p)
+    if cap.property == "header_keep_with_next":
+        return read_table_header_keep_with_next(index.document, p)
     if cap.property == "three_line":
         borders = p.find("./" + qn("w:tblPr") + "/" + qn("w:tblBorders"))
 
@@ -302,6 +313,10 @@ def equal_value(actual, expected, tolerance=NUMERIC_TOLERANCE):
 def verify_atomic(actual, params, cap):
     if cap.property == "three_line":
         return actual["enabled"] if params["value"] else not actual["saved"]
+    if cap.property == "header_keep_with_next":
+        if not actual["applicable"]:
+            return not actual["enabled"]
+        return actual["enabled"] is params["value"]
     if cap.property == "tabs":
         return equal_value(actual, params["value"])
     expected = (
@@ -538,6 +553,22 @@ add(
     "repeat_header",
     {"table"},
     op.set_repeat_header,
+    scalar("boolean"),
+    {"value": "boolean"},
+)
+add(
+    "table.row_cant_split.set",
+    "row_cant_split",
+    {"table"},
+    op.set_table_row_cant_split,
+    scalar("boolean"),
+    {"value": "boolean"},
+)
+add(
+    "table.header_keep_with_next.set",
+    "header_keep_with_next",
+    {"table"},
+    op.set_table_header_keep_with_next,
     scalar("boolean"),
     {"value": "boolean"},
 )

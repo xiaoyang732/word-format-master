@@ -24,6 +24,35 @@ CHECKED_ROLES = frozenset(
     {"body", "module_body", "heading", "reference", "list", "keywords", "caption"}
 )
 WORD_ALIGNMENTS: dict[str, int] = {"left": 0, "center": 1, "right": 2, "justify": 3}
+WD_UNDEFINED_NUMERIC = 9999999
+TEXT_PREVIEW_MAX_CHARS = 40
+_CROSS_REF_CODE_RE = re.compile(r"^\s*(?:REF|PAGEREF)\b", re.I)
+_NUMERIC_CITATION_SWITCH_RE = re.compile(r"(?:^|\s)\\n(?:\s|$)")
+_CHARFORMAT_SWITCH_RE = re.compile(r"\\\*\s*CHARFORMAT\b", re.I)
+
+
+def _text_preview(text: str, limit: int = TEXT_PREVIEW_MAX_CHARS) -> str:
+    clean = " ".join(str(text or "").split())
+    if len(clean) <= limit:
+        return clean
+    return clean[: max(1, limit - 3)] + "..."
+
+
+def _unprotected_cross_ref_codes(node: Any) -> list[str]:
+    """Return body cross-reference REF/PAGEREF fields missing the \\* CHARFORMAT switch."""
+    if node is None:
+        return []
+    from .fields import field_codes
+
+    codes: list[str] = []
+    for code in field_codes(node):
+        if (
+            _CROSS_REF_CODE_RE.match(code)
+            and not _NUMERIC_CITATION_SWITCH_RE.search(code)
+            and not _CHARFORMAT_SWITCH_RE.search(code)
+        ):
+            codes.append(code)
+    return codes
 
 
 def field_errors(evidence: dict[str, Any]) -> list[dict[str, Any]]:
@@ -219,6 +248,8 @@ def _compare_font_value(
     required_fonts: set[str],
     theme_fonts: set[tuple[str, str, str]],
     errors: list[dict[str, Any]],
+    text_preview: str | None = None,
+    node: Any = None,
 ) -> None:
     if name in {"font_east_asia", "font_latin"}:
         if isinstance(observed, str) and observed.startswith("+") and uses_theme:
@@ -232,14 +263,29 @@ def _compare_font_value(
             and abs(float(observed) - float(expected)) <= FONT_SIZE_TOLERANCE_PT
         )
     if mismatch:
-        errors.append(
-            {
-                "paragraph": paragraph_id,
-                "property": name,
-                "expected": expected,
-                "actual": observed,
-            }
+        error: dict[str, Any] = {
+            "paragraph": paragraph_id,
+            "property": name,
+            "expected": expected,
+            "actual": observed,
+        }
+        if text_preview is not None:
+            error["text_preview"] = text_preview
+        unprotected_refs = _unprotected_cross_ref_codes(node)
+        is_mixed_undefined = observed == WD_UNDEFINED_NUMERIC or (
+            name in {"font_east_asia", "font_latin"} and observed == ""
         )
+        if unprotected_refs:
+            error["fields"] = unprotected_refs
+            error["hint"] = (
+                "Cross-reference REF/PAGEREF field lacks \\* CHARFORMAT; "
+                "Word may copy the target bookmark font/size into this paragraph."
+            )
+        elif is_mixed_undefined:
+            error["hint"] = (
+                "Word reported mixed/undefined run formatting across runs in this paragraph."
+            )
+        errors.append(error)
 
 
 def _check_paragraph_typography(
@@ -255,6 +301,7 @@ def _check_paragraph_typography(
 ) -> None:
     from .properties import read_font, read_paragraph, text_runs
 
+    preview = _text_preview(row.get("text", ""))
     vis_runs = [
         r
         for r in text_runs(node)
@@ -284,6 +331,8 @@ def _check_paragraph_typography(
                 required_fonts=required_fonts,
                 theme_fonts=theme_fonts,
                 errors=errors,
+                text_preview=preview,
+                node=node,
             )
 
     alignment = WORD_ALIGNMENTS.get(read_paragraph(document, node, "alignment"))
@@ -294,6 +343,7 @@ def _check_paragraph_typography(
                 "property": "alignment",
                 "expected": alignment,
                 "actual": row["alignment"],
+                "text_preview": preview,
             }
         )
     if is_toc_heading:
@@ -313,6 +363,7 @@ def _check_paragraph_typography(
                 "property": "first_line_indent",
                 "expected": expected_indent,
                 "actual": observed_indent,
+                "text_preview": preview,
             }
         )
 
@@ -336,6 +387,7 @@ def _check_paragraph_typography(
                 "property": "line_spacing_rule",
                 "expected": sorted(allowed),
                 "actual": observed_rule,
+                "text_preview": preview,
             }
         )
     elif rule == "multiple" and row.get("line_spacing_pt") is not None:
@@ -347,6 +399,7 @@ def _check_paragraph_typography(
                     "property": "line_spacing_pt",
                     "expected": expected_pt,
                     "actual": row["line_spacing_pt"],
+                    "text_preview": preview,
                 }
             )
 

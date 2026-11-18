@@ -36,8 +36,14 @@ from .constants import (
     section_content_width_twips,
     wfm_header_footer_style,
 )
+from document_structure import is_measurement_or_date_prefix
 from .namespaces import qn
-from .properties import paragraph_style_name
+from .properties import (
+    paragraph_style_name,
+    read_paragraph,
+    write_table_header_keep_with_next,
+    write_table_row_cant_split,
+)
 from .ooxml import insert_child
 
 ALIGNMENTS = {
@@ -177,6 +183,10 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
     changes: list[str] = []
     three_line = bool(tables.get("three_line_table", False))
     repeat_header = bool(tables.get("repeat_header_row", False))
+    has_prevent_split = "prevent_row_split" in tables
+    prevent_split = bool(tables.get("prevent_row_split", False))
+    has_keep_header = "keep_header_with_first_row" in tables
+    keep_header = bool(tables.get("keep_header_with_first_row", False))
     alignment = tables.get("alignment")
     latin = tables.get("font_latin") or body.get("font_latin")
     east_asia = tables.get("font_east_asia") or body.get("font_east_asia")
@@ -301,6 +311,11 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
             if trPr.find(qn("w:tblHeader")) is None:
                 trPr.append(parse_xml(f"<w:tblHeader {nsdecls('w')}/>"))
 
+        if has_prevent_split:
+            write_table_row_cant_split(table._tbl, prevent_split)
+        if has_keep_header:
+            write_table_header_keep_with_next(table._tbl, keep_header)
+
         if latin or east_asia or font_size_pt is not None:
             from .properties import element, write_font
 
@@ -328,6 +343,10 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
         desc.append("three-line borders")
     if repeat_header:
         desc.append("repeat header row")
+    if has_prevent_split and prevent_split:
+        desc.append("prevent row split")
+    if has_keep_header and keep_header:
+        desc.append("keep header with first row")
     if alignment:
         desc.append(f"alignment={alignment}")
     if font_size_pt:
@@ -721,6 +740,83 @@ def _insert_body_paragraph_before(document: Document, anchor, style):
     return paragraph
 
 
+_TOC_FRONT_MATTER_SKIP_MODULES = frozenset({"cover", "declaration"})
+_TOC_NEW_PAGE_SECTION_TYPES = frozenset({None, "nextPage", "evenPage", "oddPage"})
+
+
+def _sect_pr_starts_new_page(sect_pr) -> bool:
+    """Return True when sectPr breaks onto a new page (everything except continuous/column)."""
+    if sect_pr is None:
+        return False
+    sec_type = sect_pr.find(qn("w:type"))
+    val = sec_type.get(qn("w:val")) if sec_type is not None else None
+    return val in _TOC_NEW_PAGE_SECTION_TYPES
+
+
+def _paragraph_has_page_break(node) -> bool:
+    """Return True when a paragraph carries an explicit top-level page break run."""
+    return any(
+        br.get(qn("w:type")) == "page"
+        and not any(anc.tag == qn("w:txbxContent") for anc in br.iterancestors() if anc is not node)
+        for br in node.iter(qn("w:br"))
+    )
+
+
+def _has_enabled_page_break_before(pr) -> bool:
+    if pr is None:
+        return False
+    pbr = pr.find(qn("w:pageBreakBefore"))
+    return pbr is not None and pbr.get(qn("w:val"), "1") not in {"0", "false", "off"}
+
+
+def _ensure_leading_page_break_before(
+    document: Document,
+    target_xml,
+    break_style,
+    *,
+    title_paragraph=None,
+    heading_style=None,
+) -> None:
+    """Ensure preceding content and TOC are separated onto distinct pages without duplicate breaks."""
+    if title_paragraph is not None and bool(
+        read_paragraph(document, title_paragraph._p, "page_break_before")
+    ):
+        return
+    if heading_style is not None and _has_enabled_page_break_before(
+        heading_style.element.find(qn("w:pPr"))
+    ):
+        return
+
+    body = document.element.body
+    if target_xml is not None:
+        prev = target_xml.getprevious()
+    else:
+        prev = body[-1] if len(body) else None
+        if prev is not None and prev.tag == qn("w:sectPr"):
+            prev = prev.getprevious()
+
+    def insert_leading_break() -> None:
+        leading_break = _insert_body_paragraph_before(document, target_xml, break_style)
+        leading_break.add_run().add_break(WD_BREAK.PAGE)
+
+    while prev is not None:
+        if prev.tag == qn("w:tbl"):
+            insert_leading_break()
+            return
+        if prev.tag == qn("w:p"):
+            if _paragraph_has_page_break(prev):
+                return
+            sect_pr = prev.find("./" + qn("w:pPr") + "/" + qn("w:sectPr"))
+            if _sect_pr_starts_new_page(sect_pr):
+                return
+            if not _is_empty_top_level_paragraph(prev):
+                insert_leading_break()
+                return
+            if _has_enabled_page_break_before(prev.find(qn("w:pPr"))):
+                return
+        prev = prev.getprevious()
+
+
 def _find_toc_insertion_anchor(document: Document):
     """Find (anchor_paragraph, placeholder_toc_paragraph) for managed TOC insertion.
 
@@ -731,6 +827,15 @@ def _find_toc_insertion_anchor(document: Document):
     If the document contains an unmanaged placeholder TOC heading, that position is
     used and the redundant placeholder paragraph will be removed upon insertion.
     """
+    from .inspect import DocumentIndex
+
+    index = DocumentIndex(document)
+    record_by_elem = {
+        index.elements[oid]: index.records[oid]
+        for oid in index.top_ids
+        if oid in index.elements and oid in index.records
+    }
+
     re_abstract_cn = re.compile(
         r"^\s*(?:[【\[]\s*(?:摘\s*要|中文摘要|内容摘要|提\s*要)\s*[】\]]\s*(?:[:：]\s*)?.*|"
         r"(?:摘\s*要|中文摘要|内容摘要|提\s*要)(?:\s*[:：].*)?)$",
@@ -752,14 +857,34 @@ def _find_toc_insertion_anchor(document: Document):
         re.I,
     )
     re_toc = re.compile(r"^\s*(?:目\s*录|目\s*次|table\s+of\s+contents|contents)\s*$", re.I)
+    # Exclude calendar dates/years (e.g. "2026年11月", "2026.11") and require an explicit
+    # delimiter after 1-2 digit numeric chapter prefixes so digits before CJK units never trigger.
     re_next_module = re.compile(
-        r"^\s*(?:第\s*[一二三四五六七八九十0-9]+\s*章|\d+(?:[、.\s]|\s*)[^\s\d.]|"
+        r"^\s*(?:第\s*[一二三四五六七八九十百零〇0-9]+\s*章|"
+        r"(?!(?:19|20)\d{2}\s*[年./-])\d{1,2}(?:[、.．]|\s+)(?!\d)[^\s\d.]|"
         r"主要符号(?:对照)?表|符号(?:与|及)?缩略语说明|符号说明|缩略语(?:对照)?表|符号表|术语表|"
         r"symbols?|abbreviations?|nomenclature|glossary|"
         r"参考文献|参考资料|引用文献|致\s*谢|谢\s*辞|后\s*记|附\s*录|"
         r"references|bibliography|works\s+cited|acknowledg(?:e)?ments?|appendix)",
         re.I,
     )
+
+    def _is_chapter_h1(paragraph) -> bool:
+        style_lower = paragraph_style_name(document, paragraph._p).lower()
+        rec = record_by_elem.get(paragraph._p, {})
+        return (
+            style_lower.startswith("heading 1")
+            or style_lower.startswith("标题 1")
+            or style_lower == "heading"
+            or rec.get("heading_level") == 1
+        )
+
+    def _matches_next_module(text: str, is_h1: bool = False) -> bool:
+        if is_h1:
+            return True
+        if is_measurement_or_date_prefix(text):
+            return False
+        return bool(re_next_module.match(text))
 
     paragraphs = [
         p for p in document.paragraphs if p.text.strip() or p._p.find(qn("w:drawing")) is not None
@@ -792,17 +917,11 @@ def _find_toc_insertion_anchor(document: Document):
                 return "en"
             if re_abstract_cn.match(ct):
                 return "zh"
-            c_style = paragraph_style_name(document, cand._p).lower()
-            c_h1 = (
-                c_style.startswith("heading 1")
-                or c_style.startswith("标题 1")
-                or c_style == "heading"
-            )
             if (
                 len(ct) > 200
-                or c_h1
+                or _is_chapter_h1(cand)
                 or re_toc.match(ct)
-                or re_next_module.match(ct)
+                or _matches_next_module(ct)
                 or re.search(r"[。；;！？!?]", ct)
             ):
                 return None
@@ -817,22 +936,22 @@ def _find_toc_insertion_anchor(document: Document):
         t = p.text.strip()
         if not t:
             continue
-        style_name = paragraph_style_name(document, p._p).lower()
-        is_h1 = (
-            style_name.startswith("heading 1")
-            or style_name.startswith("标题 1")
-            or style_name == "heading"
-        )
+        rec = record_by_elem.get(p._p, {})
+        is_h1 = _is_chapter_h1(p)
 
         if state == "SEEKING_ABSTRACT":
             if re_abstract_cn.match(t):
                 state = "IN_CHINESE_ABSTRACT"
             elif re_abstract_en.match(t):
                 state = "IN_ENGLISH_ABSTRACT"
+            elif rec.get("module") in _TOC_FRONT_MATTER_SKIP_MODULES:
+                # Never terminate anchor search inside cover/declaration front matter
+                # (e.g. cover date lines like "2026年11月" or declaration numbered clauses).
+                continue
             elif re_toc.match(t):
                 anchor_p = p
                 break
-            elif re_next_module.match(t) or is_h1:
+            elif _matches_next_module(t, is_h1):
                 anchor_p = p
                 break
         elif state == "IN_CHINESE_ABSTRACT":
@@ -840,7 +959,7 @@ def _find_toc_insertion_anchor(document: Document):
                 state = "IN_CHINESE_KEYWORDS"
             elif re_abstract_en.match(t):
                 state = "IN_ENGLISH_ABSTRACT"
-            elif re_toc.match(t) or re_next_module.match(t) or is_h1:
+            elif re_toc.match(t) or _matches_next_module(t, is_h1):
                 anchor_p = p
                 break
         elif state == "IN_CHINESE_KEYWORDS":
@@ -856,7 +975,7 @@ def _find_toc_insertion_anchor(document: Document):
                 state = "IN_ENGLISH_KEYWORDS"
             elif re_abstract_cn.match(t):
                 state = "IN_CHINESE_ABSTRACT"
-            elif re_toc.match(t) or re_next_module.match(t) or is_h1:
+            elif re_toc.match(t) or _matches_next_module(t, is_h1):
                 anchor_p = p
                 break
         elif state == "IN_ENGLISH_KEYWORDS":
@@ -869,7 +988,15 @@ def _find_toc_insertion_anchor(document: Document):
                 break
 
     if anchor_p is None and state == "SEEKING_ABSTRACT":
-        anchor_p = paragraphs[0] if paragraphs else None
+        non_cover = next(
+            (
+                p
+                for p in paragraphs
+                if record_by_elem.get(p._p, {}).get("module") not in _TOC_FRONT_MATTER_SKIP_MODULES
+            ),
+            None,
+        )
+        anchor_p = non_cover or (paragraphs[0] if paragraphs else None)
 
     # If anchor_p was found in a subsequent section (e.g. Chapter 1 in body),
     # check if there is an intervening section break paragraph before anchor_p.
@@ -967,66 +1094,34 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
         title_appearance = tokens.get("title_format", tokens.get("title_style", {}))
         if title_appearance:
             set_run_font(title_run, title_appearance)
-        insert_target = title_paragraph._p.getnext()
-        field_paragraph = _insert_body_paragraph_before(document, insert_target, field_style)
-        append_field(
-            field_paragraph,
-            f'TOC \\o "1-{max_level}" \\h \\z \\u',
-            cached_text="\n".join(cached_entries) or "目录将在 Word 中更新",
+        _ensure_leading_page_break_before(
+            document,
+            title_paragraph._p,
+            break_style,
+            title_paragraph=title_paragraph,
         )
-        if tokens.get("page_break_after", True) and not reusing_boundary:
-            break_paragraph = _insert_body_paragraph_before(
-                document, field_paragraph._p.getnext(), break_style
-            )
-            break_paragraph.add_run().add_break(WD_BREAK.PAGE)
+        field_anchor = title_paragraph._p.getnext()
     else:
-        # Check if there is preceding content before the TOC (e.g. abstract / keywords / cover)
-        # and ensure there is a page break on the last page of the abstract so TOC and abstract are on separate pages.
-        has_preceding_content = False
-        if anchor_xml is not None:
-            prev = anchor_xml.getprevious()
-            while prev is not None:
-                if prev.tag == qn("w:p"):
-                    has_preceding_content = True
-                    break
-                prev = prev.getprevious()
-        elif len(document.paragraphs) > 0:
-            has_preceding_content = True
-
-        if has_preceding_content:
-            prev_p = (
-                anchor_xml.getprevious()
-                if anchor_xml is not None
-                else (document.paragraphs[-1]._p if document.paragraphs else None)
-            )
-            prev_has_break = False
-            while prev_p is not None:
-                if prev_p.tag == qn("w:p"):
-                    for br in prev_p.iter(qn("w:br")):
-                        if br.get(qn("w:type")) == "page":
-                            prev_has_break = True
-                            break
-                    pPr = prev_p.find(qn("w:pPr"))
-                    if pPr is not None and pPr.find(qn("w:pageBreakBefore")) is not None:
-                        prev_has_break = True
-                    break
-                prev_p = prev_p.getprevious()
-
-            if not prev_has_break:
-                leading_break = _insert_body_paragraph_before(document, anchor_xml, break_style)
-                leading_break.add_run().add_break(WD_BREAK.PAGE)
-
+        _ensure_leading_page_break_before(
+            document,
+            anchor_xml,
+            break_style,
+            heading_style=heading_style,
+        )
         title_paragraph = _insert_body_paragraph_before(document, anchor_xml, heading_style)
         title_paragraph.add_run(title)
-        field_paragraph = _insert_body_paragraph_before(document, anchor_xml, field_style)
-        append_field(
-            field_paragraph,
-            f'TOC \\o "1-{max_level}" \\h \\z \\u',
-            cached_text="\n".join(cached_entries) or "目录将在 Word 中更新",
-        )
-        if tokens.get("page_break_after", True) and not reusing_boundary:
-            break_paragraph = _insert_body_paragraph_before(document, anchor_xml, break_style)
-            break_paragraph.add_run().add_break(WD_BREAK.PAGE)
+        field_anchor = anchor_xml
+
+    field_paragraph = _insert_body_paragraph_before(document, field_anchor, field_style)
+    append_field(
+        field_paragraph,
+        f'TOC \\o "1-{max_level}" \\h \\z \\u',
+        cached_text="\n".join(cached_entries) or "目录将在 Word 中更新",
+    )
+    if tokens.get("page_break_after", True) and not reusing_boundary:
+        trailing_anchor = field_paragraph._p.getnext() if placeholder_toc_p is not None else anchor_xml
+        break_paragraph = _insert_body_paragraph_before(document, trailing_anchor, break_style)
+        break_paragraph.add_run().add_break(WD_BREAK.PAGE)
 
     mark_fields_for_update(document)
     break_note = " and page break" if tokens.get("page_break_after", True) else ""

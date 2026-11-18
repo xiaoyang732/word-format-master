@@ -11,6 +11,9 @@ from typing import Any
 
 from .namespaces import qn
 
+MC_NAMESPACE = "http://schemas.openxmlformats.org/markup-compatibility/2006"
+MC_IGNORABLE_ATTR = f"{{{MC_NAMESPACE}}}Ignorable"
+
 SEQUENCES: dict[str, str] = {
     "numbering": "numPicBullet abstractNum num numIdMacAtCleanup",
     "abstractNum": "nsid multiLevelType tmpl name styleLink numStyleLink lvl",
@@ -65,6 +68,50 @@ def insert_child(parent: Any, child: Any) -> Any:
                 return child
     parent.append(child)
     return child
+
+
+def undeclared_mc_ignorable(root: Any) -> list[str]:
+    """Return ordered unique prefixes in mc:Ignorable missing from root.nsmap."""
+    if root is None:
+        return []
+    raw = root.get(MC_IGNORABLE_ATTR)
+    if not raw:
+        return []
+    declared = {prefix for prefix in (getattr(root, "nsmap", None) or {}) if prefix}
+    return [prefix for prefix in dict.fromkeys(raw.split()) if prefix not in declared]
+
+
+def sanitize_mc_ignorable(root: Any) -> list[str]:
+    """Drop undeclared prefixes from mc:Ignorable and return the removed prefixes."""
+    if root is None:
+        return []
+    raw = root.get(MC_IGNORABLE_ATTR)
+    if raw is None:
+        return []
+    declared = {prefix for prefix in (getattr(root, "nsmap", None) or {}) if prefix}
+    tokens = list(dict.fromkeys(raw.split()))
+    kept = [prefix for prefix in tokens if prefix in declared]
+    removed = [prefix for prefix in tokens if prefix not in declared]
+    if kept:
+        root.set(MC_IGNORABLE_ATTR, " ".join(kept))
+    else:
+        root.attrib.pop(MC_IGNORABLE_ATTR, None)
+    return removed
+
+
+def package_mc_ignorable_errors(document: Any) -> list[str]:
+    """Validate that every XML part declares all prefixes named in its mc:Ignorable attribute."""
+    errors: list[str] = []
+    for part in document.part.package.parts:
+        root = getattr(part, "element", None)
+        if root is None:
+            continue
+        missing = undeclared_mc_ignorable(root)
+        if missing:
+            errors.append(
+                f"{part.partname}: undeclared mc:Ignorable prefixes ({', '.join(missing)})"
+            )
+    return errors
 
 
 def sequence_warnings(root: Any) -> list[str]:

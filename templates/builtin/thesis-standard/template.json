@@ -200,6 +200,8 @@
     "tables": {
       "three_line_table": true,
       "repeat_header_row": true,
+      "prevent_row_split": true,
+      "keep_header_with_first_row": true,
       "alignment": "center",
       "font_size_pt": 10.5,
       "font_east_asia": "宋体",

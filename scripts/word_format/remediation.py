@@ -63,7 +63,8 @@ NUMBERING_KIND_REMEDIATIONS: dict[str, dict[str, str]] = {
         "cause": "图表题注使用了手打编号（如“表 1.1”、“图 2.1”），未使用 Word 动态域。",
         "fix": (
             "将题注编号替换为 STYLEREF 1 \\s 与 SEQ Table \\* ARABIC \\s 1（或 SEQ Figure）组合域，"
-            "并用书签（如 Ref_Table_1_1）包裹编号部分，正文中通过 REF Ref_Table_1_1 \\h 交叉引用。"
+            "并用书签（如 Ref_Table_1_1）包裹编号部分，正文中通过 REF Ref_Table_1_1 \\h \\* CHARFORMAT 交叉引用，"
+            "避免继承题注字号引发混排或 Word wdUndefined(9999999) 报错。"
         ),
     },
     "reference_or_citation": {

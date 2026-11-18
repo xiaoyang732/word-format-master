@@ -121,6 +121,7 @@ python scripts/format_cli.py verify --plan plan.json --report report.json --outp
 | 制表位及引导符 | `paragraph.tabs.set` | 完整有效集合；整数 twip 位置、对齐、leader；清除未请求的继承位置 |
 | 页面尺寸、边距、页眉页脚距离 | `page.*.set` | 每项只写所选节的对应属性 |
 | 表格对齐、标题行重复 | `table.alignment.set` / `table.header_repeat.set` | 所选表格属性 |
+| 表格防跨页断行、表头连首行 | `table.row_cant_split.set` / `table.header_keep_with_next.set` | 全表行 `cantSplit`；多行表首行段落 `keepNext`（单行表跳过） |
 | 三线表 | `table.three_line.apply` | 保存原始边框后应用；false 只恢复本工具保存的边框 |
 | 样式指派 | `paragraph.style.assign` | 只接受段落样式；可显式创建新样式 |
 | 页眉页脚、页码、目录、编号、题注位置、引用 | 登记的 configure / convert / insert 操作 | 明确列出结构影响，独立验收 |

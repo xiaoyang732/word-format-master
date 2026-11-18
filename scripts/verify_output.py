@@ -20,6 +20,7 @@ from word_format.constants import (
     STYLE_WFM_TOC_HEADING,
     TOC_MANAGED_STYLES,
 )
+from word_format.ooxml import package_mc_ignorable_errors
 from word_format.properties import outline_level, paragraph_style_name
 
 EXPECTED_LIST_MARKERS = LIST_NUMBERING_STYLES
@@ -57,6 +58,16 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
             "errors": [str(exc)],
             "content_review": content_review_scope(),
         }
+
+    mc_errors = package_mc_ignorable_errors(document)
+    _check(
+        checks,
+        "package-mc-ignorable",
+        not mc_errors,
+        "all XML parts declare every mc:Ignorable namespace prefix",
+    )
+    if mc_errors:
+        errors.extend(mc_errors)
 
     requested_structure = spec.get("document_structure")
     if isinstance(requested_structure, dict) and requested_structure.get("match") in {

@@ -2,15 +2,18 @@
 
 import copy
 import re
+from xml.sax.saxutils import escape
 
-from docx.oxml import OxmlElement
+from docx.oxml import OxmlElement, parse_xml
 from docx.enum.style import WD_STYLE_TYPE
 from docx.section import Section, _Header
+from lxml import etree
 
 from .constants import NUMERIC_TOLERANCE
 from .contracts import FormatError, require_keys, text_value
 from .fields import field_codes, page_number_paragraphs
 from .namespaces import qn
+from .ooxml import sanitize_mc_ignorable
 from .properties import (
     FONT_TAGS,
     element,
@@ -85,6 +88,27 @@ def effective_root(container):
     return container._element if container is not None else None
 
 
+def _merge_root_namespaces(container, saved):
+    """Ensure the new header/footer root inherits all extension xmlns:* declarations from saved."""
+    target_root = container._element
+    base_ns = {prefix: uri for prefix, uri in (target_root.nsmap or {}).items() if prefix}
+    saved_ns = {prefix: uri for prefix, uri in (saved.nsmap or {}).items() if prefix}
+    missing_ns = {prefix: uri for prefix, uri in saved_ns.items() if prefix not in base_ns}
+    if not missing_ns:
+        return target_root
+    combined_ns = {**base_ns, **missing_ns}
+    qname = etree.QName(target_root)
+    ns_prefix = next((p for p, u in combined_ns.items() if u == qname.namespace), "w")
+    attr_escape = {'"': "&quot;"}
+    ns_decls = " ".join(
+        f'xmlns:{prefix}="{escape(uri, attr_escape)}"'
+        for prefix, uri in combined_ns.items()
+    )
+    rebuilt = parse_xml(f"<{ns_prefix}:{qname.localname} {ns_decls}/>")
+    container.part._element = rebuilt
+    return rebuilt
+
+
 def detach(container):
     source = container
     while source is not None and not source._has_definition:
@@ -110,25 +134,28 @@ def detach(container):
     if saved is None:
         container._element.attrib.clear()
         container._element[:] = [OxmlElement("w:p")]
-    if saved is not None:
-        container._element.attrib.clear()
-        container._element.attrib.update(saved.attrib)
-        ids = {
-            rel.rId: container.part.relate_to(
-                rel.target_ref if rel.is_external else rel.target_part, rel.reltype, rel.is_external
-            )
-            for rel in relationships
-        }
-        for node in saved.iter():
-            for attr, value in list(node.attrib.items()):
-                if (
-                    attr.startswith(
-                        "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
-                    )
-                    and value in ids
-                ):
-                    node.set(attr, ids[value])
-        container._element[:] = list(saved)
+        sanitize_mc_ignorable(container._element)
+        return
+    target_root = _merge_root_namespaces(container, saved)
+    target_root.attrib.clear()
+    target_root.attrib.update(saved.attrib)
+    ids = {
+        rel.rId: container.part.relate_to(
+            rel.target_ref if rel.is_external else rel.target_part, rel.reltype, rel.is_external
+        )
+        for rel in relationships
+    }
+    for node in saved.iter():
+        for attr, value in list(node.attrib.items()):
+            if (
+                attr.startswith(
+                    "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
+                )
+                and value in ids
+            ):
+                node.set(attr, ids[value])
+    target_root[:] = list(saved)
+    sanitize_mc_ignorable(target_root)
 
 
 def editable_header(index, ref, variant):
