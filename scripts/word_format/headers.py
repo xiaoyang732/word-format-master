@@ -4,7 +4,8 @@ import copy
 import re
 
 from docx.oxml import OxmlElement
-from docx.section import Section
+from docx.enum.style import WD_STYLE_TYPE
+from docx.section import Section, _Header
 
 from .contracts import FormatError, require_keys, text_value
 from .fields import field_codes, page_number_paragraphs
@@ -22,6 +23,14 @@ from .properties import (
 )
 
 VARIANTS = {"default": "header", "first": "first_page_header", "even": "even_page_header"}
+
+
+def style_reference(style):
+    """Use language independent selectors only for verified built-in Heading styles."""
+    match = re.fullmatch(r"heading\s*([1-9])", style.name or "", re.I)
+    if style.builtin and match:
+        return match[1]
+    return '"' + style.name.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
 def variant_params(params, validator):
@@ -54,7 +63,7 @@ def content_params(params):
         "chapter header",
     )
     name = text_value(params["style_name"], "style_name")
-    if any(c in name for c in ('"', "\\", "\n", "\r")):
+    if any(c in name for c in ('\n', '\r')):
         raise FormatError("Unsafe STYLEREF style name")
     return {
         "mode": "chapter_title",
@@ -83,7 +92,18 @@ def detach(container):
     saved = copy.deepcopy(root) if root is not None else None
     # Always create a new part: two explicit references may share the same rId.
     if container._has_definition:
-        container._drop_definition()
+        section = container._sectPr
+        variant = container._hdrftr_index
+        reference = (
+            section.get_headerReference(variant) if isinstance(container, _Header)
+            else section.get_footerReference(variant)
+        )
+        # python-docx drops the relationship after removing the reference. If
+        # it is shared with just one other section, that would delete its link.
+        if container._document_part._rel_ref_count(reference.rId) > 1:
+            section.remove(reference)
+        else:
+            container._drop_definition()
     container._add_definition()
     if saved is None:
         container._element.attrib.clear()
@@ -126,11 +146,15 @@ def editable_header(index, ref, variant):
 def set_content(index, ref, params):
     if params["mode"] == "chapter_title":
         name = params["style_name"]
-        if name not in index.document.styles or index.document.styles[name].type != 1:
+        style = next((
+            candidate for candidate in index.document.styles
+            if candidate.type == WD_STYLE_TYPE.PARAGRAPH and candidate.name == name
+        ), None)
+        if style is None:
             raise FormatError(
                 "STYLEREF requires an existing paragraph style", "needs_clarification"
             )
-        sid = index.document.styles[name].style_id
+        sid = style.style_id
         if not any(
             p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")) is not None
             and p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")).get(qn("w:val")) == sid
@@ -167,7 +191,7 @@ def set_content(index, ref, params):
     else:
         p.add_run(params["prefix"])
         field = OxmlElement("w:fldSimple")
-        field.set(qn("w:instr"), f'STYLEREF "{params["style_name"]}"')
+        field.set(qn("w:instr"), f"STYLEREF {style_reference(style)}")
         field.set(qn("w:dirty"), "true")
         field.append(OxmlElement("w:r"))
         p._p.append(field)
@@ -380,6 +404,11 @@ def read_header(index, ref, cap):
                 if root is not None
                 else [],
             }
+            # Normalize the reader to the same selector mapping as the writer.
+            variants[variant]["style_selectors"] = {
+                style.name: style_reference(style) for style in index.document.styles
+                if style.type == WD_STYLE_TYPE.PARAGRAPH
+            }
         else:
             variants[variant] = []
             if root is not None:
@@ -409,10 +438,11 @@ def verify_header(actual, params, cap):
     selected = actual[params["variant"]]
     if name == "content":
         if params["mode"] == "text":
-            return selected == {"text": params["text"], "fields": []}
-        return selected == {
+            return selected["text"] == params["text"] and selected["fields"] == []
+        selector = selected.get("style_selectors", {}).get(params["style_name"])
+        return {k:v for k,v in selected.items() if k != "style_selectors"} == {
             "text": params["prefix"],
-            "fields": [f'STYLEREF "{params["style_name"]}"'],
+            "fields": [f'STYLEREF {selector}'],
         }
     if name == "link":
         return selected is params["value"]

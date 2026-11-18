@@ -197,6 +197,11 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
             paragraph_style_name(document, paragraph._p)
             for paragraph in document.paragraphs
             if paragraph_style_name(document, paragraph._p) in {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
+            and not (
+                paragraph_style_name(document, paragraph._p) == "WFM TOC Break"
+                and not paragraph.text.strip()
+                and paragraph._p.find("./" + qn("w:pPr") + "/" + qn("w:sectPr")) is not None
+            )
         }
         all_toc_codes = [
             " ".join(node.text.split())
@@ -214,7 +219,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
         update = document.settings.element.find(qn("w:updateFields"))
         update_enabled = update is not None and update.get(qn("w:val")) in {"true", "1"}
         if toc.get("enabled"):
-            from word_format.toc import headings, result_status
+            from word_format.toc import headings, is_trailing_break, result_status
 
             expected_level = int(toc.get("max_heading_level", 3))
             expected_switch = f'\\o "1-{expected_level}"'
@@ -228,9 +233,7 @@ def verify_structure(path: str | Path, spec: dict[str, Any], *, check_format: bo
             )
             break_matches = any(
                 paragraph_style_name(document, paragraph._p) == "WFM TOC Break"
-                and any(node.get(qn("w:type")) == "page" for node in paragraph._p.iter(qn("w:br")))
-                and paragraph._p.getprevious() is not None
-                and any(n.text and "TOC " in n.text for n in paragraph._p.getprevious().iter(qn("w:instrText")))
+                and is_trailing_break(paragraph._p)
                 for paragraph in document.paragraphs
             )
             break_ok = break_matches if toc.get("page_break_after", True) else not break_matches

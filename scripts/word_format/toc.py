@@ -8,6 +8,37 @@ from .namespaces import qn
 from .properties import outline_level, paragraph_style_name
 
 
+def entry_styles(document, max_level, *, create=False):
+    """Return Word's native TOC paragraph styles in level order."""
+    from docx.enum.style import WD_STYLE_TYPE
+
+    def normalized(name):
+        return (name or "").casefold().replace(" ", "")
+
+    styles = {
+        normalized(style.name): style
+        for style in document.styles if style.type == WD_STYLE_TYPE.PARAGRAPH
+    }
+    for level in range(1, max_level + 1):
+        style = styles.get(f"toc{level}") or styles.get(f"目录{level}")
+        if style is None and create:
+            style = document.styles.add_style(f"toc {level}", WD_STYLE_TYPE.PARAGRAPH, builtin=True)
+            style.base_style = document.styles.default(WD_STYLE_TYPE.PARAGRAPH)
+        yield style
+
+
+def is_trailing_break(paragraph):
+    previous = paragraph.getprevious()
+    return (
+        previous is not None
+        and any(n.text and "TOC " in n.text for n in previous.iter(qn("w:instrText")))
+        and (
+            paragraph.find("./" + qn("w:pPr") + "/" + qn("w:sectPr")) is not None
+            or any(node.get(qn("w:type")) == "page" for node in paragraph.iter(qn("w:br")))
+        )
+    )
+
+
 def imported_fields(document):
     """Only complete, standalone imported TOC fields can be safely replaced.
 

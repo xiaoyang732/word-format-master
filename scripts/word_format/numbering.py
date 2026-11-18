@@ -9,6 +9,7 @@ from docx.oxml import OxmlElement
 from .contracts import FormatError, json_hash, number, require_keys, text_value
 from .namespaces import qn
 from .properties import element, ppr_sources, strip_text_prefix
+from .ooxml import insert_child
 
 
 def heading_prefix(text):
@@ -180,7 +181,9 @@ def extract_heading_scheme(index):
 
 
 def _definition(document, params):
-    root = document.part.numbering_part.element
+    from .structures import _get_numbering_element
+
+    root = _get_numbering_element(document, create=True)
     name = "WFM:" + json_hash(params)
     for abstract in root.findall(qn("w:abstractNum")):
         label = abstract.find(qn("w:name"))
@@ -217,21 +220,22 @@ def _definition(document, params):
         if config.get("legal"):
             element(level, "isLgl")
         abstract.append(level)
-    root.append(abstract)
+    insert_child(root, abstract)
     num = OxmlElement("w:num")
     num.set(qn("w:numId"), str(nid))
     element(num, "abstractNumId").set(qn("w:val"), str(aid))
-    root.append(num)
+    insert_child(root, num)
     return nid
 
 
-def apply_heading_scheme(index, ref, params):
+def apply_heading_scheme(index, ref, params, *, preserve_levels=()):
     from .structures import _set_paragraph_numbering
 
     records = [
         index.records[oid]
         for oid in index.top_ids
         if index.records[oid].get("semantic_role") == "chapter_heading"
+        and index.records[oid].get("heading_level") not in preserve_levels
     ]
     if not records:
         return []
@@ -248,6 +252,32 @@ def apply_heading_scheme(index, ref, params):
             strip_text_prefix(paragraph._p, prefix.end())
         _set_paragraph_numbering(paragraph, nid, level - 1)
     return [f"Applied template numbering to {len(records)} chapter headings"]
+
+
+def apply_legacy_heading_scheme(document, params):
+    """Adapt legacy enums to the same semantic targets and writer as explicit levels."""
+    import json
+    from config import SKILL_DIR
+    from .inspect import DocumentIndex
+
+    modes = json.loads(
+        (SKILL_DIR / "templates/compatibility/heading-numbering.json").read_text(encoding="utf-8")
+    )
+    levels = []
+    preserved = list(range(4, 10))
+    for level in range(1, 4):
+        mode = params.get(f"level{level}", "keep")
+        if mode == "keep":
+            preserved.append(level)
+        config = dict(modes[mode]) if level == 1 else {
+            "format": "decimal", "text": ".".join(f"%{n}" for n in range(1, level + 1)),
+            "legal": True,
+        }
+        levels.append({**config, "start": 1, "suffix": "space"})
+    return apply_heading_scheme(
+        DocumentIndex(document), {"id": "document"}, {"levels": levels},
+        preserve_levels=preserved,
+    )
 
 
 def read_heading_scheme(index, ref, cap):

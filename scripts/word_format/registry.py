@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 from typing import Callable
 
-from . import headers, section_breaks
+from . import headers, section_breaks, numbering_order
 from . import numbering as template_numbering
 from . import operations as op
 from .citation_display import DISPLAY_VALUES, read_citation_display, set_citation_display
@@ -56,6 +56,11 @@ class Capability:
 
 
 REGISTRY: dict[str, Capability] = {}
+REGISTRY["numbering.order.repair"] = Capability(
+    "numbering.order.repair", "numbering_order", frozenset({"document"}),
+    numbering_order.repair, numbering_order.validate, numbering_order.read, numbering_order.verify,
+    {}, True, ("explicit repair of known numbering sequences; existing IDs and subtrees retained",),
+)
 
 
 def scalar(kind, low=None, high=None, unit=None, enum=None):
@@ -199,6 +204,7 @@ def read_atomic(index, ref, cap):
         "snap_to_grid",
         "mirror_indents",
         "tabs",
+        "border_bottom",
     }:
         return read_paragraph(index.document, p, cap.property)
     if cap.property.startswith("page:"):
@@ -448,6 +454,8 @@ for action, prop, handler, validator, params in (
      scalar("boolean"), {"value": "boolean"}),
     ("paragraph.mirror_indents.set", "mirror_indents", op.set_mirror_indents,
      scalar("boolean"), {"value": "boolean"}),
+    ("paragraph.border_bottom.set", "border_bottom", op.set_border_bottom,
+     scalar("boolean"), {"value":"boolean"}),
     ("paragraph.tabs.set", "tabs", op.set_tabs, tabs,
      {"value": "complete list of {alignment, position: -31680..31680 integer, unit: twips, leader}; empty clears inherited custom stops"}),
 ):
@@ -628,7 +636,7 @@ for action, prop, handler, section, effects in (
         "caption_position",
         op.set_caption_position,
         "caption_position",
-        ("adjacent top-level caption order",),
+        ("adjacent top-level caption order", "keepNext on a proven caption/object pair"),
     ),
     (
         "citation.insert",

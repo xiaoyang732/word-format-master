@@ -57,68 +57,11 @@ def _rewrite_dotx_bytes(path: Path) -> bytes:
 
 
 def _word_com_to_docx(staged_source: Path, output_docx: Path) -> None:
-    shell = shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
-    if not shell:
-        raise RuntimeError("PowerShell is unavailable for Word/WPS COM conversion")
-    # wdFormatXMLDocument = 12 forces Transitional DOCX regardless of Word's default save setting.
-    script = r"""
-param([string]$InputPath, [string]$OutputPath)
-$app = $null
-$doc = $null
-$ErrorActionPreference = 'Stop'
-try {
-  foreach ($progId in @('Word.Application', 'KWPS.Application', 'WPS.Application')) {
-    try {
-      $app = New-Object -ComObject $progId
-      break
-    } catch {}
-  }
-  if ($null -eq $app) {
-    throw 'No Word/WPS COM server available'
-  }
-  $app.Visible = $false
-  try { $app.DisplayAlerts = 0 } catch {}
-  $doc = $app.Documents.Open($InputPath, $false, $true)
-  try {
-    $doc.SaveAs2([ref]$OutputPath, [ref]12)
-  } catch {
-    $doc.SaveAs($OutputPath, 12)
-  }
-} finally {
-  if ($null -ne $doc) { try { $doc.Close(0) } catch {} }
-  if ($null -ne $app) { try { $app.Quit() } catch {} }
-  if ($null -ne $doc) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($doc) }
-  if ($null -ne $app) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($app) }
-  [GC]::Collect()
-  [GC]::WaitForPendingFinalizers()
-}
-""".strip()
-    with tempfile.TemporaryDirectory(prefix="wfm-doc-com-") as temp_dir:
-        script_path = Path(temp_dir) / "convert_to_docx.ps1"
-        script_path.write_text(script + "\n", encoding="utf-8")
-        result = subprocess.run(
-            [
-                shell,
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(script_path),
-                str(staged_source),
-                str(output_docx),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-        )
-    if result.returncode != 0 or not _is_valid_ooxml_docx(output_docx):
-        detail = (result.stderr or result.stdout).strip()
-        raise RuntimeError(f"Word/WPS COM conversion failed: {detail[-500:] or 'no DOCX output'}")
+    from office_automation import automate_word
+
+    automate_word(staged_source, output_docx, mode="convert", timeout=120)
+    if not _is_valid_ooxml_docx(output_docx):
+        raise RuntimeError("Microsoft Word did not produce a readable DOCX")
 
 
 def _libreoffice_to_docx(staged_source: Path, output_docx: Path, executable: Path) -> None:
@@ -176,14 +119,7 @@ def _convert_legacy_word_file(staged_source: Path, output_docx: Path) -> None:
             return
         except Exception as exc:  # noqa: BLE001
             errors.append(str(exc))
-    if os.name == "nt" and not runtime.get("word", {}).get("available"):
-        # Attempt WPS ProgIDs even when Word.Application CLSID was not registered.
-        try:
-            _word_com_to_docx(staged_source, output_docx)
-            return
-        except Exception as exc:  # noqa: BLE001
-            errors.append(str(exc))
-    detail = "; ".join(errors) if errors else "Microsoft Word, WPS Office, or LibreOffice not found"
+    detail = "; ".join(errors) if errors else "Microsoft Word or LibreOffice not found"
     raise FormatError(
         f"Cannot read legacy {staged_source.suffix.upper()} file without a local converter ({detail})",
         "unsupported",

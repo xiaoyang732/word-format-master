@@ -27,7 +27,7 @@ def build_release(output, template_mode="native", root=ROOT):
     files = {}
     for name in ("LICENSE.txt", "README.md", "requirements.txt", "SECURITY.md", "SKILL.md"):
         files[name] = (root / name).read_bytes()
-    for folder, suffixes in (("scripts", {".py"}), ("references", {".md"}),
+    for folder, suffixes in (("scripts", {".py", ".ps1"}), ("references", {".md"}),
                              ("agents", {".yaml"}), ("assets", {".json"}), ("templates", {".json", ".md", ".docx"})):
         for source in sorted((root / folder).rglob("*")):
             if not source.is_file() or source.suffix not in suffixes or "__pycache__" in source.parts:

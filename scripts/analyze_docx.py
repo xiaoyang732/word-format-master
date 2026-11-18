@@ -823,11 +823,14 @@ def infer_section_header_tokens(package, names, styles, theme_fonts, sections, p
             item=infer_header_footer_tokens(package,names,styles,theme_fonts,[by_part[name]])["header"]
             root=read_xml(package,name)
             codes=[w_attr(n,"instr") or "" for n in root.findall(".//w:fldSimple",NS)]+[n.text or "" for n in root.findall(".//w:instrText",NS)]
-            dynamic=[re.fullmatch(r'\s*STYLEREF\s+"([^"\\]+)"\s*',code,re.I) for code in codes]
+            dynamic=[re.fullmatch(r'\s*STYLEREF\s+(?:"((?:\\.|[^"\\])+)"|([1-9]))\s*',code,re.I) for code in codes]
             prefix = _styleref_prefix(root) if len(codes)==1 and dynamic[0] else None
             if prefix is not None:
                 item.pop("text",None)
-                item.update(enabled=True,mode="chapter_title",style_name=dynamic[0][1],prefix=prefix)
+                match = dynamic[0]
+                style_name = (re.sub(r'\\(["\\])', r'\1', match[1]) if match[1]
+                              else f"Heading {match[2]}")
+                item.update(enabled=True,mode="chapter_title",style_name=style_name,prefix=prefix)
             elif codes and any("STYLEREF" in c.upper() for c in codes):
                 # Preserve and report complex fields; never convert their cache to literal text.
                 tokens.setdefault("unsupported_headers",[]).append(f'section {s["index"]} / {variant}: unsupported STYLEREF switches, suffix, objects or paragraph combination')

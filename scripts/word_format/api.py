@@ -132,6 +132,9 @@ def build_plan(input_path, output, request, *, _document=None):
     operations = request.get("operations")
     if not isinstance(operations, list) or len(operations) > MAX_OPERATIONS:
         raise FormatError(f"operations must be an array with at most {MAX_OPERATIONS} entries")
+    from .body_sections import order_scoped_pagination
+
+    operations = order_scoped_pagination(operations)
     if any(
         isinstance(o, dict) and o.get("action") == "section.break.next_page.insert"
         for o in operations
@@ -328,6 +331,14 @@ def _has_valid_property_order(index, ref, cap):
     node = index.elements.get(ref["id"])
     if node is None:
         return True
+    if cap.property in {"heading_numbering", "numbered", "reference_numbering", "citations"}:
+        from .numbering_order import integrity
+        from .ooxml import sequence_warnings
+        from .structures import _get_numbering_element
+
+        root = _get_numbering_element(index.document)
+        if root is not None and (integrity(root) or sequence_warnings(root)):
+            return False
     if ref["kind"] in {"paragraph", "text_range"}:
         ppr = node.find(qn("w:pPr"))
         if ppr is not None and node.index(ppr) != 0:
@@ -410,6 +421,8 @@ def apply_plan(plan, *, overwrite=False):
     notes = []
     for item in plan["operations"]:
         cap = REGISTRY[item["action"]]
+        if cap.structural:
+            index.refresh_semantics()
         local = []
         before_projection = (
             _preservation(index, item["targets"], cap) if not cap.structural else None
@@ -583,6 +596,7 @@ def _validate_report_checks(plan, report):
             "heading.numbering.configure",
             "section.break.next_page.insert",
             "caption.position.configure",
+            "page_number.configure",
         }
         for item in plan["operations"]
     )

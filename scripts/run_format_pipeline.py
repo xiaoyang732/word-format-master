@@ -126,7 +126,8 @@ def run_pipeline(input_path, output_path, *, template=None, profile=None, resolu
     # A page review is produced after rendering; permit attaching it on resume.
     files = {str(Path(p).resolve()): digest(p) for p in protected
              if p and Path(p).resolve() != output and p != visual_report}
-    engine = {p.relative_to(SKILL_DIR).as_posix(): digest(p) for p in (SKILL_DIR / "scripts").rglob("*.py")}
+    engine = {p.relative_to(SKILL_DIR).as_posix(): digest(p)
+              for p in (SKILL_DIR / "scripts").rglob("*") if p.suffix in {".py", ".ps1"}}
     identity = {"files": files, "engine": hashlib.sha256(json.dumps(engine, sort_keys=True).encode()).hexdigest(),
                 "output": str(output), "template": str(template), "profile": str(profile),
                 "mapping": str(mapping), "resolutions": str(resolutions), "match_structure": match_structure,
@@ -163,6 +164,14 @@ def run_pipeline(input_path, output_path, *, template=None, profile=None, resolu
             checks["structure"] = "pending"
         if not render:
             checks["render"] = "skipped"
+        checks["office"] = "not_executed"
+        render_manifest = reports / "render/render-manifest.json"
+        if render_manifest.is_file():
+            try:
+                rendered = json.loads(render_manifest.read_text(encoding="utf-8"))
+                checks["office"] = rendered.get("office_validation", {}).get("status", "not_recorded")
+            except (ValueError, OSError):
+                checks["office"] = "pending"
         checks["visual"] = "pending" if render else "skipped"
         if stages.get("visual", {}).get("status") == "failed":
             checks["visual"] = "failed"
@@ -200,6 +209,11 @@ def run_pipeline(input_path, output_path, *, template=None, profile=None, resolu
             try:
                 result = subprocess.run(command, check=True, capture_output=True, encoding="utf-8",
                                         errors="backslashreplace", timeout=render_timeout if name == "render" else None)
+                if name == "render":
+                    manifest = json.loads((reports / "render/render-manifest.json").read_text(encoding="utf-8"))
+                    office = manifest.get("office_validation")
+                    if office and office.get("status") != "passed":
+                        raise ValueError("Office semantic validation failed: " + json.dumps(office, ensure_ascii=False))
                 state.succeeded(name, paths() if callable(paths) else paths)
                 return result
             except (subprocess.SubprocessError, OSError, ValueError) as exc:
@@ -225,6 +239,12 @@ def run_pipeline(input_path, output_path, *, template=None, profile=None, resolu
                 path = Path(page["path"]).resolve()
                 if (reports / "render").resolve() not in path.parents:
                     raise ValueError("非法渲染产物路径")
+                ensure_protected_paths(path, *protected)
+                paths.append(path)
+            if data.get("office_evidence"):
+                path = Path(data["office_evidence"]["path"]).resolve()
+                if (reports / "render").resolve() not in path.parents:
+                    raise ValueError("非法 Office 验收产物路径")
                 ensure_protected_paths(path, *protected)
                 paths.append(path)
         return paths
@@ -282,7 +302,8 @@ def run_pipeline(input_path, output_path, *, template=None, profile=None, resolu
                 stage("quality", q_args, [reports / "quality.json"])
             if render:
                 stage("render", [sys.executable, str(SKILL_DIR / "scripts/render_docx.py"), str(output),
-                                 "--output-dir", str(reports / "render"), "--method", render_method],
+                                 "--output-dir", str(reports / "render"), "--method", render_method,
+                                 "--baseline", str(source)],
                       render_artifacts, retries=render_retries)
             if visual_report:
                 stage("visual", [sys.executable, cli, "verify", "--plan", str(plan), "--report", str(applied),

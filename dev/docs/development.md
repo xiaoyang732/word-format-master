@@ -23,3 +23,5 @@ python dev/tools/validate_release.py dev/artifacts/word-format-master-1.3.1-json
 SkillHub 发布须显式提交 `overviewMd`（使用 `dev/docs/skillhub-overview.md` 中保留的完整概述）与非空的中文 `changelog`（更新简介）。当前本机 CLI 的 publish 请求省略 `overviewMd` 会导致平台回退展示精简的 SKILL.md，而省略 `changelog` 会导致平台回退显示 `Initial release`。发布后回读概述与版本信息并逐字校验。
 
 CI 在 Windows、macOS 和 Linux 上运行核心回归及两种分发构建。页面渲染环境应另行配置并完成逐页验收，构建通过不代表页面视觉已通过。新模板需登记来源、使用说明、指纹与结构契约，并通过同一分发检查。
+
+本机 Microsoft Word 回归使用 `python -B dev/tools/check_office_compatibility.py --workspace <新的任务工作区>`。将 `TEMP` 和 `TMP` 指向工作区的临时目录，可将测试产物和缓存统一留在任务目录。

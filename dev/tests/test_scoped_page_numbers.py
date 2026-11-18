@@ -91,14 +91,14 @@ class ScopedPageNumberTests(unittest.TestCase):
             with self.subTest(params=params), self.assertRaises(FormatError):
                 self.plan(**params)
 
-    def test_missing_body_marker_does_not_silently_number_front_matter(self):
+    def test_explicit_heading_style_resolves_body_without_a_named_marker(self):
         doc = Document(self.source)
         for p in doc.paragraphs:
             if "第1章" in p.text or "第2章" in p.text:
                 p.text = "业务分析"
         doc.save(self.source)
-        with self.assertRaises(FormatError):
-            self.execute(scope="body")
+        result = self.execute(scope="body")
+        self.assertEqual(result.sections[2]._sectPr.find(qn("w:pgNumType")).get(qn("w:start")), "1")
 
     def test_verifier_rejects_wrong_body_reset(self):
         plan = self.plan(scope="body")

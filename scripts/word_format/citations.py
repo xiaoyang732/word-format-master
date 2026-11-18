@@ -10,6 +10,7 @@ from .citation_display import DISPLAY_VALUES, run_display, write_display
 from .contracts import FormatError
 from .namespaces import qn
 from .properties import element, strip_text_prefix, xml_value
+from .ooxml import insert_child
 
 PREFIX = re.compile(r'^\s*(?:\[\s*\d+\s*\]|［\s*\d+\s*］|\d+[.)、])\s*')
 
@@ -88,9 +89,9 @@ def _number_references(document, references):
     for tag,value in [('start','1'),('numFmt','decimal'),('lvlText','[%1]'),('suff','space')]:
         element(level,tag).set(qn('w:val'),value)
     if marker_fonts and marker_fonts[0] is not None:level.append(copy.deepcopy(marker_fonts[0]))
-    root.append(abstract)
+    insert_child(root, abstract)
     num=OxmlElement('w:num');num.set(qn('w:numId'),str(nid))
-    element(num,'abstractNumId').set(qn('w:val'),str(aid));root.append(num)
+    element(num,'abstractNumId').set(qn('w:val'),str(aid));insert_child(root,num)
     for ref,values in zip(references,retained):
         paragraph=document.paragraphs[ref['paragraph_index']]
         prefix=PREFIX.match(paragraph.text)
@@ -118,13 +119,9 @@ def _run(text=None, pr=None):
 
 
 def _field(name, number, pr):
-    result=[]
-    for tag,value in [('fldChar','begin'),('instrText',f' REF {name} \\n \\h \\* MERGEFORMAT '),('fldChar','separate'),('t',f'[{number}]'),('fldChar','end')]:
-        run=_run(pr=pr);node=element(run,tag)
-        if tag=='fldChar':node.set(qn('w:fldCharType'),value)
-        else:node.text=value
-        result.append(run)
-    return result
+    from .fields import complex_field_runs
+
+    return complex_field_runs(f'REF {name} \\n \\h \\* MERGEFORMAT', f'[{number}]', pr)
 
 
 def _insert(paragraph, offset, nodes):
@@ -299,7 +296,7 @@ def read_state(document):
                 kind=node.get(qn('w:fldCharType'))
                 if kind=='begin':
                     stack.append({'code':'','text':'','result':False,'start':None,'displays':[],
-                                  'controls':set()})
+                                  'controls':set(), 'space_preserved':True})
                 elif kind=='separate' and stack:
                     stack[-1].update(result=True, start=offset)
                 if stack and kind in {'begin', 'separate', 'end'}:
@@ -310,6 +307,7 @@ def read_state(document):
                     fields.append(field)
             elif node.tag==qn('w:instrText') and stack:
                 stack[-1]['code'] += node.text or ''
+                stack[-1]['space_preserved'] &= node.get(qn('xml:space')) == 'preserve'
                 stack[-1]['controls'].add(run_display(document, p._p, node.getparent()))
             elif node.tag==qn('w:t'):
                 text = node.text or ''
@@ -372,6 +370,8 @@ def verify_state(state,params):
             if not rows[target]['numbering'] or rows[target]['numbering']['format']!='decimal' or rows[target]['numbering']['value']!=number:return False
             found=False
             for field in row['fields']:
+                if not field['space_preserved']:
+                    continue
                 if (field['start'] != start + token.start() or field['displays'] != [expected_display]
                         or field['controls'] != [expected_display]):
                     continue
@@ -439,10 +439,12 @@ def snapshot(index,params,baseline=None):
             else:tokens.append(xml_value(child))
         if p in reference_nodes:tokens.append(('effective_reference_paragraph',effective))
         paragraphs.append((p,tokens))
-    # Existing numbering must be byte-for-byte unchanged; only append definitions.
+    # Preserve existing definitions by identity; legal insertion precedes old nums.
     numbering=next((p.element for p in document.part.package.parts if str(p.partname)=='/word/numbering.xml'),[])
     if baseline is None:
-        old_numbering=[xml_value(n) for n in numbering]
+        old_numbering={_numbering_key(n):xml_value(n) for n in numbering}
+        if len(old_numbering) != len(numbering):
+            raise FormatError('Duplicate numbering definition identity')
     else:old_numbering=None
     parts={str(p.partname):p.blob for p in document.part.package.parts
            if str(p.partname) not in {'/word/document.xml','/word/numbering.xml'}}
@@ -459,5 +461,19 @@ def verify_preservation(index,params,before):
     if before[:2]!=after[:2]:
         raise FormatError('Citation changed unrelated content, objects or formatting')
     old=before[3];numbering=index.document.part.numbering_part.element
-    if [xml_value(n) for n in list(numbering)[:len(old)]]!=old:
+    current={_numbering_key(n):xml_value(n) for n in numbering}
+    if len(current)!=len(numbering) or any(current.get(key)!=value for key,value in old.items()):
         raise FormatError('Citation changed an existing numbering definition')
+    added=[n for n in numbering if _numbering_key(n) not in old]
+    abstracts=[n for n in added if n.tag==qn('w:abstractNum')]
+    nums=[n for n in added if n.tag==qn('w:num')]
+    if len(added)!=2 or len(abstracts)!=1 or len(nums)!=1:
+        raise FormatError('Citation added unexpected numbering definitions')
+    link=nums[0].find(qn('w:abstractNumId'))
+    if link is None or link.get(qn('w:val'))!=abstracts[0].get(qn('w:abstractNumId')):
+        raise FormatError('Citation numbering link is invalid')
+
+
+def _numbering_key(node):
+    """Include the node type so numId and abstractNumId may share a number."""
+    return node.tag, node.get(qn('w:abstractNumId')), node.get(qn('w:numId'))

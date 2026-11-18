@@ -32,10 +32,25 @@ def paragraph_text(p):
 
 
 class DocumentIndex:
+    def refresh_semantics(self):
+        """Refresh classifications after a structural write while retaining source IDs."""
+        current = DocumentIndex(self.document)
+        records = {node: current.records[oid] for oid, node in current.elements.items()}
+        for oid, node in self.elements.items():
+            if node in records:
+                current_record = records[node]
+                self.records[oid].update(
+                    {key: current_record[key] for key in (
+                        "text", "style_id", "style_name", "role", "heading_level", "toc_level",
+                        "outline_level", "module", "semantic_role", "object_kind", "language",
+                    ) if key in current_record}
+                )
+
     def __init__(self, document):
         self.document = document
         self.records: dict[str, dict] = {}
         self.elements: dict[str, object] = {}
+        self.ids_by_element: dict[object, str] = {}
         self.parents: dict[str, object] = {}
         self.parts = {str(p.partname).lstrip("/"): p for p in document.part.package.parts}
         self.top_ids = []
@@ -275,6 +290,7 @@ class DocumentIndex:
             **extra,
         }
         self.elements[oid] = node
+        self.ids_by_element[node] = oid
 
     def public(self):
         return list(self.records.values())

@@ -5,6 +5,37 @@ import re
 from .namespaces import qn
 
 
+def complex_field_runs(instruction, cached_text="", run_properties=None):
+    """Build one complex field with whitespace and formatting on every owned run."""
+    import copy
+    from docx.oxml import OxmlElement
+
+    result = []
+    for tag, value in (("fldChar", "begin"), ("instrText", f" {instruction.strip()} "),
+                       ("fldChar", "separate"), ("t", str(cached_text)), ("fldChar", "end")):
+        run = OxmlElement("w:r")
+        if run_properties is not None:
+            run.append(copy.deepcopy(run_properties))
+        child = OxmlElement("w:" + tag)
+        if tag == "fldChar":
+            child.set(qn("w:fldCharType"), value)
+        else:
+            child.set(qn("xml:space"), "preserve")
+            child.text = value
+        if tag == "t" and "\n" in value:
+            for index, line in enumerate(value.splitlines()):
+                if index:
+                    run.append(OxmlElement("w:br"))
+                text = OxmlElement("w:t")
+                text.set(qn("xml:space"), "preserve")
+                text.text = line
+                run.append(text)
+        else:
+            run.append(child)
+        result.append(run)
+    return result
+
+
 def field_codes(root):
     if root is None:
         return []
@@ -105,7 +136,6 @@ def refresh_document_fields(
     import os
     from pathlib import Path
     import shutil
-    import subprocess
     import uuid
     from docx import Document
     from .contracts import FormatError, SCHEMA_VERSION, output_path, sha256, source_path
@@ -128,48 +158,31 @@ def refresh_document_fields(
     out_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = out_path.with_name(f".{out_path.stem}.{uuid.uuid4().hex}.docx")
     shutil.copy2(src_path, temp_path)
-    method_used = "xml_cleanup_only"
     try:
-        ps = shutil.which("powershell") or shutil.which("pwsh")
-        if ps:
-            script = (
-                "$ErrorActionPreference = 'Stop'; "
-                "$word = New-Object -ComObject Word.Application; "
-                "$word.Visible = $false; "
-                "$word.DisplayAlerts = 0; "
-                "try { "
-                f"  $doc = $word.Documents.Open({repr(str(temp_path))}, $false, $false); "
-                "  try { "
-                "    foreach ($toc in $doc.TablesOfContents) { $toc.Update() } "
-                "    $doc.Fields.Update() | Out-Null; "
-                "    foreach ($sec in $doc.Sections) { "
-                "      foreach ($hdr in $sec.Headers) { $hdr.Range.Fields.Update() | Out-Null } "
-                "      foreach ($ftr in $sec.Footers) { $ftr.Range.Fields.Update() | Out-Null } "
-                "    } "
-                "    $doc.Save(); "
-                "  } finally { $doc.Close(0) } "
-                "} finally { $word.Quit() }"
-            )
-            proc = subprocess.run(
-                [ps, "-NoProfile", "-NonInteractive", "-Command", script],
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=timeout,
-            )
-            if proc.returncode == 0:
-                method_used = "word_com"
+        from office_automation import automate_word
+        from .office_validation import field_errors
+
+        try:
+            office = automate_word(temp_path, mode="refresh", timeout=timeout)
+        except RuntimeError as exc:
+            raise FormatError(f"Word field refresh failed; output not published: {exc}") from exc
+        errors = field_errors(office)
+        if errors:
+            raise FormatError(f"Word field refresh returned {len(errors)} erroneous field result(s): {errors[:5]}")
+        if not office["pagination_stable"] or any(
+            item["pass"] == office["update_passes"] for item in office["field_update_errors"]
+        ):
+            raise FormatError("Word field updates or pagination did not stabilize; output not published")
         removed_breaks = 0
-        if strip_last_rendered_page_breaks or method_used == "word_com":
-            doc = Document(temp_path)
-            if method_used == "word_com":
-                _sync_toc_entry_runs_from_styles(doc)
-            if strip_last_rendered_page_breaks:
-                removed_breaks = strip_last_rendered_page_breaks_in_doc(doc)
-            doc.save(temp_path)
-        if not in_place and sha256(src_path) != src_hash:
+        document = Document(temp_path)
+        _sync_toc_entry_runs_from_styles(document)
+        if strip_last_rendered_page_breaks:
+            removed_breaks = strip_last_rendered_page_breaks_in_doc(document)
+        document.save(temp_path)
+        if sha256(src_path) != src_hash:
             raise FormatError("Source document changed during field refresh; output not published")
+        if not in_place and not overwrite and out_path.exists():
+            raise FormatError("Output appeared during field refresh; output not replaced")
         os.replace(temp_path, out_path)
     finally:
         if temp_path.exists():
@@ -182,6 +195,9 @@ def refresh_document_fields(
         "input": {"path": str(src_path), "sha256": src_hash},
         "output": str(out_path),
         "output_sha256": sha256(out_path),
-        "method": method_used,
+        "method": "word_com",
+        "refresh_status": "word_refreshed",
+        "application": office["application"],
+        "coverage": office["coverage"],
         "stripped_last_rendered_page_breaks": removed_breaks,
     }

@@ -41,6 +41,7 @@ PARAGRAPH_TAGS = {
     "snap_to_grid": ("snapToGrid",),
     "mirror_indents": ("mirrorIndents",),
     "tabs": ("tabs",),
+    "border_bottom": ("pBdr",),
 }
 ATTRIBUTES = {
     "font_east_asia": {"rFonts": ("eastAsia", "eastAsiaTheme")},
@@ -80,7 +81,9 @@ def element(parent, name: str):
         if is_leading_pr:
             parent.insert(0, child)
         else:
-            parent.append(child)
+            from .ooxml import insert_child
+
+            insert_child(parent, child)
     elif is_leading_pr and parent.index(child) != 0:
         parent.insert(0, child)
     return child
@@ -96,6 +99,12 @@ def sanitize_properties(pr, property_name: str):
     for tag in tags:
         node = clone.find(qn("w:" + tag))
         if node is None:
+            continue
+        if property_name == "border_bottom":
+            for bottom in list(node.findall(qn("w:bottom"))):
+                node.remove(bottom)
+            if not node.attrib and not len(node):
+                clone.remove(node)
             continue
         if property_name in ATTRIBUTES:
             for attr in ATTRIBUTES[property_name].get(tag, ()):
@@ -406,6 +415,12 @@ def write_style_font(document, style, name, value):
 
 
 def read_paragraph(document, paragraph, name):
+    if name == "border_bottom":
+        for pr in ppr_sources(document, paragraph):
+            bottom = pr.find("./" + qn("w:pBdr") + "/" + qn("w:bottom")) if pr is not None else None
+            if bottom is not None:
+                return bottom.get(qn("w:val")) not in {"none", "nil"}
+        return False
     origin_sources = list(_iter_ppr_sources_with_origin(document, paragraph))
     sources = [pr for _, pr in origin_sources]
     if name == "outline_level":
@@ -559,6 +574,11 @@ def write_effective_tabs(document, paragraph, pr, value):
 
 
 def write_paragraph(pr, name, value, clear_tab_positions=()):
+    if name == "border_bottom":
+        bottom = element(element(pr, "pBdr"), "bottom")
+        bottom.attrib.clear()
+        bottom.set(qn("w:val"), "single" if value else "nil")
+        return
     if name == "outline_level":
         element(pr, "outlineLvl").set(qn("w:val"), str(int(value)))
     elif name == "numbering_suppressed":

@@ -50,7 +50,7 @@ def diagnose(output_dir=None, probe_render=False):
     runtime = detect_renderers(ROOT / ".runtime")
     probe = {"status": "not_performed"}
     if not runtime["visual_ready"]:
-        actions.append("逐页检查需要 Word/WPS/LibreOffice 及 PDF 页面转图片后端；核心排版可单独使用")
+        actions.append("逐页检查需要 Microsoft Word 或 LibreOffice，以及 PDF 页面转图片后端")
     if probe_render:
         try:
             from docx import Document

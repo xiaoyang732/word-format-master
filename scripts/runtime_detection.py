@@ -112,7 +112,7 @@ def _word_application_com_server() -> Path | None:
         except OSError:
             continue
         # A COM local server commonly has `"C:\\path\\app.exe" /Automation`.
-        match = re.match(r'\s*"([^"]+\.exe)"|\s*([^\s]+\.exe)', str(command), re.IGNORECASE)
+        match = re.match(r'\s*"([^"]+\.exe)"|\s*(.+?\.exe)(?:\s|$)', str(command), re.IGNORECASE)
         executable = match.group(1) or match.group(2) if match else None
         if executable:
             path = Path(executable)
@@ -219,17 +219,23 @@ def detect_renderers(runtime_root: str | Path) -> dict[str, Any]:
     word = _find_word(root)
     word_name = "Microsoft Word"
     word_method = "installed executable"
-    if not word:
-        word = _word_application_com_server()
+    registered = _word_application_com_server()
+    if registered and registered.name.casefold() != "winword.exe":
+        # Installed WINWORD does not prove that Word.Application starts Word.
+        word = None
+        word_method = "Word.Application registration mismatch"
+    elif not word:
+        word = registered
         if word:
             word_method = "Windows Word.Application COM"
-            if "wps" in word.name.lower() or "kingsoft" in str(word).lower():
-                word_name = "WPS Office（Word 兼容）"
     libreoffice = _find_libreoffice(root)
     preferred = "word" if word else "libreoffice" if libreoffice else None
     pdf_rasterizer = detect_pdf_rasterizer()
+    word_entry = _runtime_entry("word", word_name, word, word_method)
+    word_entry["registered_server"] = str(registered) if registered else None
+    word_entry["diagnostic"] = word_method
     return {
-        "word": _runtime_entry("word", word_name, word, word_method),
+        "word": word_entry,
         "libreoffice": _runtime_entry("libreoffice", "LibreOffice", libreoffice, "installed or managed runtime"),
         "preferred": preferred,
         "renderer_ready": preferred is not None,

@@ -134,6 +134,10 @@ def set_alignment(index, ref, params):
     set_paragraph_property(index, ref, params, "alignment")
 
 
+def set_border_bottom(index, ref, params):
+    set_paragraph_property(index, ref, params, "border_bottom")
+
+
 def set_spacing_before(index, ref, params):
     set_paragraph_property(index, ref, params, "space_before_pt")
 
@@ -325,9 +329,9 @@ def configure_toc(index, ref, params):
 
 
 def configure_heading_numbering(index, ref, params):
-    from .structures import normalize_heading_styles
+    from .numbering import apply_legacy_heading_scheme
 
-    return normalize_heading_styles(index.document, params)
+    return apply_legacy_heading_scheme(index.document, params)
 
 
 def configure_lists(index, ref, params):

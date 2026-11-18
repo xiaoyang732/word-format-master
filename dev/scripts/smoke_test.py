@@ -322,8 +322,14 @@ def main() -> int:
         assert body_children.index(table_caption) < body_children.index(reopened.tables[0]._tbl)
         assert body_children.index(figure_caption) < body_children.index(figure_object)
         assert abs(reopened.sections[0].page_width.mm - 215.9) < 0.2
-        assert result["document"]["fields"]["types"].get("PAGE", 0) == 1
-        assert result["document"]["fields"]["types"].get("NUMPAGES", 0) == 1
+        from word_format.fields import field_codes
+        from word_format.headers import effective_root
+
+        front, body = reopened.sections
+        assert not field_codes(effective_root(front.footer))
+        assert not field_codes(effective_root(front.first_page_footer))
+        for footer in (body.footer, body.first_page_footer):
+            assert field_codes(effective_root(footer)) == ["PAGE", "NUMPAGES"]
         assert result["document"]["fields"]["types"].get("TOC", 0) >= 1
         assert any('TOC \\o "1-2" \\h \\z \\u' in code for code in result["document"]["fields"]["codes"])
         toc_check = next(

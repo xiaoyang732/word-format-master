@@ -112,7 +112,8 @@ def read_complex_state(index, name):
         }
     if name == "table_of_contents":
         from .properties import read_font, read_paragraph
-        from .toc import headings, result_status
+        from .inspect import _style_paragraph
+        from .toc import entry_styles, headings, is_trailing_break, result_status
 
         managed = [
             p for p in doc.paragraphs if paragraph_style_name(doc, p._p).startswith("WFM TOC")
@@ -129,11 +130,7 @@ def read_complex_state(index, name):
             p
             for p in managed
             if paragraph_style_name(doc, p._p) == "WFM TOC Break"
-            and p._p.getprevious() is not None
-            and any(
-                n.tag == qn("w:instrText") and n.text and "TOC " in n.text
-                for n in p._p.getprevious().iter()
-            )
+            and is_trailing_break(p._p)
         ]
         title_paragraphs = [
             p for p in managed if paragraph_style_name(doc, p._p) == "WFM TOC Heading"
@@ -156,6 +153,7 @@ def read_complex_state(index, name):
             "snap_to_grid",
             "mirror_indents",
             "tabs",
+            "border_bottom",
         )
 
         def formats(paragraphs):
@@ -173,6 +171,17 @@ def read_complex_state(index, name):
                 for p in paragraphs
             ]
 
+        entry_style_formats = []
+        for style in entry_styles(doc, 9):
+            if style is None:
+                entry_style_formats.append(None)
+                continue
+            probe = _style_paragraph(style.name, doc)
+            entry_style_formats.append({
+                "font": [{key: read_font(doc, probe, None, key) for key in font_keys}],
+                "paragraph": {key: read_paragraph(doc, probe, key) for key in paragraph_keys},
+            })
+
         return {
             "titles": [p.text for p in title_paragraphs],
             "title_formats": formats(title_paragraphs),
@@ -180,6 +189,7 @@ def read_complex_state(index, name):
                 [p for p in managed if p.style.name == "WFM TOC Field"] or native_entries
             ),
             "entry_formats": formats(native_entries),
+            "entry_style_formats": entry_style_formats,
             "break_formats": formats(trailing),
             "codes": [
                 n.text or ""
@@ -284,7 +294,7 @@ def read_complex_state(index, name):
                     "marker": marker,
                     "start": start,
                     "number_format": num_format,
-                    "numbered_target": _has_numbered_list_marker(doc, p)
+                    "numbered_target": _has_numbered_list_marker(doc, p, index=index)
                     if name == "numbered"
                     else False,
                     "left_indent": _read_list_indent(doc, p._p, lvl, "left_indent")
@@ -300,6 +310,7 @@ def read_complex_state(index, name):
         return records
     if name == "caption_position":
         from .structures import _is_figure_paragraph, _neighboring_content_element
+        from .properties import read_paragraph
 
         states = []
         for p in doc.paragraphs:
@@ -313,6 +324,9 @@ def read_complex_state(index, name):
                         "after_table": after is not None and after.tag == qn("w:tbl"),
                         "before_figure": before is not None and _is_figure_paragraph(before),
                         "after_figure": after is not None and _is_figure_paragraph(after),
+                        "caption_keep_next": read_paragraph(doc, p._p, "keep_with_next"),
+                        "before_figure_keep_next": read_paragraph(doc, before, "keep_with_next")
+                        if before is not None and _is_figure_paragraph(before) else False,
                     }
                 )
         return states
@@ -478,6 +492,11 @@ def verify_complex_state(actual, params, name):
         )
         if not structure_matches:
             return False
+        if appearance := params.get("entry_format"):
+            level_count = params.get("max_heading_level", 3)
+            styles = actual["entry_style_formats"][:level_count]
+            if not all(styles) or not _verify_toc_title_format(styles, appearance):
+                return False
         for name in ("title", "field", "break"):
             requested = params.get(
                 name + "_format", params.get("title_style") if name == "title" else None
@@ -546,7 +565,10 @@ def verify_complex_state(actual, params, name):
         label = params.get("label") or ("图" if params["role"] == "figure" else "表")
         items = [r for r in actual if r["text"].strip().startswith(label)]
         target_key = ("after_" if params["position"] == "above" else "before_") + params["role"]
-        return all(r[target_key] for r in items)
+        return all(r[target_key] and (
+            r["caption_keep_next"] if params["position"] == "above"
+            else r["before_figure_keep_next"] if params["role"] == "figure" else True
+        ) for r in items)
     if name == "citations":
         from .citations import verify_state
 
@@ -830,8 +852,21 @@ def _page_number_content_projection(document):
     return values
 
 
+def _page_number_section_projection(section):
+    clone = copy.deepcopy(section)
+    for child in list(clone):
+        if child.tag in {qn("w:headerReference"), qn("w:footerReference"),
+                         qn("w:pgNumType"), qn("w:titlePg")}:
+            clone.remove(child)
+    return clone
+
+
 def structural_snapshot(index, cap, params, refs):
     """Protect body content/objects and unrelated parts across structural writes."""
+    if cap.property == "numbering_order":
+        from .numbering_order import projection
+
+        return projection(index)
     if cap.property == "citations":
         from .citations import snapshot
 
@@ -891,9 +926,20 @@ def structural_snapshot(index, cap, params, refs):
         return header_projection(index, cap, params, refs)
     from .inspect import paragraph_text
 
+    preparation = None
+    if (cap.property == "page_numbers" and params.get("enabled")
+            and params.get("scope") == "body" and "start_section" not in params):
+        from .body_sections import boundary_preparation
+
+        preparation = boundary_preparation(index.document)
     reference_nodes = index.reference_nodes() if cap.property == "reference_numbering" else set()
     toc_nodes = {}
     imported_toc_nodes = set()
+    caption_nodes = set()
+    if cap.property == "caption_position":
+        from .structures import caption_keep_nodes
+
+        caption_nodes = caption_keep_nodes(index.document, params)
     if cap.property == "table_of_contents" and params.get("enabled"):
         from .toc import imported_fields
 
@@ -918,6 +964,29 @@ def structural_snapshot(index, cap, params, refs):
         ):
             continue
         clone = copy.deepcopy(p)
+        if p in caption_nodes:
+            pr = clone.find(qn("w:pPr"))
+            if pr is not None:
+                for child in list(pr.findall(qn("w:keepNext"))):
+                    pr.remove(child)
+                if not len(pr) and not pr.attrib:
+                    clone.remove(pr)
+        if preparation is not None and p is preparation[0]:
+            from .properties import element
+
+            element(clone, "pPr").append(copy.deepcopy(preparation[2]))
+            if not text.strip():
+                for br in list(clone.iter(qn("w:br"))):
+                    if br.get(qn("w:type")) == "page":
+                        br.getparent().remove(br)
+        if preparation is not None:
+            original_section = p.find("./" + qn("w:pPr") + "/" + qn("w:sectPr"))
+            if original_section is preparation[1]:
+                from .properties import element
+
+                element(clone.find("./" + qn("w:pPr") + "/" + qn("w:sectPr")), "type").set(
+                    qn("w:val"), "nextPage"
+                )
         if p in toc_nodes:
             pr = clone.find(qn("w:pPr"))
             if pr is not None:
@@ -983,17 +1052,38 @@ def structural_snapshot(index, cap, params, refs):
     stories = (
         _page_number_content_projection(index.document) if cap.property == "page_numbers" else None
     )
+    if preparation is not None:
+        sections = [s._sectPr for s in index.document.sections]
+        position = sections.index(preparation[1]) * 6
+        stories[position:position] = copy.deepcopy(stories[position:position + 6])
+    final_section = None
+    if cap.property == "page_numbers":
+        ending = index.document.element.body.find(qn("w:sectPr"))
+        if ending is not None:
+            clone = _page_number_section_projection(ending)
+            if preparation is not None and preparation[1] is ending:
+                from .properties import element
+
+                element(clone, "type").set(qn("w:val"), "nextPage")
+            final_section = xml_value(clone)
     list_targets = None
     if cap.property == "numbered":
         from .structures import _has_numbered_list_marker
 
         list_targets = [
-            p._p for p in index.document.paragraphs if _has_numbered_list_marker(index.document, p)
+            p._p for p in index.document.paragraphs
+            if _has_numbered_list_marker(index.document, p, index=index)
         ]
-    return paragraphs, parts, stories, list_targets
+    return paragraphs, parts, stories, list_targets, final_section
 
 
 def verify_structural_preservation(index, cap, params, refs, before):
+    if cap.property == "numbering_order":
+        from .numbering_order import projection
+
+        if before != projection(index):
+            raise FormatError("Numbering repair changed definitions, links or unrelated content")
+        return
     if cap.property == "citations":
         from .citations import verify_preservation
 
@@ -1025,6 +1115,8 @@ def verify_structural_preservation(index, cap, params, refs, before):
         raise FormatError("Page-number configuration changed unrelated header/footer content")
     if before[3] != after[3]:
         raise FormatError("List operation changed its original numbered paragraph scope")
+    if before[4] != after[4]:
+        raise FormatError("Page-number configuration changed unrelated final-section properties")
     by_node = {p: (text, xml) for p, text, xml in after[0]}
     for node, text, xml in before[0]:
         if node not in by_node:

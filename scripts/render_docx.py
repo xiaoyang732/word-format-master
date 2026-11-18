@@ -63,66 +63,10 @@ def _relative_external_links(data: bytes) -> list[str]:
     return links
 
 
-def _word_to_pdf(source: Path, output_pdf: Path) -> None:
-    shell = shutil.which("powershell.exe") or shutil.which("powershell") or shutil.which("pwsh")
-    if not shell:
-        raise RuntimeError("未找到 PowerShell，无法调用 Microsoft Word 导出 PDF")
-    script = r'''
-param([string]$InputPath, [string]$OutputPath)
-$word = $null
-$document = $null
-$ErrorActionPreference = 'Stop'
-try {
-  $word = New-Object -ComObject Word.Application
-  $word.Visible = $false
-  $word.DisplayAlerts = 0
-  $document = $word.Documents.Open($InputPath, $false, $true)
-  foreach ($toc in $document.TablesOfContents) { $null = $toc.Update() }
-  foreach ($rootStory in $document.StoryRanges) {
-    $story = $rootStory
-    while ($null -ne $story) {
-      $null = $story.Fields.Update()
-      $story = $story.NextStoryRange
-    }
-  }
-  $document.Repaginate()
-  foreach ($toc in $document.TablesOfContents) { $null = $toc.UpdatePageNumbers() }
-  $document.ExportAsFixedFormat($OutputPath, 17)
-} finally {
-  if ($document -ne $null) { $document.Close(0) }
-  if ($word -ne $null) { $word.Quit() }
-  if ($document -ne $null) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($document) }
-  if ($word -ne $null) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($word) }
-  [GC]::Collect()
-  [GC]::WaitForPendingFinalizers()
-}
-'''.strip()
-    with tempfile.TemporaryDirectory(prefix="word-format-word-") as temp:
-        script_path = Path(temp) / "export_pdf.ps1"
-        script_path.write_text(script + "\n", encoding="utf-8")
-        result = subprocess.run(
-            [
-                shell,
-                "-NoLogo",
-                "-NoProfile",
-                "-NonInteractive",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(script_path),
-                str(source),
-                str(output_pdf),
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=180,
-        )
-    if result.returncode != 0 or not _nonempty(output_pdf):
-        detail = (result.stderr or result.stdout).strip()
-        raise RuntimeError(f"Microsoft Word 导出 PDF 失败：{detail[-800:] or '没有生成 PDF'}")
+def _word_to_pdf(source: Path, output_pdf: Path) -> dict[str, Any]:
+    from office_automation import automate_word
+
+    return automate_word(source, output_pdf, mode="render")
 
 
 def _libreoffice_to_pdf(source: Path, output_pdf: Path, executable: Path) -> None:
@@ -277,6 +221,7 @@ def render_document(
     runtime_root: str | Path = DEFAULT_RUNTIME_ROOT,
     dpi: int = 150,
     emit_pdf: bool = False,
+    baseline_source: str | Path | None = None,
 ) -> dict[str, Any]:
     input_path = Path(source).resolve()
     if not input_path.is_file() or input_path.suffix.lower() not in {".docx", ".dotx"}:
@@ -290,6 +235,9 @@ def render_document(
     manifest_path.unlink(missing_ok=True)
     source_bytes = input_path.read_bytes()
     source_sha256 = hashlib.sha256(source_bytes).hexdigest()
+    baseline_path = Path(baseline_source).resolve() if baseline_source else None
+    baseline_bytes = baseline_path.read_bytes() if baseline_path else None
+    baseline_sha256 = hashlib.sha256(baseline_bytes).hexdigest() if baseline_bytes else None
     relative_links = _relative_external_links(source_bytes)
     if relative_links:
         raise ValueError("DOCX contains relative external links that would resolve differently from a render snapshot: " + "; ".join(relative_links[:5]))
@@ -307,11 +255,12 @@ def render_document(
         snapshot.write_bytes(source_bytes)
         temporary_pdf = stage / "rendering.pdf"
         failures = []
+        office_evidence = None
         for candidate_method, candidate_entry in candidates:
             temporary_pdf.unlink(missing_ok=True)
             try:
                 if candidate_method == "word":
-                    _word_to_pdf(snapshot, temporary_pdf)
+                    office_evidence = _word_to_pdf(snapshot, temporary_pdf)
                 else:
                     _libreoffice_to_pdf(snapshot, temporary_pdf, Path(candidate_entry["path"]))
                 selected, entry = candidate_method, candidate_entry
@@ -325,7 +274,7 @@ def render_document(
             raise RuntimeError("渲染期间源文件发生变化，请重新渲染；未发布验收清单")
         pages = [target / page.name for page in staged_pages]
         page_manifest = {
-            "schema_version": "1.0",
+            "schema_version": "1.1" if office_evidence else "1.0",
             "source": str(input_path),
             "source_sha256": source_sha256,
             "selected_method": selected,
@@ -339,6 +288,25 @@ def render_document(
                 for index, page in enumerate(staged_pages, start=1)
             ],
         }
+        if office_evidence:
+            from docx import Document
+            from word_format.office_validation import validate_office
+
+            page_manifest["requested_method"] = method
+            page_manifest["application"] = office_evidence["application"]
+            baseline = Document(io.BytesIO(baseline_bytes)) if baseline_bytes else None
+            page_manifest["office_validation"] = validate_office(
+                Document(snapshot), office_evidence, baseline_document=baseline
+            )
+            evidence_path = target / "office-evidence.json"
+            office_evidence["source_sha256"] = source_sha256
+            evidence_path.write_text(json.dumps(office_evidence, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+            page_manifest["office_evidence"] = {"path": str(evidence_path),
+                "sha256": hashlib.sha256(evidence_path.read_bytes()).hexdigest()}
+            if baseline_path:
+                if hashlib.sha256(baseline_path.read_bytes()).hexdigest() != baseline_sha256:
+                    raise RuntimeError("Office baseline changed during rendering")
+                page_manifest["baseline"] = {"path":str(baseline_path), "sha256":baseline_sha256}
         for staged_page, page in zip(staged_pages, pages):
             os.replace(staged_page, page)
         for stale in target.glob("page-*.png"):
@@ -376,6 +344,7 @@ def render_document(
         "requested_method": method,
         "selected_method": selected,
         "renderer": entry.get("name"),
+        "office_validation": page_manifest.get("office_validation", {"status": "not_executed"}),
         "page_count": len(pages),
         "pages": [str(page) for page in pages],
         "manifest": str(manifest_path),
@@ -394,6 +363,7 @@ def main() -> int:
     parser.add_argument("--runtime-root", default=str(DEFAULT_RUNTIME_ROOT))
     parser.add_argument("--dpi", type=int, default=150)
     parser.add_argument("--emit-pdf", action="store_true")
+    parser.add_argument("--baseline", help="Original DOCX used to identify inherited field errors")
     args = parser.parse_args()
     if args.dpi < 72 or args.dpi > 300:
         raise SystemExit("--dpi 必须在 72 到 300 之间")
@@ -405,6 +375,7 @@ def main() -> int:
             runtime_root=args.runtime_root,
             dpi=args.dpi,
             emit_pdf=args.emit_pdf,
+            baseline_source=args.baseline,
         )
     except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired) as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False))

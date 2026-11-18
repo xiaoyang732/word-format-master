@@ -32,12 +32,32 @@ def verify_visual_evidence(output, report, manifest_path=None, requested_method=
     manifest = json.loads(path.read_text(encoding="utf-8-sig"))
     require_keys(
         manifest,
-        {"schema_version", "source", "source_sha256", "selected_method", "page_count", "pages"},
+        {"schema_version", "source", "source_sha256", "selected_method", "page_count", "pages",
+         "requested_method", "application", "office_validation", "office_evidence", "baseline"},
         {"schema_version", "source", "source_sha256", "selected_method", "page_count", "pages"},
         "render manifest",
     )
-    if manifest["schema_version"] != "1.0":
+    if manifest["schema_version"] not in {"1.0", "1.1"}:
         raise FormatError("Unsupported render manifest version")
+    if manifest["schema_version"] == "1.1":
+        application = manifest.get("application", {})
+        if (application.get("name") != "Microsoft Word"
+                or Path(application.get("executable", "")).name.casefold() != "winword.exe"):
+            raise FormatError("Render manifest does not identify Microsoft Word")
+        evidence = manifest.get("office_evidence", {})
+        evidence_path = Path(evidence.get("path", ""))
+        if not evidence_path.is_file() or sha256(evidence_path) != evidence.get("sha256"):
+            raise FormatError("Office semantic evidence is missing or changed")
+        office = manifest.get("office_validation", {})
+        if office.get("status") != "passed":
+            raise FormatError("Office semantic validation has not passed")
+        if report.get("status") == "passed" and office.get("delivery_ready") is not True:
+            raise FormatError("Office records unresolved document issues; cannot accept the output")
+        if manifest.get("baseline"):
+            baseline = manifest["baseline"]
+            baseline_path = Path(baseline["path"])
+            if not baseline_path.is_file() or sha256(baseline_path) != baseline["sha256"]:
+                raise FormatError("Office baseline evidence changed")
     output = Path(output).resolve()
     output_hash = sha256(output)
     source = Path(text_value(manifest["source"], "manifest source"))

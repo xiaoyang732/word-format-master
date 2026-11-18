@@ -163,7 +163,7 @@ class HeaderTests(unittest.TestCase):
         ])
         self.assertTrue(doc.settings.odd_and_even_pages_header_footer)
         field = doc.sections[1].header._element.find(".//" + qn("w:fldSimple"))
-        self.assertEqual(field.get(qn("w:instr")), 'STYLEREF "Heading 1"')
+        self.assertEqual(field.get(qn("w:instr")), 'STYLEREF 1')
         self.assertEqual(self.text(doc.sections[1].even_page_header), "Thesis title")
 
     def test_first_page_blank_only_selected_section(self):
@@ -240,7 +240,7 @@ class HeaderTests(unittest.TestCase):
 
     def test_bad_variant_missing_style_and_duplicate_boundary(self):
         for operation in [self.op("header.font.size.set", {"value": 9, "variant": "unknown"}),
-                          self.op("header.content.set", {"mode": "chapter_title", "style_name": 'Heading "1"'})]:
+                          self.op("header.content.set", {"mode": "chapter_title", "style_name": 'Heading\n1'})]:
             with self.assertRaises(FormatError): build_plan(self.source, self.output, {"operations": [operation]})
         plan = build_plan(self.source, self.output, {"operations": [self.op("header.content.set", {"mode": "chapter_title", "style_name": "Missing"})]})
         with self.assertRaises(FormatError): apply_plan(plan)

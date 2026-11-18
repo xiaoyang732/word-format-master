@@ -138,7 +138,7 @@ _FIELD_LABEL_CORES = {
     "classification": rf"(?:中图)?{_SP}分{_SP}类{_SP}号",
     "udc": r"udc",
     "security": rf"密{_SP}级",
-    "date": rf"(?:提交|完成|答辩|写作)?{_SP}日{_SP}期|时{_SP}间",
+    "date": rf"(?:提{_SP}交|完{_SP}成|答{_SP}辩|写{_SP}作)?{_SP}日{_SP}期|时{_SP}间",
     "signature": rf"(?:本人)?{_SP}(?:签{_SP}名|签{_SP}字)|声{_SP}明{_SP}人",
     "signature_date": rf"(?:声{_SP}明|签{_SP}名|签{_SP}字)?{_SP}日{_SP}期",
 }
@@ -601,6 +601,17 @@ def _is_vmerge_continue(tc) -> bool:
     return val in {None, "", "continue"}
 
 
+def _cells_by_column(row):
+    offset = row.find("./" + qn("w:trPr") + "/" + qn("w:gridBefore"))
+    column = int(offset.get(qn("w:val"), "0")) if offset is not None else 0
+    positions = {}
+    for cell in row.findall(qn("w:tc")):
+        positions[column] = cell
+        span = cell.find("./" + qn("w:tcPr") + "/" + qn("w:gridSpan"))
+        column += int(span.get(qn("w:val"), "1")) if span is not None else 1
+    return positions
+
+
 def _fill_cover_tables(nodes, compiled_fields, all_cell_res) -> set[str]:
     matched_keys: set[str] = set()
     tables = []
@@ -610,13 +621,14 @@ def _fill_cover_tables(nodes, compiled_fields, all_cell_res) -> set[str]:
         tables.extend(t for t in node.iter(qn("w:tbl")) if t is not node)
     for tbl in tables:
         rows = tbl.findall(qn("w:tr"))
-        for r_idx, row in enumerate(rows):
-            cells = row.findall(qn("w:tc"))
+        grid = [_cells_by_column(row) for row in rows]
+        for r_idx, columns in enumerate(grid):
+            cells = list(columns.items())
             if len(cells) < 2:
                 continue
             c_idx = 0
             while c_idx + 1 < len(cells):
-                label_tc = cells[c_idx]
+                label_column, label_tc = cells[c_idx]
                 raw_label = _cell_text(label_tc)
                 matched = False
                 if raw_label:
@@ -631,24 +643,35 @@ def _fill_cover_tables(nodes, compiled_fields, all_cell_res) -> set[str]:
                         )
                     if hit is not None:
                         key, val = hit[0], hit[1]
-                        value_tc = cells[c_idx + 1]
+                        value_column, value_tc = cells[c_idx + 1]
+                        value_text = _cell_text(value_tc)
+                        if _is_vmerge_continue(value_tc) or any(
+                            pattern.match(value_text) for pattern in all_cell_res
+                        ):
+                            raise FormatError(
+                                f"Cover field {key!r} has no unambiguous value slot before the next label",
+                                "needs_clarification",
+                            )
                         _set_table_cell_value(value_tc, str(val), fallback_tc=label_tc)
                         matched_keys.add(key)
                         matched = True
                         # Clear multi-row vMerge continuation slots (e.g. 2-line title cells).
                         next_r = r_idx + 1
-                        while next_r < len(rows):
-                            next_cells = rows[next_r].findall(qn("w:tc"))
+                        while next_r < len(grid):
+                            next_columns = grid[next_r]
+                            label_next = next_columns.get(label_column)
+                            value_next = next_columns.get(value_column)
                             if (
-                                c_idx + 1 < len(next_cells)
-                                and _is_vmerge_continue(next_cells[c_idx])
-                                and not _cell_text(next_cells[c_idx])
+                                label_next is not None and value_next is not None
+                                and _is_vmerge_continue(label_next)
+                                and not _cell_text(label_next)
                                 and not any(
-                                    cre.match(_cell_text(next_cells[c_idx + 1]))
+                                    cre.match(_cell_text(value_next))
                                     for cre in all_cell_res
                                 )
                             ):
-                                _clear_continuation_cell(next_cells[c_idx + 1])
+                                if not _is_vmerge_continue(value_next):
+                                    _clear_continuation_cell(value_next)
                                 next_r += 1
                             else:
                                 break
@@ -1011,11 +1034,15 @@ def _set_whole_paragraph_text(p, value: str) -> bool:
             old_ppr_rpr = ppr.find(qn("w:rPr"))
             if old_ppr_rpr is not None:
                 ppr.remove(old_ppr_rpr)
-            ppr.insert(0, copy.deepcopy(rpr))
+            from .ooxml import insert_child
+
+            insert_child(ppr, copy.deepcopy(rpr))
     return True
 
 
-def _clean_cover_paragraph_hygiene(p, *, was_standalone_date: bool = False) -> None:
+def _clean_cover_paragraph_hygiene(
+    p, *, was_standalone_date: bool = False, title_width_twips: float | None = None,
+) -> None:
     text_runs = [r for r in p.findall(qn("w:r")) if not _is_opaque_run(r)]
     if not text_runs:
         return
@@ -1039,7 +1066,13 @@ def _clean_cover_paragraph_hygiene(p, *, was_standalone_date: bool = False) -> N
             if r not in non_empty:
                 p.remove(r)
     ppr = p.find(qn("w:pPr"))
-    if ppr is not None and (stripped_hint or was_standalone_date):
+    excessive_title_indent = False
+    if ppr is not None and title_width_twips:
+        ind = ppr.find(qn("w:ind"))
+        if ind is not None:
+            first_line = abs(float(ind.get(qn("w:firstLine"), "0")))
+            excessive_title_indent = first_line >= title_width_twips
+    if ppr is not None and (stripped_hint or was_standalone_date or excessive_title_indent):
         jc = ppr.find(qn("w:jc"))
         if jc is not None and jc.get(qn("w:val")) == "center":
             ind = ppr.find(qn("w:ind"))
@@ -1052,7 +1085,9 @@ def _clean_cover_paragraph_hygiene(p, *, was_standalone_date: bool = False) -> N
             old_ppr_rpr = ppr.find(qn("w:rPr"))
             if old_ppr_rpr is not None:
                 ppr.remove(old_ppr_rpr)
-            ppr.insert(0, copy.deepcopy(non_empty[0].find(qn("w:rPr"))))
+            from .ooxml import insert_child
+
+            insert_child(ppr, copy.deepcopy(non_empty[0].find(qn("w:rPr"))))
 
 
 def _compact_cover_spacers(nodes: list, count: int) -> None:
@@ -1151,7 +1186,22 @@ def clone_template_cover(
             all_paragraphs.append(node)
         all_paragraphs.extend(p for p in node.iter(qn("w:p")) if p is not node)
 
+    from .properties import read_font, read_paragraph
+
+    centered_sizes = {
+        p: max((read_font(src_doc, p, run, "font_size_pt") or 0
+                for run in p.findall(qn("w:r"))), default=0)
+        for p in all_paragraphs if read_paragraph(src_doc, p, "alignment") == "center"
+    }
+    largest_size = max(centered_sizes.values(), default=0)
+    source_section = src_doc.sections[0]
+    title_width = ((source_section.page_width - source_section.left_margin
+                    - source_section.right_margin - (source_section.gutter or 0)) / 635)
+
     inline_fields = sorted(compiled_fields, key=lambda item: (item[2] is not None,))
+    labeled_date = re.compile(
+        rf"^\s*(?:{_FIELD_LABEL_CORES['date']}){_SP}[:：]?{_SP}(?=[0-9〇零一二三四五六七八九十])"
+    )
 
     for p in all_paragraphs:
         raw_text = "".join(
@@ -1167,15 +1217,24 @@ def clone_template_cover(
                     matched_keys.add(key)
                     handled_whole_line = True
                 break
+            if canonical == "date" and labeled_date.match(raw_text):
+                if _set_labeled_paragraph_value(p, val, inline_re=labeled_date):
+                    matched_keys.add(key)
+                    handled_whole_line = True
+                break
         if not handled_whole_line:
-            for key, val, _, _, _, inline_re in inline_fields:
+            for key, val, _, _, cell_re, inline_re in inline_fields:
                 current_text = "".join(
                     t.text or ""
                     for r in p.findall(qn("w:r"))
                     if not _is_opaque_run(r)
                     for t in r.findall(qn("w:t"))
                 )
-                if inline_re.search(current_text):
+                is_filled_table_label = (
+                    key in matched_keys and cell_re.fullmatch(current_text)
+                    and any(a.tag == qn("w:tc") for a in p.iterancestors())
+                )
+                if inline_re.search(current_text) and not is_filled_table_label:
                     if _set_labeled_paragraph_value(
                         p, val, inline_re=inline_re, any_label_re=any_inline_re
                     ):
@@ -1207,7 +1266,10 @@ def clone_template_cover(
                             replaced_in_single_run = True
                 if not replaced_in_single_run:
                     _replace_paragraph_text_pattern(p, re.escape(old), str(new))
-        _clean_cover_paragraph_hygiene(p, was_standalone_date=is_standalone_date)
+        _clean_cover_paragraph_hygiene(
+            p, was_standalone_date=is_standalone_date,
+            title_width_twips=title_width if largest_size and centered_sizes.get(p) == largest_size else None,
+        )
 
     # Fallback for standalone centered title placeholders (e.g. "论文题目" without colon or table).
     for key, val, canonical, *_ in compiled_fields:
@@ -1227,7 +1289,28 @@ def clone_template_cover(
     body = target_doc.element.body
     for insert_idx, node in enumerate(cloned):
         body.insert(insert_idx, node)
+    target_doc._wfm_cover_fields = {
+        "matched":sorted(set(fields) & matched_keys), "unmatched":sorted(set(fields) - matched_keys),
+    }
     return target_doc
+
+
+def _finalize_standalone_cover(document):
+    """Use the cover section as the final section when no body follows it."""
+    body = document.element.body
+    final_section = body.find(qn("w:sectPr"))
+    last = final_section.getprevious()
+    if last is not None and last.tag == qn("w:p"):
+        ending = last.find("./" + qn("w:pPr") + "/" + qn("w:sectPr"))
+        if ending is not None:
+            ending.getparent().remove(ending)
+            body.replace(final_section, ending)
+            final_section = ending
+    while (last := final_section.getprevious()) is not None and last.tag == qn("w:p"):
+        _strip_top_level_page_breaks(last)
+        if not _is_empty_paragraph(last):
+            break
+        body.remove(last)
 
 
 def apply_template_cover_file(
@@ -1284,6 +1367,8 @@ def apply_template_cover_file(
         include_declaration=include_declaration,
         compact_spacers=compact_spacers,
     )
+    if into_path is None:
+        _finalize_standalone_cover(result_doc)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = out_path.with_name(f".{out_path.stem}.{uuid.uuid4().hex}.docx")
     try:
@@ -1309,5 +1394,6 @@ def apply_template_cover_file(
         "output_sha256": sha256(out_path),
         "replace_existing_cover": bool(replace_existing_cover),
         "fields": sorted((fields or {}).keys()),
+        "field_matching": result_doc._wfm_cover_fields,
     }
 

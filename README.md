@@ -32,6 +32,8 @@
 
 修改已有文档时完整保留原有的正文、数据、公式和图片，并另存为新文件，不会覆盖原稿。
 
+Microsoft Office 验收可显式选择 Word。项目分别记录实际应用身份、Word 语义结果与逐页视觉结果。[Office 兼容性与验收](references/office-compatibility.md)
+
 ## 怎么开始使用
 
 ### 1. 加载技能

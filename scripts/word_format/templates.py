@@ -572,6 +572,9 @@ def bind_template(index, template, mapping=None):
     toc_ops = [op for op in operations if op["action"] == "toc.configure"]
     if toc_ops:
         operations = [op for op in operations if op["action"] != "toc.configure"] + toc_ops
+    from .body_sections import order_scoped_pagination
+
+    operations = order_scoped_pagination(operations)
     ledger = [
         {"rule_id": op["id"], "state": "planned", "evidence": "Word heading semantics"}
         for op in semantics

@@ -193,6 +193,7 @@ class FormatCoreTests(unittest.TestCase):
     def test_list_scope_uses_effective_level_and_override(self):
         from docx.enum.style import WD_STYLE_TYPE
         from word_format.api import audit_document
+        from word_format.ooxml import insert_child
 
         for first_format, second_format, override_format, direct_level in (
             ("bullet", "decimal", None, False),
@@ -209,14 +210,14 @@ class FormatCoreTests(unittest.TestCase):
                 def level(index, fmt):
                     node = OxmlElement("w:lvl")
                     node.set(qn("w:ilvl"), str(index))
-                    for tag, value in (("numFmt", fmt), ("lvlText", f"%{index + 1}."), ("start", "1")):
+                    for tag, value in (("start", "1"), ("numFmt", fmt), ("lvlText", f"%{index + 1}.")):
                         child = OxmlElement("w:" + tag)
                         child.set(qn("w:val"), value)
                         node.append(child)
                     return node
 
                 abstract.extend([level(0, first_format), level(1, second_format)])
-                numbering.append(abstract)
+                insert_child(numbering, abstract)
                 num = OxmlElement("w:num")
                 num.set(qn("w:numId"), "100")
                 aid = OxmlElement("w:abstractNumId")
@@ -227,7 +228,7 @@ class FormatCoreTests(unittest.TestCase):
                     override.set(qn("w:ilvl"), "1")
                     override.append(level(1, override_format))
                     num.append(override)
-                numbering.append(num)
+                insert_child(numbering, num)
                 style = doc.styles.add_style("Custom numbered scope", WD_STYLE_TYPE.PARAGRAPH)
                 numpr = OxmlElement("w:numPr")
                 for tag, value in (("ilvl", "0" if direct_level else "1"), ("numId", "100")):

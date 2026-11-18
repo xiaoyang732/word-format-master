@@ -39,6 +39,7 @@ PARA = {
     "snap_to_grid": "paragraph.snap_to_grid.set",
     "mirror_indents": "paragraph.mirror_indents.set",
     "tabs": "paragraph.tabs.set",
+    "border_bottom": "paragraph.border_bottom.set",
 }
 INDENTS = ("first_line_indent", "left_indent", "right_indent", "hanging_indent")
 META = {"style_name", "source_style_id", "numbering"}
@@ -334,10 +335,11 @@ def validate_section(section, data):
                 "title_style",
                 "field_format",
                 "break_format",
+                "entry_format",
             },
             label=section,
         )
-        for key in ("title_format", "field_format", "break_format"):
+        for key in ("title_format", "field_format", "break_format", "entry_format"):
             if key in data:
                 validate_tokens(data[key])
         for key in ("enabled", "page_break_after"):
