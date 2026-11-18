@@ -12,6 +12,14 @@ SEQUENCES = {
     "abstractNum": "nsid multiLevelType tmpl name styleLink numStyleLink lvl",
     "lvl": "start numFmt lvlRestart pStyle isLgl suff lvlText lvlPicBulletId legacy lvlJc pPr rPr",
     "num": "abstractNumId lvlOverride",
+    "numPr": "ilvl numId numberingChange ins",
+    "styles": "docDefaults latentStyles style",
+    "docDefaults": "rPrDefault pPrDefault",
+    "style": (
+        "name aliases basedOn next link autoRedefine hidden uiPriority "
+        "semiHidden unhideWhenUsed qFormat locked personal personalCompose "
+        "personalReply rsid pPr rPr tblPr trPr tcPr tblStylePr"
+    ),
     "pPr": (
         "pStyle keepNext keepLines pageBreakBefore framePr widowControl numPr "
         "suppressLineNumbers pBdr shd tabs suppressAutoHyphens kinsoku wordWrap "
@@ -26,6 +34,18 @@ SEQUENCES = {
         "titlePg textDirection bidi rtlGutter docGrid printerSettings sectPrChange"
     ),
     "pBdr": "top left bottom right between bar",
+    "tblPr": (
+        "tblStyle tblpPr tblOverlap bidiVisual tblStyleRowBandSize "
+        "tblStyleColBandSize tblW jc tblCellSpacing tblInd tblBorders shd "
+        "tblLayout tblCellMar tblLook tblCaption tblDescription tblPrChange"
+    ),
+    "tblBorders": "top start left bottom end right insideH insideV",
+    "tcPr": (
+        "cnfStyle tcW gridSpan hMerge vMerge tcBorders shd noWrap tcMar "
+        "textDirection tcFitText vAlign hideMark headers cellIns cellDel "
+        "cellMerge tcPrChange"
+    ),
+    "tcBorders": "top start left bottom end right insideH insideV tl2br tr2bl",
 }
 
 

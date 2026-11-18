@@ -7,7 +7,7 @@ from .namespaces import qn
 from .ooxml import SEQUENCES, sequence_warnings
 from .properties import xml_value
 
-OWNED_CONTAINERS = {"numbering", "abstractNum", "lvl"}
+OWNED_CONTAINERS = {"numbering", "abstractNum", "lvl", "num", "pPr", "pBdr", "numPr"}
 
 
 def validate(params):

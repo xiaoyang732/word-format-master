@@ -823,7 +823,7 @@ def infer_section_header_tokens(package, names, styles, theme_fonts, sections, p
             item=infer_header_footer_tokens(package,names,styles,theme_fonts,[by_part[name]])["header"]
             root=read_xml(package,name)
             codes=[w_attr(n,"instr") or "" for n in root.findall(".//w:fldSimple",NS)]+[n.text or "" for n in root.findall(".//w:instrText",NS)]
-            dynamic=[re.fullmatch(r'\s*STYLEREF\s+(?:"((?:\\.|[^"\\])+)"|([1-9]))\s*',code,re.I) for code in codes]
+            dynamic=[re.fullmatch(r'\s*STYLEREF\s+(?:"((?:\\.|[^"\\])+)"|([1-9]))(?:\s+\\\*\s*(?:CHARFORMAT|MERGEFORMAT))?\s*',code,re.I) for code in codes]
             prefix = _styleref_prefix(root) if len(codes)==1 and dynamic[0] else None
             if prefix is not None:
                 item.pop("text",None)

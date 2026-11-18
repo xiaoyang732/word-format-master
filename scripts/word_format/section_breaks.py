@@ -31,8 +31,10 @@ def insert(index, ref, params):
         following = following.getnext()
     if ending is None:
         raise FormatError("No containing section found", "unsupported")
+    from .ooxml import insert_child
+
     boundary = copy.deepcopy(ending)
-    pr.append(boundary)
+    insert_child(pr, boundary)
     element(ending, "type").set(qn("w:val"), "nextPage")
 
 

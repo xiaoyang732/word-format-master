@@ -142,7 +142,7 @@ def paragraph_style(document, paragraph):
 
 def paragraph_style_name(document, paragraph):
     style = paragraph_style(document, paragraph)
-    return style.name if style is not None else ""
+    return (style.name or "") if style is not None else ""
 
 
 @lru_cache(maxsize=16)

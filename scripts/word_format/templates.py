@@ -285,12 +285,13 @@ def compile_template(profiles, *, identifier="user-template", resolutions=None):
 
 
 def _heading_structure(index, operations, preserved=()):
-    from .properties import read_font
+    from .properties import FONT_TAGS, read_font
 
     touched = set()
     explicit_style = set()
     explicit_outline = set()
     explicit_color = set()
+    para_font_ops = defaultdict(dict)
     for op in operations:
         cap = REGISTRY[op["action"]]
         if cap.property == "heading_numbering":
@@ -306,6 +307,9 @@ def _heading_structure(index, operations, preserved=()):
                 explicit_outline.update(r["id"] for r in refs)
             if op["action"] == "font.color.set":
                 explicit_color.update(r["id"] for r in refs)
+            if op["target"]["type"] == "paragraph" and cap.property in FONT_TAGS:
+                for r in refs:
+                    para_font_ops[r["id"]][op["action"]] = op["params"]
         elif op["target"]["type"] == "style" and op["action"] == "font.color.set":
             style_name = op["target"].get("name")
             explicit_color.update(
@@ -350,6 +354,18 @@ def _heading_structure(index, operations, preserved=()):
                     "params": {"name": assigned_style},
                 }
             )
+            if assigned_style.startswith("WFM ") and oid in para_font_ops:
+                for action, params in para_font_ops[oid].items():
+                    style_op_id = f"semantic.{assigned_style}.{action}"
+                    if not any(item["id"] == style_op_id for item in result):
+                        result.append(
+                            {
+                                "id": style_op_id,
+                                "action": action,
+                                "target": {"type": "style", "name": assigned_style},
+                                "params": params,
+                            }
+                        )
         # Preserve effective heading color so assigning Office's blue Heading N style
         # or enabling automatic numbering never turns black headings/numbers blue.
         if oid not in explicit_color:
@@ -444,9 +460,10 @@ def bind_template(index, template, mapping=None):
                     }
                 )
     if "format" in template:
-        from .spec import spec_request
+        from .spec import FONT, spec_request, token_operations
 
-        expanded = spec_request(index, template["format"], isolated=True)
+        fmt = template["format"]
+        expanded = spec_request(index, fmt, isolated=True)
         for n, op in enumerate(expanded["operations"], 1):
             if preserve and op["target"].get("type") == "paragraph" and "ids" in op["target"]:
                 kept = [oid for oid in op["target"]["ids"] if oid not in preserve]
@@ -460,6 +477,57 @@ def bind_template(index, template, mapping=None):
             ledger.append(
                 {"rule_id": operation["id"], "state": "planned", "evidence": "builtin format"}
             )
+        protected_styles = {
+            r.get("style_name")
+            for r in index.records.values()
+            if r["kind"] == "paragraph"
+            and (r["id"] in preserve or r.get("unsupported_container"))
+        }
+        assigned_styles = {
+            op["params"]["name"]
+            for op in operations
+            if op["action"] == "paragraph.style.assign"
+        }
+        style_seq = len(expanded["operations"])
+        fig_cap = fmt.get("captions", {}).get("figure", {})
+        tbl_cap = fmt.get("captions", {}).get("table", {})
+        for style_name, style_tokens, full_style in [
+            ("Title", fmt.get("title", {}), False),
+            *(
+                (f"Heading {h['level']}", {k: v for k, v in h.items() if k in FONT}, False)
+                for h in fmt.get("headings", [])
+            ),
+            (fig_cap.get("style_name") or "Figure Caption", fig_cap, True),
+            (tbl_cap.get("style_name") or "Table Caption", tbl_cap, True),
+            ("Bibliography", fmt.get("references", {}), True),
+        ]:
+            if (
+                not style_tokens
+                or style_name not in assigned_styles
+                or style_name in protected_styles
+            ):
+                continue
+            selected_tokens = (
+                style_tokens
+                if full_style
+                else {k: v for k, v in style_tokens.items() if k in FONT}
+            )
+            for action, params in token_operations(selected_tokens):
+                style_seq += 1
+                operation = {
+                    "id": f"builtin.{style_seq}",
+                    "action": action,
+                    "target": {"type": "style", "name": style_name},
+                    "params": params,
+                }
+                operations.append(operation)
+                ledger.append(
+                    {
+                        "rule_id": operation["id"],
+                        "state": "planned",
+                        "evidence": "builtin format",
+                    }
+                )
     for rule in template["rules"]:
         target = copy.deepcopy(overrides.get(rule["id"], rule["target"]))
         if rule["state"] == "preserve" or set(target) == {"preserve"}:

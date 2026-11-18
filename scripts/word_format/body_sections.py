@@ -70,8 +70,10 @@ def ensure_body_boundary(document):
     preparation = boundary_preparation(document)
     if preparation is None:
         return
+    from .ooxml import insert_child
+
     previous, ending, clone = preparation
-    element(previous, "pPr").append(clone)
+    insert_child(element(previous, "pPr"), clone)
     element(ending, "type").set(qn("w:val"), "nextPage")
     # A page break at the same boundary would add an empty page in Word.
     if not "".join(node.text or "" for node in previous.iter(qn("w:t"))).strip():

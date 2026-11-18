@@ -116,8 +116,8 @@ def add_standard_thesis_cover(
 _SP = r"[\s\u3000]*"
 _FIELD_LABEL_CORES = {
     "title": (
-        rf"(?:(?:毕业|学位|课程)?(?:论文|设计)?(?:[（(](?:设计|论文)[）)])?{_SP}题{_SP}目|"
-        rf"(?:课题|论文|设计|项目){_SP}名{_SP}称)"
+        rf"(?:(?:毕业|学位|课程|课题|项目|研究|报告)?(?:论文|设计|报告)?(?:[（(](?:设计|论文)[）)])?{_SP}题{_SP}目|"
+        rf"(?:课题|论文|设计|项目|报告){_SP}名{_SP}称)"
     ),
     "title_en": rf"(?:英文|外文){_SP}(?:论文|设计)?{_SP}题{_SP}目|english\s+title",
     "subtitle": rf"副{_SP}题{_SP}目|副{_SP}标{_SP}题",
@@ -159,6 +159,7 @@ _FIELD_ALIASES = {
     "题目": "title",
     "论文题目": "title",
     "设计题目": "title",
+    "课题题目": "title",
     "课题名称": "title",
     "title_en": "title_en",
     "英文题目": "title_en",
@@ -246,7 +247,10 @@ _RED_FORMAT_HINT_RE = re.compile(
     r"宋体|黑体|楷体|仿宋|加粗|居中|左对齐|右对齐|行距|缩进)[^）)】\]]*[）)】\]]?[\s\u3000]*$"
 )
 _STANDALONE_TITLE_PLACEHOLDER_RE = re.compile(
-    r"^[（(【\[]?\s*(?:在此(?:处)?输入)?(?:毕业)?(?:论文|设计)?题\s*目\s*[）)】\]]?$"
+    r"^[（(【\[]?\s*(?:在此(?:处)?输入)?(?:毕业|学位|课程|课题|项目)?(?:论文|设计|报告)?\s*题\s*目"
+    r"(?:[\s\u3000]*[（(【\[]?[^）)】\]]*(?:号|居中|宋|黑|楷|仿|加粗|bold|pt)[^）)】\]]*[）)】\]]?)?"
+    r"\s*[）)】\]]?$",
+    re.I,
 )
 _COVER_BANNER_RE = re.compile(
     r"(?:毕业(?:设计|论文)|学位论文|课程(?:设计|论文|报告)|实验报告|实习报告|开题报告|期末作业|文献综述|专题报告|读书报告|调研报告|封面)"
@@ -683,7 +687,64 @@ def _remap_cover_relationships(src_part, dst_part, nodes):
     copied_parts = {}
     used_names = {str(p.partname) for p in dst_part.package.parts}
     counter = 1
-    for root in nodes:
+    bookmark_starts = {
+        bm.get(qn("w:id"))
+        for root in nodes
+        for bm in root.iter(qn("w:bookmarkStart"))
+        if bm.get(qn("w:id")) is not None
+    }
+    bookmark_ends = {
+        bm.get(qn("w:id"))
+        for root in nodes
+        for bm in root.iter(qn("w:bookmarkEnd"))
+        if bm.get(qn("w:id")) is not None
+    }
+    paired_bookmarks = bookmark_starts & bookmark_ends
+    comment_tags = {
+        qn("w:commentRangeStart"),
+        qn("w:commentRangeEnd"),
+        qn("w:commentReference"),
+    }
+    for root in list(nodes):
+        if root.tag in comment_tags:
+            nodes.remove(root)
+            continue
+        if root.tag in {qn("w:bookmarkStart"), qn("w:bookmarkEnd")} and (
+            root.get(qn("w:id")) not in paired_bookmarks
+        ):
+            nodes.remove(root)
+            continue
+        for marker in list(root.iter()):
+            if marker is root:
+                continue
+            if marker.tag in comment_tags or (
+                marker.tag in {qn("w:bookmarkStart"), qn("w:bookmarkEnd")}
+                and marker.get(qn("w:id")) not in paired_bookmarks
+            ):
+                parent = marker.getparent()
+                if parent is not None:
+                    parent.remove(marker)
+                    if parent.tag == qn("w:r") and all(
+                        c.tag == qn("w:rPr") for c in parent
+                    ):
+                        r_parent = parent.getparent()
+                        if r_parent is not None:
+                            r_parent.remove(parent)
+        # Strip pure format-instruction callout bubbles (e.g. "楷体，二号，居中") in VML picts.
+        for pict in list(root.iter(qn("w:pict"))):
+            txbx_nodes = list(pict.iter(qn("w:txbxContent")))
+            if txbx_nodes:
+                txbx_text = "".join(
+                    t.text or "" for tb in txbx_nodes for t in tb.iter(qn("w:t"))
+                ).strip()
+                if txbx_text and _RED_FORMAT_HINT_RE.match(txbx_text):
+                    run_parent = pict.getparent()
+                    pict.getparent().remove(pict)
+                    if run_parent is not None and run_parent.tag == qn("w:r") and all(
+                        c.tag == qn("w:rPr") for c in run_parent
+                    ):
+                        if run_parent.getparent() is not None:
+                            run_parent.getparent().remove(run_parent)
         for sect in root.iter(qn("w:sectPr")):
             for child in list(sect):
                 if child.tag in {qn("w:headerReference"), qn("w:footerReference")}:
@@ -772,10 +833,12 @@ def _materialize_cover_fonts(src_doc, nodes, target_doc) -> None:
                 # colliding style definition from the destination document.
                 temporary = OxmlElement("w:pPr")
                 write_paragraph(temporary, prop, val)
-                for child in temporary:
+                for child in list(temporary):
                     current = ppr.find(child.tag)
                     if current is None:
-                        ppr.append(child)
+                        from .ooxml import insert_child
+
+                        insert_child(ppr, child)
                     else:
                         for attr, value in child.attrib.items():
                             if attr not in current.attrib:
@@ -819,7 +882,7 @@ def _has_declaration_module(doc) -> bool:
         text = p.text.strip()
         if not text:
             continue
-        style_name = p.style.name if p.style else ""
+        style_name = (p.style.name or "") if p.style else ""
         mod = classify_module(text, style_name, None)
         if mod == "declaration":
             return True
@@ -844,7 +907,7 @@ def _is_cover_boundary_paragraph(
     ):
         return False
     style = paragraph_style(doc, p)
-    style_name = style.name if style is not None else ""
+    style_name = (style.name or "") if style is not None else ""
     outline = outline_level(doc, p)
     mod = classify_module(text, style_name, outline)
     non_cover = (
@@ -900,7 +963,7 @@ def _extract_cover_nodes(
             has_cover_content = True
         elif child.tag == qn("w:p"):
             style = paragraph_style(src_doc, child)
-            if classify_module(text, style.name if style is not None else "",
+            if classify_module(text, (style.name or "") if style is not None else "",
                                outline_level(src_doc, child)) == "declaration":
                 seen_declaration = True
             if text or any(
@@ -982,7 +1045,7 @@ def _remove_existing_cover_from_target(
         elif child.tag == qn("w:p"):
             text = _paragraph_top_text(child).strip()
             style = paragraph_style(target_doc, child)
-            if classify_module(text, style.name if style is not None else "",
+            if classify_module(text, (style.name or "") if style is not None else "",
                                outline_level(target_doc, child)) == "declaration":
                 seen_declaration = True
             if text or any(

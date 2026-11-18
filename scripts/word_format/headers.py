@@ -27,10 +27,11 @@ VARIANTS = {"default": "header", "first": "first_page_header", "even": "even_pag
 
 def style_reference(style):
     """Use language independent selectors only for verified built-in Heading styles."""
-    match = re.fullmatch(r"heading\s*([1-9])", style.name or "", re.I)
+    raw_name = style.name or style.style_id or ""
+    match = re.fullmatch(r"heading\s*([1-9])", raw_name, re.I)
     if style.builtin and match:
         return match[1]
-    return '"' + style.name.replace('\\', '\\\\').replace('"', '\\"') + '"'
+    return '"' + raw_name.replace('\\', '\\\\').replace('"', '\\"') + '"'
 
 
 def variant_params(params, validator):
@@ -406,8 +407,9 @@ def read_header(index, ref, cap):
             }
             # Normalize the reader to the same selector mapping as the writer.
             variants[variant]["style_selectors"] = {
-                style.name: style_reference(style) for style in index.document.styles
-                if style.type == WD_STYLE_TYPE.PARAGRAPH
+                style.name: style_reference(style)
+                for style in index.document.styles
+                if style.type == WD_STYLE_TYPE.PARAGRAPH and style.name
             }
         else:
             variants[variant] = []
@@ -440,10 +442,14 @@ def verify_header(actual, params, cap):
         if params["mode"] == "text":
             return selected["text"] == params["text"] and selected["fields"] == []
         selector = selected.get("style_selectors", {}).get(params["style_name"])
-        return {k:v for k,v in selected.items() if k != "style_selectors"} == {
-            "text": params["prefix"],
-            "fields": [f'STYLEREF {selector}'],
-        }
+        normalized_fields = [
+            re.sub(r"\s+\\\*\s*CHARFORMAT\s*$", "", f.strip(), flags=re.I)
+            for f in selected["fields"]
+        ]
+        return (
+            selected["text"] == params["prefix"]
+            and normalized_fields == [f"STYLEREF {selector}"]
+        )
     if name == "link":
         return selected is params["value"]
     expected = (

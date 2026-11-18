@@ -1,4 +1,4 @@
-param(
+﻿param(
   [Parameter(Mandatory=$true)][string]$InputPath,
   [string]$OutputPath,
   [ValidateSet('inspect','render','refresh','convert')][string]$Mode = 'inspect',
@@ -37,12 +37,89 @@ function Get-ShapeTextRanges($Shapes) {
   }
 }
 
+function Get-HeaderFooterRanges($Doc) {
+  foreach ($section in $Doc.Sections) {
+    foreach ($header in $section.Headers) {
+      if ($header.Exists -and ([int]$section.Index -eq 1 -or -not $header.LinkToPrevious)) {
+        Write-Output $header.Range
+      }
+    }
+    foreach ($footer in $section.Footers) {
+      if ($footer.Exists -and ([int]$section.Index -eq 1 -or -not $footer.LinkToPrevious)) {
+        Write-Output $footer.Range
+      }
+    }
+  }
+}
+
 function Get-FieldRanges($Doc) {
-  Get-StoryRanges $Doc
+  Get-StoryRanges $Doc | Where-Object { [int]$_.StoryType -notin @(6, 7, 8, 9, 10, 11) }
+  Get-HeaderFooterRanges $Doc
   Get-ShapeTextRanges $Doc.Shapes
   foreach ($section in $Doc.Sections) {
     foreach ($header in $section.Headers) { Get-ShapeTextRanges $header.Shapes }
     foreach ($footer in $section.Footers) { Get-ShapeTextRanges $footer.Shapes }
+  }
+}
+
+function Sync-TocEntryFonts($Doc) {
+  foreach ($toc in $Doc.TablesOfContents) {
+    foreach ($tocPara in $toc.Range.Paragraphs) {
+      try {
+        $styleObj = $tocPara.Range.Style
+        if ($null -eq $styleObj) { continue }
+        $styleName = [string]$styleObj.NameLocal
+        if ($styleName -notmatch '^(?i)(?:toc|目录)\s*[1-9]$') { continue }
+        $sf = $styleObj.Font
+        $pf = $tocPara.Range.Font
+        $fe = [string]$sf.NameFarEast
+        $la = [string]$sf.NameAscii
+        if ($fe -and -not $fe.StartsWith('+')) { $pf.NameFarEast = $fe }
+        if ($la -and -not $la.StartsWith('+')) {
+          $pf.NameAscii = $la
+          $pf.NameOther = $la
+        }
+        $sz = [double]$sf.Size
+        if ($sz -gt 0 -and $sz -lt 1000) { $pf.Size = $sz }
+        if ([int]$sf.Bold -ne 9999999) { $pf.Bold = [int]$sf.Bold }
+        if ([int]$sf.Italic -ne 9999999) { $pf.Italic = [int]$sf.Italic }
+        if ([int]$sf.Color -ne 9999999) { $pf.Color = [int]$sf.Color }
+      } catch {}
+    }
+  }
+}
+
+function Sync-HeaderFooterFieldFonts($Doc) {
+  foreach ($story in @(Get-HeaderFooterRanges $Doc)) {
+    foreach ($field in $story.Fields) {
+      try {
+        $code = [string]$field.Code.Text
+        if ($code -notmatch '^\s*(?i)(?:STYLEREF|PAGE|NUMPAGES|SECTIONPAGES)\b') { continue }
+        $pRange = $field.Result.Paragraphs.Item(1).Range
+        $markFont = $pRange.Characters.Last.Font
+        $fe = [string]$markFont.NameFarEast
+        $la = [string]$markFont.NameAscii
+        $sz = [double]$markFont.Size
+        $hasExplicit = ($fe -and -not $fe.StartsWith('+')) -or ($la -and -not $la.StartsWith('+')) -or ($sz -gt 0 -and $sz -lt 1000)
+        if ($hasExplicit -and $code -match '^\s*(?i)STYLEREF\b' -and $code -notmatch '(?i)\\\*\s*CHARFORMAT\b') {
+          $field.Code.Text = ($code.TrimEnd() + ' \* CHARFORMAT ')
+        }
+        foreach ($targetFont in @($field.Code.Font, $field.Result.Font)) {
+          if ($fe -and -not $fe.StartsWith('+')) { $targetFont.NameFarEast = $fe }
+          if ($la -and -not $la.StartsWith('+')) {
+            $targetFont.NameAscii = $la
+            $targetFont.NameOther = $la
+          }
+          if ($sz -gt 0 -and $sz -lt 1000) { $targetFont.Size = $sz }
+          if ([int]$markFont.Bold -ne 9999999) { $targetFont.Bold = [int]$markFont.Bold }
+          if ([int]$markFont.Italic -ne 9999999) { $targetFont.Italic = [int]$markFont.Italic }
+          if ([int]$markFont.Color -ne 9999999) { $targetFont.Color = [int]$markFont.Color }
+        }
+        if ($code -match '^\s*(?i)STYLEREF\b') {
+          $null = $field.Update()
+        }
+      } catch {}
+    }
   }
 }
 
@@ -89,10 +166,14 @@ try {
     }
     $document.Repaginate()
     foreach ($toc in $document.TablesOfContents) { $null = $toc.UpdatePageNumbers() }
+    Sync-TocEntryFonts $document
+    Sync-HeaderFooterFieldFonts $document
     $pageCount = [int]$document.ComputeStatistics(2)
     if ($pageCount -eq $previousPageCount) { $stable = $true; break }
     $previousPageCount = $pageCount
   }
+  Sync-TocEntryFonts $document
+  Sync-HeaderFooterFieldFonts $document
   if ($Mode -eq 'refresh') { $document.Save() }
   if ($Mode -eq 'render') { $document.ExportAsFixedFormat($OutputPath, 17) }
 
@@ -142,6 +223,8 @@ try {
       alignment = [int]$range.ParagraphFormat.Alignment
       first_line_indent_pt = [double]$range.ParagraphFormat.FirstLineIndent
       first_line_indent_chars = [double]$range.ParagraphFormat.CharacterUnitFirstLineIndent
+      left_indent_pt = [double]$range.ParagraphFormat.LeftIndent
+      left_indent_chars = [double]$range.ParagraphFormat.CharacterUnitLeftIndent
       line_spacing_rule = [int]$range.ParagraphFormat.LineSpacingRule
       line_spacing_pt = [double]$range.ParagraphFormat.LineSpacing
     }

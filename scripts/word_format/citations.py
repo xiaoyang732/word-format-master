@@ -397,7 +397,12 @@ def snapshot(index,params,baseline=None):
         _,refs=extract_citation_data(document)
         reference_nodes={document.paragraphs[r['paragraph_index']]._p for r in refs}
         old_names={n.get(qn('w:name')) for n in document.element.iter(qn('w:bookmarkStart'))}
-        target_nodes={document.paragraphs[p['paragraph_index']]._p for p in params['placements']}
+        target_nodes={
+            document.paragraphs[p['paragraph_index']]._p
+            for p in params['placements']
+            if isinstance(p.get('paragraph_index'), int)
+            and 0 <= p['paragraph_index'] < len(document.paragraphs)
+        }
     else:reference_nodes,old_names,target_nodes=baseline
     paragraphs=[]
     for p in document.element.body.iter(qn('w:p')):

@@ -21,12 +21,37 @@ from .properties import (
 )
 
 
+BUILTIN_PARAGRAPH_STYLES = frozenset(
+    {
+        "normal",
+        "title",
+        "subtitle",
+        "header",
+        "footer",
+        "caption",
+        "bibliography",
+        "list paragraph",
+        "list number",
+        "list bullet",
+        "toc heading",
+        *(f"heading {i}" for i in range(1, 10)),
+        *(f"toc {i}" for i in range(1, 10)),
+    }
+)
+
+
+def is_builtin_paragraph_style(name: str) -> bool:
+    return (name or "").strip().casefold() in BUILTIN_PARAGRAPH_STYLES
+
+
 def ensure_style(index, ref):
     name = ref["id"][len("style:") :]
     try:
         style = index.document.styles[name]
     except KeyError:
-        style = index.document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+        style = index.document.styles.add_style(
+            name, WD_STYLE_TYPE.PARAGRAPH, builtin=is_builtin_paragraph_style(name)
+        )
         style.base_style = index.document.styles.default(WD_STYLE_TYPE.PARAGRAPH)
     index.elements[ref["id"]] = style.element
     if style.type != WD_STYLE_TYPE.PARAGRAPH:
@@ -69,15 +94,22 @@ def set_font_property(index, ref, params, name):
         else list(text_runs(p))
     )
     for run in runs:
-        # Empty runs may contain bookmarks/fields. Do not create formatting on them,
-        # except pure tab runs (<w:tab/>) such as TOC dot-leaders when formatting a paragraph.
+        # Empty runs may contain bookmarks/drawings. Do not create formatting on them,
+        # except pure tab runs (<w:tab/>) and field control runs (<w:fldChar/>, <w:instrText/>)
+        # when formatting a full paragraph so Word field updates (\* MERGEFORMAT / SEQ / REF)
+        # retain the paragraph's typography instead of reverting to unformatted defaults.
         has_text = any(t.text for t in run.findall(qn("w:t")))
         has_tab_only = (
             ref["kind"] == "paragraph"
             and run.find(qn("w:tab")) is not None
             and all(c.tag in {qn("w:rPr"), qn("w:tab")} for c in run)
         )
-        if has_text or has_tab_only:
+        has_field_control = (
+            ref["kind"] == "paragraph"
+            and any(c.tag in {qn("w:fldChar"), qn("w:instrText")} for c in run)
+            and all(c.tag in {qn("w:rPr"), qn("w:fldChar"), qn("w:instrText")} for c in run)
+        )
+        if has_text or has_tab_only or has_field_control:
             write_font(element(run, "rPr"), name, params["value"])
     if ref["kind"] == "paragraph" or not any(
         t.text for run in runs for t in run.findall(qn("w:t"))

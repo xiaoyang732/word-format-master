@@ -188,11 +188,7 @@ def resolve_targets(index, target, allowed):
                 candidates = [
                     r for r in candidates if r.get(field) in {"reference_item", "reference_entry"}
                 ]
-            elif (
-                field == "role"
-                and val == "reference"
-                and target.get("module") == "references"
-            ):
+            elif field == "role" and val == "reference":
                 candidates = [
                     r
                     for r in candidates

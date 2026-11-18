@@ -22,8 +22,22 @@ def entry_styles(document, max_level, *, create=False):
     for level in range(1, max_level + 1):
         style = styles.get(f"toc{level}") or styles.get(f"目录{level}")
         if style is None and create:
+            from .properties import element, write_font, write_paragraph
+
             style = document.styles.add_style(f"toc {level}", WD_STYLE_TYPE.PARAGRAPH, builtin=True)
             style.base_style = document.styles.default(WD_STYLE_TYPE.PARAGRAPH)
+            rpr = element(style.element, "rPr")
+            write_font(rpr, "bold", False)
+            write_font(rpr, "italic", False)
+            write_font(rpr, "color", "000000")
+            ppr = element(style.element, "pPr")
+            write_paragraph(ppr, "alignment", "left")
+            write_paragraph(ppr, "space_before_pt", 0.0)
+            write_paragraph(ppr, "space_after_pt", 0.0)
+            write_paragraph(ppr, "first_line_indent", {"value": 0, "unit": "chars"})
+            write_paragraph(
+                ppr, "left_indent", {"value": float((level - 1) * 2), "unit": "chars"}
+            )
         yield style
 
 

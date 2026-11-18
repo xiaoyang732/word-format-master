@@ -21,4 +21,4 @@
 
 模板已完成格式、编号及逐页视觉核对，验收材料保留于本地。模板成品由项目格式引擎输出，未将起草脚本直接保存的草稿当作成品。
 
-本轮 Office 修订使用注册动作 `numbering.order.repair` 调整编号定义及级别子元素次序。编号 ID、链接、内容和版面参数保留。当前源文件摘要登记于 `templates/reports.json`，两种分发构建均校验该摘要。
+本轮 Office 修订使用注册动作 `numbering.order.repair` 调整编号定义及级别子元素次序，并通过注册样式动作同步 `Heading 1` 与 `toc 1`、`toc 2` 的中英文字体及字号后在 Microsoft Word 中刷新目录域，消除 Word 更新目录时将标题直接黑体属性复制到目录项的问题。编号 ID、链接、内容和版面参数保留。当前源文件摘要登记于 `templates/reports.json`，两种分发构建均校验该摘要。

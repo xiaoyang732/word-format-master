@@ -608,6 +608,7 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
     # Resolve per-object intent first: module values provide defaults and explicit
     # global role values win. Never modify a shared style for a module-specific rule.
     effective = {}
+    wfm_styles = {}
     modules = spec.get("document_structure", {}).get("ordered_modules", [])
     for oid, r in index.records.items():
         if r["kind"] != "paragraph" or r["part"] != "word/document.xml":
@@ -659,6 +660,16 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
             # modules require their own explicit module or semantic rules.
             # Templates retain their global role baseline before module overrides.
             tokens = spec.get("body", {})
+        elif (
+            role == "list"
+            and r.get("module") in {None, "chapters"}
+            and (isolated or bool(spec.get("lists", {}).get("numbered")))
+        ):
+            tokens = {
+                k: v
+                for k, v in spec.get("body", {}).items()
+                if not any(k.startswith(ind + "_") for ind in INDENTS)
+            }
         elif role == "title":
             tokens = spec.get("title", {})
         elif role == "heading":
@@ -687,7 +698,7 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
             tokens = spec.get("keywords", {})
             if tokens or effective.get(oid):
                 style_name = "WFM Keywords"
-        elif role == "reference":
+        elif role == "reference" or sem_role in {"reference_item", "reference_entry"}:
             tokens = spec.get("references", {})
             style_name = "Bibliography" if tokens else None
         elif role == "caption":
@@ -699,7 +710,13 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
                 labels = (cap.get("label"),) + defaults
                 if cap and any(
                     label
-                    and re.match(r"^\s*" + re.escape(label) + r"\s*\d", r.get("text", ""), re.I)
+                    and re.match(
+                        r"^\s*"
+                        + re.escape(label)
+                        + r"\s*(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
+                        r.get("text", ""),
+                        re.I,
+                    )
                     for label in labels
                 ):
                     tokens = cap
@@ -754,6 +771,15 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
             merged.update(specific)
         else:
             merged.update(tokens)
+        if (
+            style_name
+            and style_name.startswith("WFM ")
+            and style_name.endswith(" Heading")
+            and extra_outline == 0
+        ):
+            wfm_styles.setdefault(
+                style_name, {k: v for k, v in merged.items() if k in FONT}
+            )
     for oid, tokens in effective.items():
         for action, params in token_operations(tokens):
             # Word/WPS stretches every non-final line when a justified
@@ -793,6 +819,9 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
                     "params": {"value": tokens["separator"]},
                 }
             )
+    for name, wfm_tokens in wfm_styles.items():
+        for action, params in token_operations(wfm_tokens):
+            add(action, ["style:" + name], params)
     # Named presentation styles mirror the explicit global rules. Body formatting
     # stays on selected paragraphs: changing Normal also changes effective format
     # in unrelated modules, table cells, headers and styles that inherit from it.
@@ -802,6 +831,16 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
             ("Subtitle", spec.get("title", {})),
         ]
         + [(f"Heading {h['level']}", h) for h in spec.get("headings", [])]
+        + [
+            (
+                spec.get("captions", {}).get("figure", {}).get("style_name") or "Figure Caption",
+                spec.get("captions", {}).get("figure", {}),
+            ),
+            (
+                spec.get("captions", {}).get("table", {}).get("style_name") or "Table Caption",
+                spec.get("captions", {}).get("table", {}),
+            ),
+        ]
         + [("Bibliography", spec.get("references", {}))]
     ):
         if not isolated:

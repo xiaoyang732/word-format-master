@@ -174,8 +174,8 @@ def _uses_theme_font(document, paragraph, run, channel):
 def validate_office(document, evidence, *, baseline_document=None):
     """Run after Word updates fields, before binding render and visual evidence."""
     from .body_sections import body_start
-    from .inspect import DocumentIndex
-    from .properties import read_font, read_paragraph
+    from .inspect import DocumentIndex, _style_paragraph
+    from .properties import read_font, read_paragraph, text_runs
 
     index = DocumentIndex(document)
     labels = expected_labels(document)
@@ -188,10 +188,12 @@ def validate_office(document, evidence, *, baseline_document=None):
     theme_fonts = set()
     cursor = 0
     matches = {}
+    checked_roles = {"body", "module_body", "heading", "reference", "list", "keywords", "caption"}
     for oid in index.top_ids:
         record = index.records[oid]
-        if (
-            record.get("semantic_role") in {"toc_entry", "toc_heading"}
+        is_toc_heading = record.get("semantic_role") == "toc_heading"
+        if not is_toc_heading and (
+            record.get("semantic_role") == "toc_entry"
             or record.get("role") == "toc"
         ):
             continue
@@ -216,18 +218,30 @@ def validate_office(document, evidence, *, baseline_document=None):
                 warnings.append({"paragraph": oid, "reason": "Number format not modeled"})
             else:
                 checked += 1
-                if row["list_string"].strip() != expected.strip():
+                if str(row.get("list_string", "")).strip() != expected.strip():
                     errors.append(
                         {
                             "paragraph": oid,
                             "text": text,
                             "expected_label": expected,
-                            "actual_label": row["list_string"],
+                            "actual_label": row.get("list_string", ""),
                         }
                     )
-        if record.get("semantic_role") == "body_text":
-            runs = node.findall(qn("w:r"))
+        should_check_format = is_toc_heading or (
+            record.get("module") != "cover"
+            and record.get("object_kind") in {None, "text"}
+            and record.get("role") in checked_roles
+        )
+        if should_check_format:
+            vis_runs = [
+                r
+                for r in text_runs(node)
+                if any(t.text and t.text.strip() for t in r.findall(qn("w:t")))
+            ]
+            runs = vis_runs or list(text_runs(node))
             for name in ("font_east_asia", "font_latin", "font_size_pt"):
+                if name not in row:
+                    continue
                 values = [read_font(document, node, run, name) for run in runs]
                 values = [value for value in values if value is not None]
                 if (
@@ -239,13 +253,21 @@ def validate_office(document, evidence, *, baseline_document=None):
                     observed = row.get(name)
                     if name in {"font_east_asia", "font_latin"}:
                         channel = "eastAsia" if name == "font_east_asia" else "ascii"
-                        if observed and observed.startswith("+") and all(
-                            _uses_theme_font(document, node, run, channel) for run in runs
+                        if (
+                            isinstance(observed, str)
+                            and observed.startswith("+")
+                            and all(_uses_theme_font(document, node, run, channel) for run in runs)
                         ):
                             theme_fonts.add((name, expected, observed))
                             continue
                         required_fonts.add(expected)
-                    if observed != expected:
+                        mismatch = observed != expected
+                    else:
+                        mismatch = not (
+                            isinstance(observed, (int, float))
+                            and abs(float(observed) - float(expected)) <= 0.05
+                        )
+                    if mismatch:
                         errors.append(
                             {
                                 "paragraph": oid,
@@ -257,7 +279,7 @@ def validate_office(document, evidence, *, baseline_document=None):
             alignment = {"left": 0, "center": 1, "right": 2, "justify": 3}.get(
                 read_paragraph(document, node, "alignment")
             )
-            if alignment is not None and row["alignment"] != alignment:
+            if alignment is not None and row.get("alignment") is not None and row["alignment"] != alignment:
                 errors.append(
                     {
                         "paragraph": oid,
@@ -266,43 +288,100 @@ def validate_office(document, evidence, *, baseline_document=None):
                         "actual": row["alignment"],
                     }
                 )
-            indent = read_paragraph(document, node, "first_line_indent")
-            if indent["unit"] == "chars":
-                observed = row.get("first_line_indent_chars")
-                expected = indent["value"]
+            if not is_toc_heading:
+                indent = read_paragraph(document, node, "first_line_indent")
+                if indent["unit"] == "chars":
+                    observed = row.get("first_line_indent_chars")
+                    expected = indent["value"]
+                else:
+                    observed = row.get("first_line_indent_pt")
+                    expected = indent["value"] * 72 / 25.4
+                if observed is not None and abs(observed - expected) > 0.25:
+                    errors.append(
+                        {
+                            "paragraph": oid,
+                            "property": "first_line_indent",
+                            "expected": expected,
+                            "actual": observed,
+                        }
+                    )
+                spacing = read_paragraph(document, node, "line_spacing")
+                observed_rule = row.get("line_spacing_rule")
+                if observed_rule is not None:
+                    rule = spacing["kind"]
+                    value = spacing["value"]
+                    allowed = (
+                        {1: {0, 5}, 1.5: {1, 5}, 2: {2, 5}}.get(value, {5})
+                        if rule == "multiple"
+                        else {4}
+                        if rule == "exact"
+                        else {3}
+                    )
+                    if observed_rule not in allowed:
+                        errors.append(
+                            {
+                                "paragraph": oid,
+                                "property": "line_spacing_rule",
+                                "expected": sorted(allowed),
+                                "actual": observed_rule,
+                            }
+                        )
+                    elif rule == "multiple" and row.get("line_spacing_pt") is not None:
+                        expected_pt = float(value) * 12.0
+                        if abs(float(row["line_spacing_pt"]) - expected_pt) > 0.5:
+                            errors.append(
+                                {
+                                    "paragraph": oid,
+                                    "property": "line_spacing_pt",
+                                    "expected": expected_pt,
+                                    "actual": row["line_spacing_pt"],
+                                }
+                            )
+    toc_style_Lookup = {}
+    for st in document.styles:
+        if st.type == 1:
+            m = re.fullmatch(r"(?:toc|目录)\s*([1-9])", (st.name or "").strip(), re.I)
+            if m:
+                toc_style_Lookup[int(m.group(1))] = st.name
+    for row in actual:
+        m = re.fullmatch(r"(?:toc|目录)\s*([1-9])", str(row.get("style", "")).strip(), re.I)
+        if not m or not row.get("text", "").strip("\r\n\x07 "):
+            continue
+        lvl = int(m.group(1))
+        st_name = toc_style_Lookup.get(lvl)
+        if not st_name:
+            continue
+        probe_p = _style_paragraph(st_name, document)
+        for name in ("font_east_asia", "font_latin", "font_size_pt"):
+            expected = read_font(document, probe_p, None, name)
+            if expected is None or isinstance(expected, dict):
+                continue
+            observed = row.get(name)
+            if name in {"font_east_asia", "font_latin"}:
+                channel = "eastAsia" if name == "font_east_asia" else "ascii"
+                if (
+                    isinstance(observed, str)
+                    and observed.startswith("+")
+                    and _uses_theme_font(document, probe_p, None, channel)
+                ):
+                    theme_fonts.add((name, expected, observed))
+                    continue
+                required_fonts.add(expected)
+                mismatch = observed != expected
             else:
-                observed = row.get("first_line_indent_pt")
-                expected = indent["value"] * 72 / 25.4
-            if observed is not None and abs(observed - expected) > 0.25:
+                mismatch = not (
+                    isinstance(observed, (int, float))
+                    and abs(float(observed) - float(expected)) <= 0.05
+                )
+            if mismatch:
                 errors.append(
                     {
-                        "paragraph": oid,
-                        "property": "first_line_indent",
+                        "paragraph": f"toc:{lvl}:{row['text'].strip()[:24]}",
+                        "property": name,
                         "expected": expected,
                         "actual": observed,
                     }
                 )
-            spacing = read_paragraph(document, node, "line_spacing")
-            observed_rule = row.get("line_spacing_rule")
-            if observed_rule is not None:
-                rule = spacing["kind"]
-                value = spacing["value"]
-                allowed = (
-                    {1: {0}, 1.5: {1, 5}, 2: {2, 5}}.get(value, {5})
-                    if rule == "multiple"
-                    else {4}
-                    if rule == "exact"
-                    else {3}
-                )
-                if observed_rule not in allowed:
-                    errors.append(
-                        {
-                            "paragraph": oid,
-                            "property": "line_spacing_rule",
-                            "expected": sorted(allowed),
-                            "actual": observed_rule,
-                        }
-                    )
     try:
         first = body_start(document)
         first_row = matches.get(first)

@@ -40,10 +40,14 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 
 
 def get_or_create_paragraph_style(document: Document, name: str):
+    from .operations import is_builtin_paragraph_style
+
     try:
         return document.styles[name]
     except KeyError:
-        return document.styles.add_style(name, WD_STYLE_TYPE.PARAGRAPH)
+        return document.styles.add_style(
+            name, WD_STYLE_TYPE.PARAGRAPH, builtin=is_builtin_paragraph_style(name)
+        )
 
 
 def resolve_paragraph_style(document: Document, tokens: dict[str, Any], fallback: str):
@@ -166,12 +170,12 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
             existing_jc = tblPr.find(qn("w:jc"))
             if existing_jc is not None:
                 tblPr.remove(existing_jc)
-            tblPr.append(parse_xml(f'<w:jc {nsdecls("w")} w:val="center"/>'))
+            insert_child(tblPr, parse_xml(f'<w:jc {nsdecls("w")} w:val="center"/>'))
         elif alignment in ("left", "right"):
             existing_jc = tblPr.find(qn("w:jc"))
             if existing_jc is not None:
                 tblPr.remove(existing_jc)
-            tblPr.append(parse_xml(f'<w:jc {nsdecls("w")} w:val="{alignment}"/>'))
+            insert_child(tblPr, parse_xml(f'<w:jc {nsdecls("w")} w:val="{alignment}"/>'))
 
         snapshot_key = "{urn:word-format-master:format}originalBorders"
         cells = [tc for tr in table._tbl.findall(qn("w:tr")) for tc in tr.findall(qn("w:tc"))]
@@ -212,7 +216,7 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
                 if border is not None:
                     owner.remove(border)
                 if saved:
-                    owner.append(parse_xml(base64.b64decode(saved)))
+                    insert_child(owner, parse_xml(base64.b64decode(saved)))
         if three_line:
             existing_borders = tblPr.find(qn("w:tblBorders"))
             if existing_borders is not None:
@@ -227,7 +231,7 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
                 f'<w:insideV w:val="none"/>'
                 f"</w:tblBorders>"
             )
-            tblPr.append(three_line_xml)
+            insert_child(tblPr, three_line_xml)
 
             rows = table._tbl.findall(qn("w:tr"))
             for row_index, row in enumerate(rows):
@@ -241,11 +245,11 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
                     # borders. Cover actual cells, including merge continuations.
                     for edge in (
                         "top",
-                        "bottom",
-                        "left",
-                        "right",
                         "start",
+                        "left",
+                        "bottom",
                         "end",
+                        "right",
                         "insideH",
                         "insideV",
                         "tl2br",
@@ -266,7 +270,7 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
                             border.set(qn("w:space"), "0")
                             border.set(qn("w:color"), "auto")
                         tc_border_xml.append(border)
-                    tcPr.append(tc_border_xml)
+                    insert_child(tcPr, tc_border_xml)
 
         if "repeat_header_row" in tables and not repeat_header and table.rows:
             trPr = table.rows[0]._tr.trPr
@@ -280,20 +284,26 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
                 trPr.append(parse_xml(f"<w:tblHeader {nsdecls('w')}/>"))
 
         if latin or east_asia or font_size_pt is not None:
+            from .properties import element, write_font
+
             for row in table.rows:
                 for cell in row.cells:
                     for paragraph in cell.paragraphs:
+                        ppr_rpr = element(element(paragraph._p, "pPr"), "rPr")
+                        if font_size_pt is not None:
+                            write_font(ppr_rpr, "font_size_pt", float(font_size_pt))
+                        if latin:
+                            write_font(ppr_rpr, "font_latin", latin)
+                        if east_asia:
+                            write_font(ppr_rpr, "font_east_asia", east_asia)
                         for run in paragraph.runs:
+                            rpr = element(run._r, "rPr")
                             if font_size_pt is not None:
-                                set_run_font(run, {"font_size_pt": float(font_size_pt)})
-                            rpr = run._r.get_or_add_rPr()
-                            rfonts = rpr.get_or_add_rFonts()
+                                write_font(rpr, "font_size_pt", float(font_size_pt))
                             if latin:
-                                run.font.name = latin
-                                rfonts.set(qn("w:ascii"), latin)
-                                rfonts.set(qn("w:hAnsi"), latin)
+                                write_font(rpr, "font_latin", latin)
                             if east_asia:
-                                rfonts.set(qn("w:eastAsia"), east_asia)
+                                write_font(rpr, "font_east_asia", east_asia)
 
     desc = []
     if three_line:
@@ -376,7 +386,8 @@ def apply_caption_positions(document: Document, captions: dict[str, Any]) -> lis
         labels = [str(tokens.get("label") or "")] + default_labels[role]
         labels = [label for label in dict.fromkeys(labels) if label]
         pattern = re.compile(
-            rf"^\s*(?:{'|'.join(re.escape(label) for label in labels)})\s*[\[（(]?[A-Za-z0-9一二三四五六七八九十]+",
+            rf"^\s*(?:{'|'.join(re.escape(label) for label in labels)})\s*"
+            r"(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
             re.I,
         )
         moved = 0
@@ -419,7 +430,12 @@ def apply_caption_positions(document: Document, captions: dict[str, Any]) -> lis
 def caption_keep_nodes(document, params):
     """Only the proven caption/object pair may receive keepNext."""
     label = params.get("label") or ("图" if params["role"] == "figure" else "表")
-    pattern = re.compile(r"^\s*" + re.escape(label) + r"\s*\d", re.I)
+    pattern = re.compile(
+        r"^\s*"
+        + re.escape(label)
+        + r"\s*(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
+        re.I,
+    )
     nodes = set()
     for paragraph in document.paragraphs:
         if not pattern.match(paragraph.text):
@@ -892,12 +908,12 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
     # Preserve the template's font, numbering and paragraph style. A real
     # outline level makes conservative text-inferred headings searchable by
     # Word's TOC \\u switch without imposing built-in Heading formatting.
+    from .properties import element
+
     for paragraph, level in entries:
         if outline_level(document, paragraph._p) is None:
-            pr = paragraph._p.get_or_add_pPr()
-            node = OxmlElement("w:outlineLvl")
-            node.set(qn("w:val"), str(level - 1))
-            pr.append(node)
+            pr = element(paragraph._p, "pPr")
+            element(pr, "outlineLvl").set(qn("w:val"), str(level - 1))
     cached_entries = ["  " * (level - 1) + p.text.strip() for p, level in entries]
     heading_style = get_or_create_paragraph_style(document, "WFM TOC Heading")
     field_style = get_or_create_paragraph_style(document, "WFM TOC Field")
@@ -1104,6 +1120,9 @@ def apply_reference_style(
         num_fmt_node = OxmlElement("w:numFmt")
         num_fmt_node.set(qn("w:val"), num_fmt)
         lvl.append(num_fmt_node)
+        suff_node = OxmlElement("w:suff")
+        suff_node.set(qn("w:val"), "space")
+        lvl.append(suff_node)
         text_node = OxmlElement("w:lvlText")
         text_node.set(qn("w:val"), level_text)
         lvl.append(text_node)
@@ -1258,7 +1277,7 @@ def _has_numbered_list_marker(document: Document, paragraph, *, index=None) -> b
     if read_paragraph(document, paragraph._p, "numbering_suppressed"):
         return False
     found = effective_numbering(document, paragraph._p)
-    if found is not None:
+    if found is not None and found[2] is not None:
         fmt = _num_format_for_num_id(_get_numbering_element(document), found[0], found[1])
         return fmt not in {None, "bullet", "picture"}
     return any(
@@ -1270,7 +1289,7 @@ def _append_numbering_definition(document: Document, style: str, start: int) -> 
     num_fmt, level_text = LIST_NUMBERING_STYLES[style]
     numbering = _get_numbering_element(document, create=True)
     abstract_id = _numbering_max_id(numbering, "abstractNum", "abstractNumId") + 1
-    num_id = _numbering_max_id(numbering, "num", "numId") + 1
+    num_id = max(0, _numbering_max_id(numbering, "num", "numId")) + 1
     abstract = OxmlElement("w:abstractNum")
     abstract.set(qn("w:abstractNumId"), str(abstract_id))
     nsid = OxmlElement("w:nsid")
@@ -1287,6 +1306,9 @@ def _append_numbering_definition(document: Document, style: str, start: int) -> 
     num_fmt_node = OxmlElement("w:numFmt")
     num_fmt_node.set(qn("w:val"), num_fmt)
     lvl.append(num_fmt_node)
+    suff_node = OxmlElement("w:suff")
+    suff_node.set(qn("w:val"), "space")
+    lvl.append(suff_node)
     text_node = OxmlElement("w:lvlText")
     text_node.set(qn("w:val"), level_text)
     lvl.append(text_node)
@@ -1502,7 +1524,7 @@ def normalize_universal_chinese_base(document: Document) -> Document:
             except KeyError:
                 pass
         if st is None:
-            st = document.styles.add_style(f"toc {lvl}", WD_STYLE_TYPE.PARAGRAPH)
+            st = document.styles.add_style(f"toc {lvl}", WD_STYLE_TYPE.PARAGRAPH, builtin=True)
             st.base_style = normal_st
         rpr = element(st.element, "rPr")
         write_font(rpr, "font_east_asia", "宋体")

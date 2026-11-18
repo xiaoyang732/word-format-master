@@ -63,6 +63,24 @@ def check(workspace, reference_style):
     document.add_heading("方法", 1)
     document.add_heading("验收范围", 2)
     document.add_paragraph("直接接口规定了核验流程。")
+    cap_p = document.add_paragraph("表 ")
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+
+    seq_fld = OxmlElement("w:fldSimple")
+    seq_fld.set(qn("w:instr"), "SEQ 表 \\* ARABIC")
+    seq_r = OxmlElement("w:r")
+    seq_t = OxmlElement("w:t")
+    seq_t.text = "1"
+    seq_r.append(seq_t)
+    seq_fld.append(seq_r)
+    cap_p._p.append(seq_fld)
+    cap_p.add_run(" 兼容性检查项")
+    table = document.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "模块"
+    table.cell(0, 1).text = "状态"
+    table.cell(1, 0).text = "目录与文献"
+    table.cell(1, 1).text = "通过"
     document.add_paragraph("参考文献")
     if reference_style:
         document.styles.add_style("Bibliography", 1)
@@ -143,8 +161,21 @@ def check(workspace, reference_style):
     manifest = json.loads(
         (workspace / "reports/render/render-manifest.json").read_text(encoding="utf-8")
     )
+    evidence = json.loads(
+        (workspace / "reports/render/office-evidence.json").read_text(encoding="utf-8")
+    )
     assert manifest["application"]["name"] == "Microsoft Word", manifest
     assert manifest["office_validation"]["status"] == "passed", manifest["office_validation"]
+    toc2 = [p for p in evidence["paragraphs"] if p.get("style") == "TOC 2"]
+    assert toc2 and all(
+        p["font_east_asia"] == "宋体" and p["left_indent_chars"] == 2 for p in toc2
+    ), toc2
+    bib = [p for p in evidence["paragraphs"] if "README.md" in p.get("text", "")]
+    expected_bib_styles = {"书目", "书目1"} if reference_style else {"书目"}
+    assert bib and bib[0]["style"] in expected_bib_styles and bib[0]["font_size_pt"] == 10.5, bib
+    assert bib[0]["first_line_indent_chars"] == -2, bib
+    cited_body = [p for p in evidence["paragraphs"] if "项目文档说明" in p.get("text", "")]
+    assert cited_body and cited_body[0]["font_size_pt"] == 12, cited_body
     return manifest
 
 

@@ -314,7 +314,11 @@ def read_complex_state(index, name):
 
         states = []
         for p in doc.paragraphs:
-            if re.match(r"^\s*(?:图|表|Figure|Fig\.|Table)\s*\d", p.text, re.I):
+            if re.match(
+                r"^\s*(?:图|表|Figure|Fig\.|Table)\s*(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
+                p.text,
+                re.I,
+            ):
                 before = _neighboring_content_element(doc, p._p, -1)
                 after = _neighboring_content_element(doc, p._p, 1)
                 states.append(
@@ -687,9 +691,22 @@ def atomic_projection(document, index, refs, cap):
                             and sub.tag == qn("w:tab")
                             and all(c.tag in {qn("w:rPr"), qn("w:tab")} for c in child)
                         )
+                        is_formatted_field_ctrl = (
+                            ref["kind"] == "paragraph"
+                            and prop in FONT_TAGS
+                            and sub.tag in {qn("w:fldChar"), qn("w:instrText")}
+                            and all(
+                                c.tag in {qn("w:rPr"), qn("w:fldChar"), qn("w:instrText")}
+                                for c in child
+                            )
+                        )
                         fmt = (
                             selected_format
-                            if (child in ref.get("controls", ()) or is_formatted_tab)
+                            if (
+                                child in ref.get("controls", ())
+                                or is_formatted_tab
+                                or is_formatted_field_ctrl
+                            )
                             else xml_value(rpr)
                         )
                         tokens.append(("object", xml_value(sub), fmt))
@@ -972,9 +989,10 @@ def structural_snapshot(index, cap, params, refs):
                 if not len(pr) and not pr.attrib:
                     clone.remove(pr)
         if preparation is not None and p is preparation[0]:
+            from .ooxml import insert_child
             from .properties import element
 
-            element(clone, "pPr").append(copy.deepcopy(preparation[2]))
+            insert_child(element(clone, "pPr"), copy.deepcopy(preparation[2]))
             if not text.strip():
                 for br in list(clone.iter(qn("w:br"))):
                     if br.get(qn("w:type")) == "page":

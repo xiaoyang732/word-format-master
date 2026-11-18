@@ -27,7 +27,7 @@ def paragraph_sha256(text: str) -> str:
 
 
 def _is_heading(paragraph: Paragraph) -> bool:
-    style = paragraph.style.name.lower() if paragraph.style else ""
+    style = (paragraph.style.name or "").lower() if paragraph.style else ""
     return style.startswith("heading")
 
 

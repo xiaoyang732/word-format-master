@@ -60,7 +60,7 @@ class DocumentIndex:
             top = p.getparent() is body
             style = paragraph_style(document, p)
             style_id = style.style_id if style is not None else ""
-            style_name = style.name if style is not None else ""
+            style_name = (style.name or "") if style is not None else ""
             text = paragraph_text(p)
             outline = outline_level(document, p)
             level = heading_level(text.strip(), style_name, outline)
@@ -84,7 +84,9 @@ class DocumentIndex:
             elif normalized in {"title", "subtitle"}:
                 role = "title"
             elif "caption" in normalized or re.match(
-                r"^\s*(?:图|表|Figure|Fig\.|Table)\s*\d+", text, re.I
+                r"^\s*(?:图|表|Figure|Fig\.|Table)\s*(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
+                text,
+                re.I,
             ):
                 role = "caption"
             elif normalized.startswith("toc") or normalized.startswith("wfmtoc"):
@@ -190,7 +192,7 @@ class DocumentIndex:
             record["module"] = module
             record["module_occurrence"] = module_occurrence
             record["chapter_id"] = chapter
-            if module == "references" and record["role"] == "body":
+            if module == "references" and record["role"] in {"body", "list"}:
                 record["role"] = "reference"
             elif (
                 module
@@ -273,6 +275,8 @@ class DocumentIndex:
                         },
                     )
         for style in document.styles:
+            if not style.name:
+                continue
             self._add(
                 f"style:{style.name}",
                 "style",
@@ -407,8 +411,9 @@ def inspect_document(path):
                     if name in properties
                 }
             )
+            p_style = index.paragraph(record["id"]).style
             record["format"]["style"] = (
-                record.get("style_name") or index.paragraph(record["id"]).style.name
+                record.get("style_name") or (p_style.name if p_style is not None else "") or ""
             )
             record["format"]["citation_display"] = sorted({mark.display for mark in marks})
             record["format"]["keyword_separator"] = keyword_separators(record["text"])

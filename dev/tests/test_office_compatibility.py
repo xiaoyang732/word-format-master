@@ -271,6 +271,407 @@ class OfficeCompatibilityTests(unittest.TestCase):
         self.assertEqual(result["status"], "passed")
         self.assertEqual(len(result["theme_font_aliases"]), 2)
 
+    def test_numbered_references_and_body_lists_receive_template_typography(self):
+        from word_format.properties import read_font, read_paragraph
+        from word_format.templates import load_template, template_plan
+
+        doc = Document()
+        doc.add_heading("绪论", 1)
+        doc.add_paragraph("正文说明。")
+        doc.add_paragraph("记录输入", "List Number")
+        doc.add_paragraph("检查输出", "List Number")
+        doc.add_paragraph("参考文献")
+        doc.add_paragraph("[1] Author A. Work One[M]. Beijing, 2024.")
+        doc.add_paragraph("[2] Author B. Work Two[J]. Shanghai, 2025.")
+        doc.save(self.source)
+
+        # Simulate pre-numbered references produced by citation.insert before template formatting.
+        cited = self.folder / "cited.docx"
+        c_plan = build_plan(
+            self.source,
+            cited,
+            {
+                "operations": [
+                    {
+                        "action": "citation.insert",
+                        "target": {"type": "document"},
+                        "params": {
+                            "placements": [
+                                {
+                                    "text_contains": "正文说明",
+                                    "reference_ids": ["ref-1"],
+                                    "citation_text": "[1]",
+                                    "display": "superscript",
+                                    "insert": "before-terminal-punctuation",
+                                }
+                            ]
+                        },
+                    }
+                ]
+            },
+        )
+        c_rep = apply_plan(c_plan)
+        self.assertEqual(verify_plan(c_plan, c_rep)["status"], "passed")
+
+        template, authority = load_template("thesis-standard")
+        plan = template_plan(cited, self.output, template, template_source=authority)
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["execution_status"], "passed")
+
+        result = Document(self.output)
+        bib_style = result.styles["Bibliography"]
+        self.assertTrue(bib_style.builtin)
+        self.assertIsNone(bib_style.element.get(qn("w:customStyle")))
+
+        # Numbering levels for lists and references use space suffix (no tab jump).
+        numbering_root = result.part.numbering_part.element
+        self.assertEqual(sequence_warnings(numbering_root), [])
+        for p in result.paragraphs:
+            if "Author A" in p.text or "记录输入" in p.text:
+                nid, ilvl, abstract, _ = effective_numbering(result, p._p)
+                self.assertGreater(int(nid), 0)
+                lvl = next(
+                    n for n in abstract.findall(qn("w:lvl")) if n.get(qn("w:ilvl")) == str(ilvl)
+                )
+                suff = lvl.find(qn("w:suff"))
+                self.assertIsNotNone(suff)
+                self.assertEqual(suff.get(qn("w:val")), "space")
+
+        list_p = next(p for p in result.paragraphs if "记录输入" in p.text)
+        self.assertEqual(read_font(result, list_p._p, list_p.runs[0]._r, "font_east_asia"), "宋体")
+        self.assertEqual(
+            read_font(result, list_p._p, list_p.runs[0]._r, "font_latin"), "Times New Roman"
+        )
+        self.assertEqual(read_font(result, list_p._p, list_p.runs[0]._r, "font_size_pt"), 12.0)
+        self.assertLess(read_paragraph(result, list_p._p, "first_line_indent")["value"], 0)
+
+        ref_p = next(p for p in result.paragraphs if "Author A" in p.text)
+        self.assertEqual(ref_p.style.name, "Bibliography")
+        self.assertEqual(read_font(result, ref_p._p, ref_p.runs[0]._r, "font_east_asia"), "宋体")
+        self.assertEqual(
+            read_font(result, ref_p._p, ref_p.runs[0]._r, "font_latin"), "Times New Roman"
+        )
+        self.assertEqual(read_font(result, ref_p._p, ref_p.runs[0]._r, "font_size_pt"), 10.5)
+        self.assertEqual(read_paragraph(result, ref_p._p, "alignment"), "justify")
+        self.assertEqual(
+            read_paragraph(result, ref_p._p, "first_line_indent"),
+            {"value": -2.0, "unit": "chars"},
+        )
+        self.assertEqual(
+            read_paragraph(result, ref_p._p, "line_spacing")["value"],
+            1.0,
+        )
+
+    def test_paragraph_font_writes_format_field_control_runs_for_mergeformat(self):
+        from word_format.properties import read_font
+
+        doc = Document()
+        doc.add_heading("绪论", 1)
+        doc.add_paragraph("正文说明。")
+        doc.add_paragraph("参考文献")
+        doc.add_paragraph("[1] Author A. Book[M]. 2025.")
+        cited_doc = self.execute(
+            doc,
+            [
+                {
+                    "action": "citation.insert",
+                    "target": {"type": "document"},
+                    "params": {
+                        "placements": [
+                            {
+                                "text_contains": "正文说明",
+                                "reference_ids": ["ref-1"],
+                                "citation_text": "[1]",
+                                "display": "superscript",
+                                "insert": "before-terminal-punctuation",
+                            }
+                        ]
+                    },
+                }
+            ],
+        )
+        self.output.unlink()
+        formatted = self.execute(
+            cited_doc,
+            [
+                {
+                    "action": "font.east_asia.set",
+                    "target": {"type": "paragraph", "id": "p1"},
+                    "params": {"value": "宋体"},
+                },
+                {
+                    "action": "font.latin.set",
+                    "target": {"type": "paragraph", "id": "p1"},
+                    "params": {"value": "Times New Roman"},
+                },
+                {
+                    "action": "font.size.set",
+                    "target": {"type": "paragraph", "id": "p1"},
+                    "params": {"value": 12},
+                },
+            ],
+        )
+        p1 = formatted.paragraphs[1]._p
+        ctrl_runs = [
+            r
+            for r in p1.iter(qn("w:r"))
+            if any(c.tag in {qn("w:fldChar"), qn("w:instrText")} for c in r)
+        ]
+        self.assertGreaterEqual(len(ctrl_runs), 3)
+        for run in ctrl_runs:
+            self.assertEqual(read_font(formatted, p1, run, "font_east_asia"), "宋体")
+            self.assertEqual(read_font(formatted, p1, run, "font_latin"), "Times New Roman")
+            self.assertEqual(read_font(formatted, p1, run, "font_size_pt"), 12.0)
+            vert = run.find("./" + qn("w:rPr") + "/" + qn("w:vertAlign"))
+            self.assertIsNotNone(vert)
+            self.assertEqual(vert.get(qn("w:val")), "superscript")
+
+    def test_toc_creates_indented_builtin_styles_and_ordered_outline_levels(self):
+        from word_format.inspect import _style_paragraph
+        from word_format.properties import read_font, read_paragraph
+        from word_format.templates import load_template, template_plan
+
+        doc = Document()
+        doc.add_paragraph("摘要")
+        doc.add_paragraph("摘要内容。")
+        doc.add_paragraph("关键词：目录；样式")
+        h1 = doc.add_paragraph("第1章 绪论")
+        element(element(h1._p, "pPr"), "rPr")
+        doc.add_paragraph("1.1 研究目标")
+        doc.add_paragraph("参考文献")
+        doc.add_paragraph("[1] Ref.")
+        doc.save(self.source)
+
+        template, authority = load_template("thesis-standard")
+        plan = template_plan(self.source, self.output, template, template_source=authority)
+        report = apply_plan(plan)
+        self.assertEqual(verify_plan(plan, report)["execution_status"], "passed")
+
+        out = Document(self.output)
+        self.assertEqual(sequence_warnings(out.element.body), [])
+        self.assertEqual(sequence_warnings(out.styles.element), [])
+        for level, expected_left in ((1, 0.0), (2, 2.0), (3, 4.0)):
+            toc_st = out.styles[f"toc {level}"]
+            self.assertTrue(toc_st.builtin)
+            probe = _style_paragraph(f"toc {level}", out)
+            self.assertEqual(
+                read_paragraph(out, probe, "first_line_indent"),
+                {"value": 0.0, "unit": "chars"},
+            )
+            self.assertEqual(
+                read_paragraph(out, probe, "left_indent"),
+                {"value": expected_left, "unit": "chars"},
+            )
+            self.assertEqual(read_font(out, probe, None, "font_east_asia"), "宋体")
+            self.assertFalse(read_font(out, probe, None, "bold"))
+        wfm_ref_probe = _style_paragraph("WFM references Heading", out)
+        self.assertEqual(read_font(out, wfm_ref_probe, None, "font_east_asia"), "黑体")
+        self.assertTrue(read_font(out, wfm_ref_probe, None, "bold"))
+
+    def test_three_line_table_and_empty_numbering_obey_ooxml_sequences(self):
+        doc = Document()
+        doc.add_paragraph("第一项", "List Number")
+        doc.add_paragraph("第二项", "List Number")
+        tbl = doc.add_table(rows=2, cols=2)
+        tbl.cell(0, 0).text = "指标"
+        tbl.cell(0, 1).text = "数值"
+        tbl.cell(1, 0).text = "准确率"
+        tbl.cell(1, 1).text = "99%"
+        for row in tbl.rows:
+            for cell in row.cells:
+                element(cell._tc.get_or_add_tcPr(), "vAlign").set(qn("w:val"), "center")
+        numbering = doc.part.numbering_part.element
+        for child in list(numbering):
+            numbering.remove(child)
+
+        out = self.execute(
+            doc,
+            [
+                {
+                    "action": "list.numbering.configure",
+                    "target": {"type": "document"},
+                    "params": {"style": "decimal-parenthesis", "start": 1},
+                },
+                {
+                    "action": "table.three_line.apply",
+                    "target": {"type": "table", "ordinal": 1},
+                    "params": {"value": True},
+                },
+                {
+                    "action": "table.alignment.set",
+                    "target": {"type": "table", "ordinal": 1},
+                    "params": {"value": "center"},
+                },
+            ],
+        )
+        self.assertEqual(sequence_warnings(out.element.body), [])
+        self.assertEqual(sequence_warnings(out.part.numbering_part.element), [])
+        num_id = int(out.paragraphs[0]._p.xpath("./w:pPr/w:numPr/w:numId")[0].get(qn("w:val")))
+        self.assertGreater(num_id, 0)
+
+    def test_nameless_word_style_does_not_crash_document_index(self):
+        from word_format.inspect import inspect_document
+
+        doc = Document()
+        nameless = OxmlElement("w:style")
+        nameless.set(qn("w:type"), "paragraph")
+        nameless.set(qn("w:customStyle"), "1")
+        nameless.set(qn("w:styleId"), "af1")
+        doc.styles.element.append(nameless)
+        p = doc.add_paragraph("目录")
+        element(element(p._p, "pPr"), "pStyle").set(qn("w:val"), "af1")
+        doc.add_heading("绪论", 1)
+        doc.save(self.source)
+
+        inspected = inspect_document(self.source)
+        self.assertEqual(inspected["objects"][1]["style_id"], "af1")
+        self.assertEqual(inspected["objects"][1]["style_name"], "")
+
+    def test_cover_cloning_matches_research_titles_strips_callouts_and_orders_ppr(self):
+        from docx.oxml import parse_xml
+        from docx.oxml.ns import nsdecls
+        from word_format.cover import clone_template_cover
+
+        tpl_path = self.folder / "cover_tpl.docx"
+        tpl = Document()
+        callout_p = tpl.add_paragraph("中石油课题研究报告")
+        callout_p._p.append(
+            parse_xml(
+                f'<w:r {nsdecls("w")} xmlns:v="urn:schemas-microsoft-com:vml">'
+                "<w:pict><v:shape id='_x0000_s9'><v:textbox><w:txbxContent>"
+                "<w:p><w:r><w:t>楷体，二号，居中</w:t></w:r></w:p>"
+                "</w:txbxContent></v:textbox></v:shape></w:pict></w:r>"
+            )
+        )
+        title_p = tpl.add_paragraph("课题题目：   XXXXXX   ")
+        element(element(title_p._p, "pPr"), "ind").set(qn("w:left"), "240")
+        cm_start = OxmlElement("w:commentRangeStart")
+        cm_start.set(qn("w:id"), "0")
+        title_p._p.insert(0, cm_start)
+        cm_run = OxmlElement("w:r")
+        cm_ref = OxmlElement("w:commentReference")
+        cm_ref.set(qn("w:id"), "0")
+        cm_run.append(cm_ref)
+        title_p._p.append(cm_run)
+        tpl.save(tpl_path)
+
+        cloned = clone_template_cover(tpl_path, fields={"title": "高精度排版引擎研究"})
+        self.assertEqual(cloned._wfm_cover_fields["matched"], ["title"])
+        self.assertEqual(sequence_warnings(cloned.element.body), [])
+        self.assertEqual(list(cloned.element.body.iter(qn("w:commentReference"))), [])
+        self.assertEqual(list(cloned.element.body.iter(qn("w:pict"))), [])
+
+    def test_office_validation_catches_undefined_citation_fonts_and_toc_reference_drift(self):
+        from word_format.templates import load_template, template_plan
+
+        doc = Document()
+        doc.add_paragraph("摘要")
+        doc.add_paragraph("摘要内容。")
+        doc.add_paragraph("关键词：校验；兼容")
+        doc.add_heading("绪论", 1)
+        doc.add_paragraph("正文内容。")
+        doc.add_paragraph("参考文献")
+        doc.add_paragraph("[1] Author. Reference[M]. 2025.")
+        doc.save(self.source)
+        template, authority = load_template("thesis-standard")
+        plan = template_plan(self.source, self.output, template, template_source=authority)
+        apply_plan(plan)
+        formatted = Document(self.output)
+
+        bad_evidence = {
+            "paragraphs": [
+                {"text": "摘要\r", "font_east_asia": "黑体", "font_size_pt": 16, "alignment": 1},
+                {
+                    "text": "摘要内容。\r",
+                    "font_east_asia": "宋体",
+                    "font_latin": "Times New Roman",
+                    "font_size_pt": 12,
+                    "alignment": 3,
+                    "first_line_indent_chars": 2,
+                    "line_spacing_rule": 1,
+                    "line_spacing_pt": 18,
+                },
+                {
+                    "text": "关键词：校验；兼容\r",
+                    "font_east_asia": "宋体",
+                    "font_latin": "Times New Roman",
+                    "font_size_pt": 12,
+                    "alignment": 0,
+                    "first_line_indent_chars": 0,
+                    "line_spacing_rule": 1,
+                    "line_spacing_pt": 18,
+                },
+                {"text": "目　　录\r", "font_east_asia": "+中文正文", "font_size_pt": 14, "alignment": 1},
+                {
+                    "text": "第一章 绪论\t1\r",
+                    "style": "TOC 1",
+                    "font_east_asia": "",
+                    "font_latin": "Times New Roman",
+                    "font_size_pt": 12,
+                },
+                {
+                    "text": "绪论\r",
+                    "list_string": "第一章",
+                    "page": 1,
+                    "physical_page": 2,
+                    "font_east_asia": "黑体",
+                    "font_latin": "Times New Roman",
+                    "font_size_pt": 16,
+                    "alignment": 1,
+                    "first_line_indent_chars": 0,
+                    "line_spacing_rule": 1,
+                    "line_spacing_pt": 18,
+                },
+                {
+                    "text": "正文内容。\r",
+                    "font_east_asia": "",
+                    "font_latin": "",
+                    "font_size_pt": 9999999,
+                    "alignment": 3,
+                    "first_line_indent_chars": 2,
+                    "line_spacing_rule": 1,
+                    "line_spacing_pt": 18,
+                },
+                {"text": "参考文献\r", "font_east_asia": "黑体", "font_size_pt": 16, "alignment": 1},
+                {
+                    "text": "Author. Reference[M]. 2025.\r",
+                    "list_string": "[1]",
+                    "font_east_asia": "+中文正文",
+                    "font_latin": "+西文正文",
+                    "font_size_pt": 11,
+                    "alignment": 0,
+                    "first_line_indent_chars": 0,
+                    "line_spacing_rule": 5,
+                    "line_spacing_pt": 13.8,
+                },
+            ],
+            "sections": [
+                {"index": 1, "adjusted_page": 1, "physical_page": 1},
+                {"index": 2, "adjusted_page": 1, "physical_page": 2},
+            ],
+            "fields": [],
+            "pagination_stable": True,
+            "application": {"name": "Microsoft Word"},
+        }
+        check = validate_office(formatted, bad_evidence)
+        self.assertEqual(check["status"], "failed")
+        props = {(e.get("paragraph"), e.get("property")) for e in check["errors"]}
+        self.assertIn(("toc:1:第一章 绪论\t1", "font_east_asia"), props)
+        body_id = next(
+            oid
+            for oid, rec in DocumentIndex(formatted).records.items()
+            if rec.get("text") == "正文内容。"
+        )
+        ref_id = next(
+            oid
+            for oid, rec in DocumentIndex(formatted).records.items()
+            if "Author. Reference" in rec.get("text", "")
+        )
+        self.assertIn((body_id, "font_size_pt"), props)
+        self.assertIn((ref_id, "font_size_pt"), props)
+        self.assertIn((ref_id, "first_line_indent"), props)
+        self.assertIn((ref_id, "line_spacing_pt"), props)
+
 
 if __name__ == "__main__":
     unittest.main()
