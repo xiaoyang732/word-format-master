@@ -1,6 +1,6 @@
 [project]
 name = "word-format-master"
-version = "1.3.1"
+version = "1.4.0"
 description = "Deterministic Word document generation and formatting engine"
 requires-python = ">=3.10"
 dependencies = [

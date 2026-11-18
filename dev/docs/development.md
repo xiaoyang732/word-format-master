@@ -11,9 +11,9 @@ python dev/scripts/smoke_test.py
 构建输出必须是不存在的新 ZIP 路径：
 
 ```powershell
-python dev/tools/build_release.py --output dev/artifacts/word-format-master-1.3.1.zip
-python dev/tools/build_release.py --output dev/artifacts/word-format-master-1.3.1-json.zip --template-mode json
-python dev/tools/validate_release.py dev/artifacts/word-format-master-1.3.1-json.zip
+python dev/tools/build_release.py --output dev/artifacts/word-format-master-1.4.0.zip
+python dev/tools/build_release.py --output dev/artifacts/word-format-master-1.4.0-json.zip --template-mode json
+python dev/tools/validate_release.py dev/artifacts/word-format-master-1.4.0-json.zip
 ```
 
 构建入口收集运行代码、规范、配置及模板，校验登记的模板摘要与来源/使用说明。JSON 模式将 DOCX 编码成既有加载器支持的 `.docx.json`。构建后先在临时目录校验全部文件摘要，再清空源码导入影响和模板缓存，使用解压包自己的 CLI 运行默认报告列表与准备流程；通过后才写出最终 ZIP。
