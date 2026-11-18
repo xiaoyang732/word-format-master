@@ -4,6 +4,12 @@ import re
 
 from document_structure import MODULE_MARKERS, heading_level
 
+from .constants import (
+    DEFAULT_TOC_INDENT_STEP_CHARS,
+    STYLE_WFM_TOC_FIELD,
+    is_toc_entry_style,
+    parse_toc_style_level,
+)
 from .namespaces import qn
 from .properties import outline_level, paragraph_style_name
 
@@ -12,15 +18,14 @@ def entry_styles(document, max_level, *, create=False):
     """Return Word's native TOC paragraph styles in level order."""
     from docx.enum.style import WD_STYLE_TYPE
 
-    def normalized(name):
-        return (name or "").casefold().replace(" ", "")
-
-    styles = {
-        normalized(style.name): style
-        for style in document.styles if style.type == WD_STYLE_TYPE.PARAGRAPH
-    }
+    styles = {}
+    for style in document.styles:
+        if style.type == WD_STYLE_TYPE.PARAGRAPH:
+            lvl = parse_toc_style_level(style.name)
+            if lvl is not None:
+                styles.setdefault(lvl, style)
     for level in range(1, max_level + 1):
-        style = styles.get(f"toc{level}") or styles.get(f"目录{level}")
+        style = styles.get(level)
         if style is None and create:
             from .properties import element, write_font, write_paragraph
 
@@ -36,7 +41,9 @@ def entry_styles(document, max_level, *, create=False):
             write_paragraph(ppr, "space_after_pt", 0.0)
             write_paragraph(ppr, "first_line_indent", {"value": 0, "unit": "chars"})
             write_paragraph(
-                ppr, "left_indent", {"value": float((level - 1) * 2), "unit": "chars"}
+                ppr,
+                "left_indent",
+                {"value": float((level - 1) * DEFAULT_TOC_INDENT_STEP_CHARS), "unit": "chars"},
             )
         yield style
 
@@ -138,11 +145,8 @@ def result_status(document, max_level):
     fields = [
         p
         for p in document.paragraphs
-        if paragraph_style_name(document, p._p) == "WFM TOC Field"
-        or re.fullmatch(
-            r"(?:toc|目录)[1-9]",
-            paragraph_style_name(document, p._p).lower().replace(" ", ""),
-        )
+        if paragraph_style_name(document, p._p) == STYLE_WFM_TOC_FIELD
+        or is_toc_entry_style(paragraph_style_name(document, p._p))
     ]
     text = "\n".join("".join(n.text or "" for n in p._p.iter(qn("w:t"))) for p in fields)
     error = bool(

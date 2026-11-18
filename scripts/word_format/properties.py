@@ -11,6 +11,15 @@ from docx.enum.style import WD_STYLE_TYPE
 from docx.oxml import OxmlElement
 from docx.styles.style import StyleFactory
 
+from .constants import (
+    CHAR_UNITS_SCALE,
+    LINE_UNITS_PER_MULTIPLE,
+    TWIPS_PER_PT,
+    mm_to_twips,
+    pt_to_half_points,
+    pt_to_twips,
+    twips_to_mm,
+)
 from .contracts import FormatError
 from .namespaces import qn
 
@@ -389,7 +398,7 @@ def write_font(pr, name, value):
             fonts.attrib.pop(qn("w:" + attr + "Theme"), None)
     elif name == "font_size_pt":
         for tag in ("sz", "szCs"):
-            element(pr, tag).set(qn("w:val"), str(int(round(value * 2))))
+            element(pr, tag).set(qn("w:val"), str(pt_to_half_points(value)))
     elif name in {"bold", "italic"}:
         for tag in ("b", "bCs") if name == "bold" else ("i", "iCs"):
             element(pr, tag).set(qn("w:val"), "1" if value else "0")
@@ -473,16 +482,16 @@ def read_paragraph(document, paragraph, name):
             if auto is not None and auto not in {"0", "false", "off"}:
                 return {"kind": "auto"}
             if lines is not None:
-                return {"value": float(lines) / 100, "unit": "lines"}
+                return {"value": float(lines) / CHAR_UNITS_SCALE, "unit": "lines"}
             if points is not None:
-                return float(points) / 20
+                return float(points) / TWIPS_PER_PT
         return 0.0
     if name == "line_spacing":
         rule = _attr(sources, "spacing", "lineRule") or "auto"
-        raw = float(_attr(sources, "spacing", "line") or 240)
+        raw = float(_attr(sources, "spacing", "line") or LINE_UNITS_PER_MULTIPLE)
         return {
             "kind": {"auto": "multiple", "exact": "exact", "atLeast": "at_least"}.get(rule, rule),
-            "value": raw / (240 if rule == "auto" else 20),
+            "value": raw / (LINE_UNITS_PER_MULTIPLE if rule == "auto" else TWIPS_PER_PT),
             "unit": "multiple" if rule == "auto" else "pt",
         }
     if name.endswith("indent"):
@@ -526,20 +535,20 @@ def read_paragraph(document, paragraph, name):
                     # A hanging indent is a negative first-line offset. Reading
                     # it as zero would incorrectly skip a request to clear it.
                     if chars is not None:
-                        return {"value": -float(chars) / 100, "unit": "chars"}
-                    return {"value": -float(raw or 0) * 25.4 / 1440, "unit": "mm"}
+                        return {"value": -float(chars) / CHAR_UNITS_SCALE, "unit": "chars"}
+                    return {"value": -twips_to_mm(raw or 0), "unit": "mm"}
                 if has_opposite and not has_own:
                     chars = ind.get(qn("w:firstLineChars"))
                     raw = ind.get(qn("w:firstLine"))
                     if chars is not None:
-                        return {"value": -float(chars) / 100, "unit": "chars"}
-                    return {"value": -float(raw or 0) * 25.4 / 1440, "unit": "mm"}
+                        return {"value": -float(chars) / CHAR_UNITS_SCALE, "unit": "chars"}
+                    return {"value": -twips_to_mm(raw or 0), "unit": "mm"}
             chars = ind.get(qn("w:" + base + "Chars"))
             raw = ind.get(qn("w:" + base))
             if chars is not None:
-                return {"value": float(chars) / 100, "unit": "chars"}
+                return {"value": float(chars) / CHAR_UNITS_SCALE, "unit": "chars"}
             if raw is not None:
-                return {"value": float(raw) * 25.4 / 1440, "unit": "mm"}
+                return {"value": twips_to_mm(raw), "unit": "mm"}
         return {"value": 0, "unit": "mm"}
     tag = PARAGRAPH_TAGS[name][0]
     for pr in sources:
@@ -614,14 +623,14 @@ def write_paragraph(pr, name, value, clear_tab_positions=()):
             spacing.attrib.pop(qn("w:" + key), None)
         if isinstance(value, dict):
             spacing.attrib.pop(qn("w:" + attr), None)
-            spacing.set(qn("w:" + attr + "Lines"), str(int(round(value["value"] * 100))))
+            spacing.set(qn("w:" + attr + "Lines"), str(int(round(value["value"] * CHAR_UNITS_SCALE))))
         else:
-            spacing.set(qn("w:" + attr), str(int(round(value * 20))))
+            spacing.set(qn("w:" + attr), str(pt_to_twips(value)))
         # Explicitly disable automatic spacing inherited from a style.
         spacing.set(qn("w:" + attr + "Autospacing"), "0")
     elif name == "line_spacing":
         node = element(pr, "spacing")
-        factor = 240 if value["kind"] == "multiple" else 20
+        factor = LINE_UNITS_PER_MULTIPLE if value["kind"] == "multiple" else TWIPS_PER_PT
         node.set(qn("w:line"), str(int(round(value["value"] * factor))))
         node.set(
             qn("w:lineRule"),
@@ -641,7 +650,7 @@ def write_paragraph(pr, name, value, clear_tab_positions=()):
         # hanging="0" still takes precedence over a nonzero firstLineChars.
         # A direct declaration already replaces the opposite style declaration.
         if value["unit"] == "chars":
-            node.set(qn("w:" + base + "Chars"), str(int(round(value["value"] * 100))))
+            node.set(qn("w:" + base + "Chars"), str(int(round(value["value"] * CHAR_UNITS_SCALE))))
             # Keep character units authoritative; a fixed 12pt conversion is
             # wrong for other font sizes and unnecessary in Word/WPS.
             if not value["value"]:
@@ -652,7 +661,7 @@ def write_paragraph(pr, name, value, clear_tab_positions=()):
             # Remove it for positive physical indents, using 0 only when clearing.
             if value["value"]:
                 node.attrib.pop(qn("w:" + base + "Chars"), None)
-            node.set(qn("w:" + base), str(int(round(value["value"] * 1440 / 25.4))))
+            node.set(qn("w:" + base), str(mm_to_twips(value["value"])))
     else:
         element(pr, PARAGRAPH_TAGS[name][0]).set(qn("w:val"), "1" if value else "0")
 

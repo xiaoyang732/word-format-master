@@ -15,7 +15,12 @@ from docx.oxml.ns import qn
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from word_format import apply_plan, build_plan, verify_plan
+from word_format import (
+    apply_plan,
+    build_plan,
+    normalize_universal_chinese_base,
+    verify_plan,
+)
 from word_format.contracts import FormatError
 from word_format.fields import refresh_document_fields
 from word_format.inspect import DocumentIndex
@@ -813,6 +818,87 @@ class OfficeCompatibilityTests(unittest.TestCase):
         doc = Document(tpl)
         self.assertEqual(sequence_warnings(doc.styles.element), [])
         self.assertEqual(sequence_warnings(doc.part.numbering_part.element), [])
+
+    def test_universal_chinese_base_respects_custom_config_and_dynamic_section_width(self):
+        from docx.shared import Mm
+        from word_format.constants import UniversalChineseBaseConfig, section_content_width_twips
+        from word_format.properties import read_font, read_paragraph
+
+        doc = Document()
+        sec = doc.sections[0]
+        sec.page_width = Mm(297)
+        sec.left_margin = Mm(25)
+        sec.right_margin = Mm(25)
+        expected_tab = section_content_width_twips(sec)
+
+        cfg = UniversalChineseBaseConfig(
+            east_asia_body_font="仿宋",
+            latin_font="Calibri",
+            body_font_size_pt=14.0,
+            toc_indent_step_chars=1.5,
+        )
+        normalize_universal_chinese_base(doc, config=cfg)
+
+        p = doc.add_paragraph("配置化基线测试")
+        self.assertEqual(read_font(doc, p._p, None, "font_east_asia"), "仿宋")
+        self.assertEqual(read_font(doc, p._p, None, "font_latin"), "Calibri")
+        self.assertEqual(read_font(doc, p._p, None, "font_size_pt"), 14.0)
+
+        toc2 = doc.styles["toc 2"]
+        probe = doc.add_paragraph("目录项", style=toc2)
+        self.assertEqual(
+            read_paragraph(doc, probe._p, "left_indent"),
+            {"value": 1.5, "unit": "chars"},
+        )
+        tabs = read_paragraph(doc, probe._p, "tabs")
+        self.assertEqual(tabs[0]["position"], expected_tab)
+
+    def test_validate_office_cursor_window_prevents_distant_duplicate_jump(self):
+        doc = Document()
+        doc.add_heading("第一章 绪论", 1)
+        doc.add_heading("实验设置", 2)
+        for idx in range(1, 12):
+            doc.add_paragraph(f"第一章正文第{idx}段。")
+        doc.add_heading("第二章 方法", 1)
+        doc.add_heading("实验设置", 2)
+        doc.add_paragraph("第二章正文。")
+        normalize_universal_chinese_base(doc)
+
+        # Simulate first "实验设置" text rewritten by a dynamic field while second "实验设置"
+        # appears >8 paragraphs later; cursor must stay in Chapter 1 and validate Chapter 1 prose.
+        paragraphs = []
+        for idx, p in enumerate(doc.paragraphs):
+            text = "实验设置（动态域已刷新）" if idx == 1 else p.text
+            paragraphs.append(
+                {
+                    "text": text,
+                    "style": p.style.name,
+                    "font_east_asia": "宋体" if "正文" in p.text else "黑体",
+                    # Deliberate mismatch on Chapter 1 body paragraph #5 to prove it was NOT skipped!
+                    "font_latin": "Arial" if p.text == "第一章正文第5段。" else "Times New Roman",
+                    "font_size_pt": 12.0
+                    if "正文" in p.text
+                    else (15.0 if "章" in p.text else 14.0),
+                }
+            )
+        evidence = {
+            "application": {"name": "Microsoft Word", "version": "16.0"},
+            "paragraphs": paragraphs,
+            "fields": [],
+            "toc_entries": [],
+            "pagination_stable": True,
+            "update_passes": 1,
+            "field_update_errors": [],
+        }
+        result = validate_office(doc, evidence)
+        self.assertEqual(result["status"], "failed")
+        self.assertTrue(
+            any(
+                err.get("property") == "font_latin" and err.get("actual") == "Arial"
+                for err in result["errors"]
+            ),
+            result["errors"],
+        )
 
 
 if __name__ == "__main__":

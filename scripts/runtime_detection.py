@@ -53,7 +53,7 @@ def _registry_candidates(product: str) -> list[Path]:
     return result
 
 
-def _find_word(runtime_root: Path) -> Path | None:
+def _find_word() -> Path | None:
     candidates = [
         Path(item) for item in (
             shutil.which("WINWORD.EXE"),
@@ -231,7 +231,7 @@ def detect_pdf_rasterizer() -> dict[str, Any]:
 
 def detect_renderers(runtime_root: str | Path) -> dict[str, Any]:
     root = Path(runtime_root).resolve()
-    word = _find_word(root)
+    word = _find_word()
     word_name = "Microsoft Word"
     word_method = "installed executable"
     registered = _word_application_com_server()

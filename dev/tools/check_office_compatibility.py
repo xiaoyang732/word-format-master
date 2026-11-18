@@ -15,8 +15,17 @@ from pathlib import Path
 
 from docx import Document
 from docx.enum.section import WD_SECTION_START
+from docx.enum.style import WD_STYLE_TYPE
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT / "scripts") not in sys.path:
+    sys.path.insert(0, str(ROOT / "scripts"))
+
+from word_format.constants import (  # noqa: E402
+    BIBLIOGRAPHY_STYLE_ALIASES,
+    STYLE_BIBLIOGRAPHY,
+    parse_toc_style_level,
+)
 
 
 def run(workspace, name, script, *args, allow_pending=False):
@@ -83,11 +92,11 @@ def check(workspace, reference_style):
     table.cell(1, 1).text = "通过"
     document.add_paragraph("参考文献")
     if reference_style:
-        document.styles.add_style("Bibliography", 1)
+        document.styles.add_style(STYLE_BIBLIOGRAPHY, WD_STYLE_TYPE.PARAGRAPH, builtin=True)
     for name in ("README.md", "references/direct-format-api.md"):
         document.add_paragraph(
             f"Word Format Master. {name}[EB/OL]. 本地项目文档.",
-            "Bibliography" if reference_style else "Normal",
+            STYLE_BIBLIOGRAPHY if reference_style else "Normal",
         )
     document.save(draft)
     request = {
@@ -166,13 +175,16 @@ def check(workspace, reference_style):
     )
     assert manifest["application"]["name"] == "Microsoft Word", manifest
     assert manifest["office_validation"]["status"] == "passed", manifest["office_validation"]
-    toc2 = [p for p in evidence["paragraphs"] if p.get("style") == "TOC 2"]
+    toc2 = [p for p in evidence["paragraphs"] if parse_toc_style_level(p.get("style")) == 2]
     assert toc2 and all(
         p["font_east_asia"] == "宋体" and p["left_indent_chars"] == 2 for p in toc2
     ), toc2
     bib = [p for p in evidence["paragraphs"] if "README.md" in p.get("text", "")]
-    expected_bib_styles = {"书目", "书目1"} if reference_style else {"书目"}
-    assert bib and bib[0]["style"] in expected_bib_styles and bib[0]["font_size_pt"] == 10.5, bib
+    assert (
+        bib
+        and str(bib[0].get("style", "")).strip().casefold() in BIBLIOGRAPHY_STYLE_ALIASES
+        and bib[0]["font_size_pt"] == 10.5
+    ), bib
     assert bib[0]["first_line_indent_chars"] == -2, bib
     cited_body = [p for p in evidence["paragraphs"] if "项目文档说明" in p.get("text", "")]
     assert cited_body and cited_body[0]["font_size_pt"] == 12, cited_body

@@ -590,16 +590,9 @@ def _validate_report_checks(plan, report):
         for ref in item["targets"]
     )
     shifts_ids = any(
-        item["action"]
-        in {
-            "toc.configure",
-            "heading.numbering.configure",
-            "heading.scheme.configure",
-            "section.break.next_page.insert",
-            "caption.position.set",
-            "page_number.configure",
-        }
+        REGISTRY[item["action"]].shifts_ids
         for item in plan["operations"]
+        if item["action"] in REGISTRY
     )
     actual = Counter()
     for check in checks:

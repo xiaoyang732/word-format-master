@@ -5,6 +5,16 @@ from __future__ import annotations
 import re
 from collections import Counter
 
+from docx.enum.style import WD_STYLE_TYPE
+
+from .constants import (
+    FONT_SIZE_TOLERANCE_PT,
+    INDENT_TOLERANCE,
+    LINE_SPACING_TOLERANCE_PT,
+    WORD_POINTS_PER_LINE,
+    mm_to_pt,
+    parse_toc_style_level,
+)
 from .contracts import FormatError
 from .namespaces import qn
 
@@ -171,6 +181,28 @@ def _uses_theme_font(document, paragraph, run, channel):
     return False
 
 
+def _find_matching_paragraph(
+    actual,
+    cursor: int,
+    text: str,
+    *,
+    allow_distant: bool = True,
+    window: int = 8,
+) -> int | None:
+    window_end = min(len(actual), cursor + window)
+    for idx in range(cursor, window_end):
+        if actual[idx]["text"].strip("\r\n\x07 ") == text:
+            return idx
+    if not allow_distant:
+        return None
+    remaining = [
+        idx
+        for idx in range(window_end, len(actual))
+        if actual[idx]["text"].strip("\r\n\x07 ") == text
+    ]
+    return remaining[0] if len(remaining) == 1 else None
+
+
 def validate_office(document, evidence, *, baseline_document=None):
     """Run after Word updates fields, before binding render and visual evidence."""
     from .body_sections import body_start
@@ -189,6 +221,18 @@ def validate_office(document, evidence, *, baseline_document=None):
     cursor = 0
     matches = {}
     checked_roles = {"body", "module_body", "heading", "reference", "list", "keywords", "caption"}
+    remaining_doc_texts = Counter(
+        index.records[oid].get("text", "").strip()
+        for oid in index.top_ids
+        if not (
+            index.records[oid].get("semantic_role") != "toc_heading"
+            and (
+                index.records[oid].get("semantic_role") == "toc_entry"
+                or index.records[oid].get("role") == "toc"
+            )
+        )
+        and index.records[oid].get("text", "").strip()
+    )
     for oid in index.top_ids:
         record = index.records[oid]
         is_toc_heading = record.get("semantic_role") == "toc_heading"
@@ -201,9 +245,10 @@ def validate_office(document, evidence, *, baseline_document=None):
         text = record.get("text", "").strip()
         if not text:
             continue
-        found = next(
-            (i for i in range(cursor, len(actual)) if actual[i]["text"].strip("\r\n\x07 ") == text),
-            None,
+        has_later_duplicate = remaining_doc_texts[text] > 1
+        remaining_doc_texts[text] -= 1
+        found = _find_matching_paragraph(
+            actual, cursor, text, allow_distant=not has_later_duplicate
         )
         if found is None:
             if node in labels:
@@ -265,7 +310,7 @@ def validate_office(document, evidence, *, baseline_document=None):
                     else:
                         mismatch = not (
                             isinstance(observed, (int, float))
-                            and abs(float(observed) - float(expected)) <= 0.05
+                            and abs(float(observed) - float(expected)) <= FONT_SIZE_TOLERANCE_PT
                         )
                     if mismatch:
                         errors.append(
@@ -295,8 +340,8 @@ def validate_office(document, evidence, *, baseline_document=None):
                     expected = indent["value"]
                 else:
                     observed = row.get("first_line_indent_pt")
-                    expected = indent["value"] * 72 / 25.4
-                if observed is not None and abs(observed - expected) > 0.25:
+                    expected = mm_to_pt(indent["value"])
+                if observed is not None and abs(observed - expected) > INDENT_TOLERANCE:
                     errors.append(
                         {
                             "paragraph": oid,
@@ -327,8 +372,11 @@ def validate_office(document, evidence, *, baseline_document=None):
                             }
                         )
                     elif rule == "multiple" and row.get("line_spacing_pt") is not None:
-                        expected_pt = float(value) * 12.0
-                        if abs(float(row["line_spacing_pt"]) - expected_pt) > 0.5:
+                        expected_pt = float(value) * WORD_POINTS_PER_LINE
+                        if (
+                            abs(float(row["line_spacing_pt"]) - expected_pt)
+                            > LINE_SPACING_TOLERANCE_PT
+                        ):
                             errors.append(
                                 {
                                     "paragraph": oid,
@@ -337,18 +385,17 @@ def validate_office(document, evidence, *, baseline_document=None):
                                     "actual": row["line_spacing_pt"],
                                 }
                             )
-    toc_style_Lookup = {}
+    toc_style_lookup = {}
     for st in document.styles:
-        if st.type == 1:
-            m = re.fullmatch(r"(?:toc|目录)\s*([1-9])", (st.name or "").strip(), re.I)
-            if m:
-                toc_style_Lookup[int(m.group(1))] = st.name
+        if st.type == WD_STYLE_TYPE.PARAGRAPH:
+            lvl = parse_toc_style_level(st.name)
+            if lvl is not None:
+                toc_style_lookup[lvl] = st.name
     for row in actual:
-        m = re.fullmatch(r"(?:toc|目录)\s*([1-9])", str(row.get("style", "")).strip(), re.I)
-        if not m or not row.get("text", "").strip("\r\n\x07 "):
+        lvl = parse_toc_style_level(str(row.get("style", "")))
+        if lvl is None or not row.get("text", "").strip("\r\n\x07 "):
             continue
-        lvl = int(m.group(1))
-        st_name = toc_style_Lookup.get(lvl)
+        st_name = toc_style_lookup.get(lvl)
         if not st_name:
             continue
         probe_p = _style_paragraph(st_name, document)
@@ -371,7 +418,7 @@ def validate_office(document, evidence, *, baseline_document=None):
             else:
                 mismatch = not (
                     isinstance(observed, (int, float))
-                    and abs(float(observed) - float(expected)) <= 0.05
+                    and abs(float(observed) - float(expected)) <= FONT_SIZE_TOLERANCE_PT
                 )
             if mismatch:
                 errors.append(

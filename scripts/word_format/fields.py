@@ -2,6 +2,7 @@
 
 import re
 
+from .constants import STYLE_ID_WFM_PAGE_NUMBER, is_toc_entry_style
 from .namespaces import qn
 
 
@@ -56,7 +57,7 @@ def page_number_paragraphs(root):
         if any(not re.match(r"^(?:PAGE|NUMPAGES)(?:\s|$)", code, re.I) for code in codes):
             continue
         style = paragraph.find("./" + qn("w:pPr") + "/" + qn("w:pStyle"))
-        managed = style is not None and style.get(qn("w:val")) == "WFMPageNumber"
+        managed = style is not None and style.get(qn("w:val")) == STYLE_ID_WFM_PAGE_NUMBER
         visible = "".join(node.text or "" for node in paragraph.iter(qn("w:t"))).strip()
         if (
             managed
@@ -79,10 +80,7 @@ def _sync_toc_entry_runs_from_styles(document) -> int:
     synced = 0
     for p in document.element.body.iter(qn("w:p")):
         style = paragraph_style(document, p)
-        if style is None:
-            continue
-        norm = (style.name or "").lower().replace(" ", "")
-        if not re.fullmatch(r"(?:toc|目录)[1-9]", norm):
+        if style is None or not is_toc_entry_style(style.name):
             continue
         style_p = element(p, "pPr")
         # Read effective style font values

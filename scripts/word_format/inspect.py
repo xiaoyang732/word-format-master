@@ -9,6 +9,11 @@ from document_structure import MODULE_MARKERS, classify_module, heading_level, i
 from docx import Document
 from docx.text.paragraph import Paragraph
 
+from .constants import (
+    ALL_DEFAULT_CAPTION_RE,
+    BIBLIOGRAPHY_STYLE_ALIASES,
+    parse_toc_style_level,
+)
 from .contracts import json_hash, sha256, source_path
 from .namespaces import qn
 from .properties import (
@@ -76,18 +81,13 @@ class DocumentIndex:
                 else "body"
             )
             normalized = style_name.lower().replace(" ", "")
-            toc_lvl_match = re.fullmatch(r"(?:toc|目录)([1-9])", normalized)
-            toc_level = int(toc_lvl_match.group(1)) if toc_lvl_match else None
-            if toc_lvl_match or normalized in {"wfmtocfield", "wfmtocbreak"}:
+            toc_level = parse_toc_style_level(style_name)
+            if toc_level is not None or normalized in {"wfmtocfield", "wfmtocbreak"}:
                 # Cached TOC text may look exactly like a chapter/caption.
                 role, level, special = "toc", None, None
             elif normalized in {"title", "subtitle"}:
                 role = "title"
-            elif "caption" in normalized or re.match(
-                r"^\s*(?:图|表|Figure|Fig\.|Table)\s*(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
-                text,
-                re.I,
-            ):
+            elif "caption" in normalized or ALL_DEFAULT_CAPTION_RE.match(text):
                 role = "caption"
             elif normalized.startswith("toc") or normalized.startswith("wfmtoc"):
                 role = "heading" if special == "toc" else "toc"
@@ -320,7 +320,7 @@ class DocumentIndex:
             or (
                 self.records[oid].get("module") is None
                 and self.records[oid].get("style_name", "").lower()
-                in {"bibliography", "references", "reference", "参考文献"}
+                in BIBLIOGRAPHY_STYLE_ALIASES
             )
         }
 

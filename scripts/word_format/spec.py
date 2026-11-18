@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 import json
-import re
 
 from config import LIST_NUMBERING_STYLES
 from document_structure import (
@@ -15,6 +14,18 @@ from document_structure import (
 )
 
 from .citation_display import DISPLAY_VALUES
+from .constants import (
+    DEFAULT_CAPTION_LABELS,
+    STYLE_BIBLIOGRAPHY,
+    STYLE_FIGURE_CAPTION,
+    STYLE_TABLE_CAPTION,
+    STYLE_WFM_ABSTRACT_TITLE,
+    STYLE_WFM_KEYWORDS,
+    STYLE_WFM_MODULE_HEADING,
+    build_caption_pattern,
+    mm_to_pt,
+    wfm_module_heading_style,
+)
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .namespaces import qn
 
@@ -117,7 +128,7 @@ def token_operations(tokens):
                     f"Cannot compare character and mm units for {name} without an explicit font size"
                 )
             pt = tokens["font_size_pt"]
-            if abs(chars * pt * 25.4 / 72 - mm) > 0.1:
+            if abs(chars * pt - mm_to_pt(mm)) * 25.4 / 72 > 0.1:
                 raise FormatError(f"Conflicting units for {name}; supply only chars or mm")
         value = chars if chars is not None else mm
         effective = name
@@ -649,7 +660,7 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
             h1 = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
             if h1:
                 tokens = {k: v for k, v in h1.items() if k not in {"level", "page_break_before"}}
-                style_name = "WFM Abstract Title"
+                style_name = STYLE_WFM_ABSTRACT_TITLE
                 extra_outline = 9
         elif (role == "body" and r.get("module") in {None, "chapters"}) or (
             isolated
@@ -683,12 +694,12 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
                 elif r.get("heading_level") is None:
                     tokens = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
                     if tokens:
-                        style_name = "WFM Module Heading"
+                        style_name = STYLE_WFM_MODULE_HEADING
             else:
                 h1 = next((h for h in spec.get("headings", []) if h["level"] == 1), {})
                 if h1:
                     tokens = {k: v for k, v in h1.items() if k != "level"}
-                    style_name = f"WFM {r.get('module')} Heading"
+                    style_name = wfm_module_heading_style(r.get("module"))
                     if r.get("module") in {"cover", "declaration", "abstract", "toc"}:
                         tokens.pop("page_break_before", None)
                         extra_outline = 9
@@ -697,31 +708,18 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
         elif role == "keywords":
             tokens = spec.get("keywords", {})
             if tokens or effective.get(oid):
-                style_name = "WFM Keywords"
+                style_name = STYLE_WFM_KEYWORDS
         elif role == "reference" or sem_role in {"reference_item", "reference_entry"}:
             tokens = spec.get("references", {})
-            style_name = "Bibliography" if tokens else None
+            style_name = STYLE_BIBLIOGRAPHY if tokens else None
         elif role == "caption":
-            for label_kind, defaults in (
-                ("figure", ("图", "Figure", "Fig.")),
-                ("table", ("表", "Table")),
-            ):
+            for label_kind, defaults in DEFAULT_CAPTION_LABELS.items():
                 cap = spec.get("captions", {}).get(label_kind, {})
                 labels = (cap.get("label"),) + defaults
-                if cap and any(
-                    label
-                    and re.match(
-                        r"^\s*"
-                        + re.escape(label)
-                        + r"\s*(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
-                        r.get("text", ""),
-                        re.I,
-                    )
-                    for label in labels
-                ):
+                if cap and build_caption_pattern(labels).match(r.get("text", "")):
                     tokens = cap
                     style_name = cap.get("style_name") or (
-                        "Figure Caption" if label_kind == "figure" else "Table Caption"
+                        STYLE_FIGURE_CAPTION if label_kind == "figure" else STYLE_TABLE_CAPTION
                     )
         sem_map = spec.get("semantic_roles", {})
         if sem_role and sem_map:
@@ -833,15 +831,17 @@ def spec_request(index, spec, clear_direct=False, *, isolated=False):
         + [(f"Heading {h['level']}", h) for h in spec.get("headings", [])]
         + [
             (
-                spec.get("captions", {}).get("figure", {}).get("style_name") or "Figure Caption",
+                spec.get("captions", {}).get("figure", {}).get("style_name")
+                or STYLE_FIGURE_CAPTION,
                 spec.get("captions", {}).get("figure", {}),
             ),
             (
-                spec.get("captions", {}).get("table", {}).get("style_name") or "Table Caption",
+                spec.get("captions", {}).get("table", {}).get("style_name")
+                or STYLE_TABLE_CAPTION,
                 spec.get("captions", {}).get("table", {}),
             ),
         ]
-        + [("Bibliography", spec.get("references", {}))]
+        + [(STYLE_BIBLIOGRAPHY, spec.get("references", {}))]
     ):
         if not isolated:
             for action, params in token_operations(tokens):

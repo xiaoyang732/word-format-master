@@ -7,6 +7,7 @@ from docx.oxml import OxmlElement
 from docx.enum.style import WD_STYLE_TYPE
 from docx.section import Section, _Header
 
+from .constants import NUMERIC_TOLERANCE
 from .contracts import FormatError, require_keys, text_value
 from .fields import field_codes, page_number_paragraphs
 from .namespaces import qn
@@ -471,7 +472,11 @@ def verify_header(actual, params, cap):
     )
     return bool(selected) and all(
         equal_value(v, expected)
-        or (name.endswith("indent") and expected["value"] == 0 and abs(v["value"]) < 0.025)
+        or (
+            name.endswith("indent")
+            and expected["value"] == 0
+            and abs(v["value"]) < NUMERIC_TOLERANCE
+        )
         for v in selected
     )
 
@@ -529,7 +534,7 @@ def header_projection(index, cap, params, refs):
                         for pr in p.iter(qn("w:" + tag))
                     ]
                     for pr in properties:
-                        from .properties import ATTRIBUTES, FONT_TAGS, PARAGRAPH_TAGS
+                        from .properties import ATTRIBUTES, PARAGRAPH_TAGS
 
                         if name == "border_bottom":
                             borders = pr.find(qn("w:pBdr"))

@@ -14,6 +14,12 @@ from pathlib import Path
 
 from docx import Document
 
+from .constants import (
+    STYLE_BIBLIOGRAPHY,
+    STYLE_FIGURE_CAPTION,
+    STYLE_TABLE_CAPTION,
+    wfm_module_heading_style,
+)
 from .contracts import FormatError, json_hash, number, require_keys, sha256, source_path, text_value
 from .inspect import DocumentIndex
 from .profiles import validate_profile, validate_profile_source
@@ -344,7 +350,7 @@ def _heading_structure(index, operations, preserved=()):
             assigned_style = (
                 f"Heading {level}"
                 if record.get("module") == "chapters"
-                else f"WFM {record.get('module')} Heading"
+                else wfm_module_heading_style(record.get("module"))
             )
             result.append(
                 {
@@ -497,9 +503,9 @@ def bind_template(index, template, mapping=None):
                 (f"Heading {h['level']}", {k: v for k, v in h.items() if k in FONT}, False)
                 for h in fmt.get("headings", [])
             ),
-            (fig_cap.get("style_name") or "Figure Caption", fig_cap, True),
-            (tbl_cap.get("style_name") or "Table Caption", tbl_cap, True),
-            ("Bibliography", fmt.get("references", {}), True),
+            (fig_cap.get("style_name") or STYLE_FIGURE_CAPTION, fig_cap, True),
+            (tbl_cap.get("style_name") or STYLE_TABLE_CAPTION, tbl_cap, True),
+            (STYLE_BIBLIOGRAPHY, fmt.get("references", {}), True),
         ]:
             if (
                 not style_tokens

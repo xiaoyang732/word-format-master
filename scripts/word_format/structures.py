@@ -8,7 +8,7 @@ import json
 import re
 from typing import Any, Iterable
 
-from config import LIST_NUMBERING_STYLES, SKILL_DIR
+from config import LIST_NUMBERING_STYLES
 from docx import Document
 from docx.enum.style import WD_STYLE_TYPE
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
@@ -16,6 +16,26 @@ from docx.oxml import OxmlElement, parse_xml
 from docx.oxml.ns import nsdecls
 from lxml import etree
 
+from .constants import (
+    BIBLIOGRAPHY_STYLE_ALIASES,
+    DEFAULT_CAPTION_LABELS,
+    DEFAULT_CHINESE_BASE_CONFIG,
+    DEFAULT_LIST_HANGING_INDENT_TWIPS,
+    DEFAULT_LIST_LEFT_INDENT_TWIPS,
+    STYLE_BIBLIOGRAPHY,
+    STYLE_WFM_PAGE_NUMBER,
+    STYLE_WFM_TOC_BREAK,
+    STYLE_WFM_TOC_FIELD,
+    STYLE_WFM_TOC_HEADING,
+    THREE_LINE_HEADER_BORDER_EIGHTH_PT,
+    THREE_LINE_OUTER_BORDER_EIGHTH_PT,
+    TOC_MANAGED_STYLES,
+    UniversalChineseBaseConfig,
+    build_caption_pattern,
+    is_builtin_paragraph_style,
+    section_content_width_twips,
+    wfm_header_footer_style,
+)
 from .namespaces import qn
 from .properties import paragraph_style_name
 from .ooxml import insert_child
@@ -40,8 +60,6 @@ def deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]
 
 
 def get_or_create_paragraph_style(document: Document, name: str):
-    from .operations import is_builtin_paragraph_style
-
     try:
         return document.styles[name]
     except KeyError:
@@ -223,9 +241,9 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
                 tblPr.remove(existing_borders)
             three_line_xml = parse_xml(
                 f"<w:tblBorders {nsdecls('w')}>"
-                f'<w:top w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+                f'<w:top w:val="single" w:sz="{THREE_LINE_OUTER_BORDER_EIGHTH_PT}" w:space="0" w:color="auto"/>'
                 f'<w:left w:val="none"/>'
-                f'<w:bottom w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+                f'<w:bottom w:val="single" w:sz="{THREE_LINE_OUTER_BORDER_EIGHTH_PT}" w:space="0" w:color="auto"/>'
                 f'<w:right w:val="none"/>'
                 f'<w:insideH w:val="none"/>'
                 f'<w:insideV w:val="none"/>'
@@ -257,10 +275,10 @@ def apply_tables(document: Document, body: dict[str, Any], tables: dict[str, Any
                     ):
                         border = OxmlElement("w:" + edge)
                         size = (
-                            12
+                            THREE_LINE_OUTER_BORDER_EIGHTH_PT
                             if (edge == "top" and row_index == 0)
                             or (edge == "bottom" and row_index == len(rows) - 1)
-                            else 6
+                            else THREE_LINE_HEADER_BORDER_EIGHTH_PT
                             if edge == "bottom" and row_index == 0
                             else None
                         )
@@ -376,20 +394,14 @@ def apply_caption_positions(document: Document, captions: dict[str, Any]) -> lis
     caption is separated from the object by prose, a page break, or a table cell.
     """
     changes: list[str] = []
-    default_labels = {"figure": ["Figure", "Fig.", "图"], "table": ["Table", "表"]}
     paragraphs = list(document.paragraphs)
     for role in ("figure", "table"):
         tokens = captions.get(role) or {}
         position = tokens.get("position")
         if position not in {"above", "below"}:
             continue
-        labels = [str(tokens.get("label") or "")] + default_labels[role]
-        labels = [label for label in dict.fromkeys(labels) if label]
-        pattern = re.compile(
-            rf"^\s*(?:{'|'.join(re.escape(label) for label in labels)})\s*"
-            r"(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
-            re.I,
-        )
+        labels = [str(tokens.get("label") or "")] + list(DEFAULT_CAPTION_LABELS[role])
+        pattern = build_caption_pattern(labels)
         moved = 0
         for paragraph in paragraphs:
             if paragraph._p.getparent() is not document.element.body or not pattern.match(
@@ -429,13 +441,8 @@ def apply_caption_positions(document: Document, captions: dict[str, Any]) -> lis
 
 def caption_keep_nodes(document, params):
     """Only the proven caption/object pair may receive keepNext."""
-    label = params.get("label") or ("图" if params["role"] == "figure" else "表")
-    pattern = re.compile(
-        r"^\s*"
-        + re.escape(label)
-        + r"\s*(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
-        re.I,
-    )
+    label = params.get("label") or DEFAULT_CAPTION_LABELS[params["role"]][0]
+    pattern = build_caption_pattern([label])
     nodes = set()
     for paragraph in document.paragraphs:
         if not pattern.match(paragraph.text):
@@ -534,7 +541,9 @@ def apply_headers_footers(document: Document, tokens: dict[str, Any]) -> list[st
         if config.get("enabled") is False or (
             config.get("enabled") and not str(config.get("text", "")).strip()
         ):
-            cleared = clear_managed_header_footer_paragraphs(document, {f"WFM {kind.title()}"})
+            cleared = clear_managed_header_footer_paragraphs(
+                document, {wfm_header_footer_style(kind)}
+            )
             changes.append(f"Removed managed {kind} text from {cleared} part(s)")
             continue
         if not config.get("enabled"):
@@ -561,7 +570,7 @@ def apply_headers_footers(document: Document, tokens: dict[str, Any]) -> list[st
                     cap.handler(index, ref, cap.validator(params))
             changes.append("Updated header through registered section header handlers")
             continue
-        style_name = f"WFM {kind.title()}"
+        style_name = wfm_header_footer_style(kind)
         style = get_or_create_paragraph_style(document, style_name)
         set_style_font(style, config)
         set_paragraph_format(style, config, document)
@@ -581,9 +590,6 @@ def apply_headers_footers(document: Document, tokens: dict[str, Any]) -> list[st
     return changes
 
 
-TOC_MANAGED_STYLES = {"WFM TOC Heading", "WFM TOC Field", "WFM TOC Break"}
-
-
 def _find_body_section_index(document: Document) -> int:
     from .body_sections import body_section_index
 
@@ -594,7 +600,7 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
     if not tokens:
         return []
     if not tokens.get("enabled"):
-        cleared = clear_managed_header_footer_paragraphs(document, {"WFM Page Number"})
+        cleared = clear_managed_header_footer_paragraphs(document, {STYLE_WFM_PAGE_NUMBER})
         return [f"Removed managed page-number fields from {cleared} part(s)"]
     from .contracts import FormatError
     from .fields import page_number_paragraphs
@@ -616,7 +622,7 @@ def apply_page_numbers(document: Document, tokens: dict[str, Any]) -> list[str]:
             and body_idx == 0 and len(sections) > 1):
         raise FormatError("Body section is ambiguous; specify start_section", "needs_clarification")
     location = tokens.get("location", "footer")
-    style_name = "WFM Page Number"
+    style_name = STYLE_WFM_PAGE_NUMBER
     style = get_or_create_paragraph_style(document, style_name)
     set_style_font(style, tokens)
     set_paragraph_format(style, tokens, document)
@@ -915,9 +921,9 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
             pr = element(paragraph._p, "pPr")
             element(pr, "outlineLvl").set(qn("w:val"), str(level - 1))
     cached_entries = ["  " * (level - 1) + p.text.strip() for p, level in entries]
-    heading_style = get_or_create_paragraph_style(document, "WFM TOC Heading")
-    field_style = get_or_create_paragraph_style(document, "WFM TOC Field")
-    break_style = get_or_create_paragraph_style(document, "WFM TOC Break")
+    heading_style = get_or_create_paragraph_style(document, STYLE_WFM_TOC_HEADING)
+    field_style = get_or_create_paragraph_style(document, STYLE_WFM_TOC_FIELD)
+    break_style = get_or_create_paragraph_style(document, STYLE_WFM_TOC_BREAK)
     for style in (heading_style, field_style, break_style):
         if style.base_style is None:
             style.base_style = get_or_create_paragraph_style(document, "Normal")
@@ -941,7 +947,7 @@ def apply_table_of_contents(document: Document, tokens: dict[str, Any]) -> list[
     anchor_p, placeholder_toc_p = _find_toc_insertion_anchor(document)
     anchor_xml = anchor_p._p if anchor_p is not None else None
     reusing_boundary = (
-        anchor_p is not None and paragraph_style_name(document, anchor_xml) == "WFM TOC Break"
+        anchor_p is not None and paragraph_style_name(document, anchor_xml) == STYLE_WFM_TOC_BREAK
         and anchor_xml.find("./" + qn("w:pPr") + "/" + qn("w:sectPr")) is not None
     )
 
@@ -1061,19 +1067,6 @@ def _remove_paragraph_numbering(paragraph) -> None:
     num_pr.append(num_id_node)
 
 
-def normalize_heading_styles(
-    document: Document,
-    heading_numbering: dict[str, Any] | str | None = None,
-    headings_spec: list[dict[str, Any]] | None = None,
-) -> list[str]:
-    """Compatibility adapter; typography remains owned by explicit format actions."""
-    from .numbering import apply_legacy_heading_scheme
-
-    if isinstance(heading_numbering, str):
-        heading_numbering = {"level1": heading_numbering, "level2": "arabic", "level3": "arabic"}
-    return apply_legacy_heading_scheme(document, heading_numbering or {})
-
-
 def apply_reference_style(
     document: Document, body: dict[str, Any], references: dict[str, Any]
 ) -> list[str]:
@@ -1088,7 +1081,7 @@ def apply_reference_style(
         )
         reference_tokens["first_line_indent_mm"] = -float(hanging_indent)
         reference_tokens["hanging_indent_mm"] = float(hanging_indent)
-    bibliography = resolve_paragraph_style(document, references, "Bibliography")
+    bibliography = resolve_paragraph_style(document, references, STYLE_BIBLIOGRAPHY)
     if bibliography.base_style is None:
         bibliography.base_style = get_or_create_paragraph_style(document, "Normal")
     set_style_font(bibliography, reference_tokens)
@@ -1230,7 +1223,6 @@ def _get_numbering_element(document: Document, create: bool = False):
             return None
         from docx.opc.constants import RELATIONSHIP_TYPE as RT
         from docx.opc.packuri import PackURI
-        from docx.oxml import parse_xml
         from docx.parts.numbering import NumberingPart
 
         numbering_elm = parse_xml(
@@ -1263,11 +1255,8 @@ def _has_numbered_list_marker(document: Document, paragraph, *, index=None) -> b
             "title",
             "subtitle",
             "toc",
-            "wfm toc heading",
-            "bibliography",
-            "references",
-            "reference",
-            "参考文献",
+            STYLE_WFM_TOC_HEADING.lower(),
+            *BIBLIOGRAPHY_STYLE_ALIASES,
         }
     ):
         return False
@@ -1317,8 +1306,8 @@ def _append_numbering_definition(document: Document, style: str, start: int) -> 
     lvl.append(justification)
     paragraph_properties = OxmlElement("w:pPr")
     indentation = OxmlElement("w:ind")
-    indentation.set(qn("w:left"), "720")
-    indentation.set(qn("w:hanging"), "360")
+    indentation.set(qn("w:left"), str(DEFAULT_LIST_LEFT_INDENT_TWIPS))
+    indentation.set(qn("w:hanging"), str(DEFAULT_LIST_HANGING_INDENT_TWIPS))
     paragraph_properties.append(indentation)
     lvl.append(paragraph_properties)
     abstract.append(lvl)
@@ -1354,16 +1343,29 @@ def _set_managed_num_pr(paragraph, num_id: int) -> None:
     insert_child(ppr, num_pr)
 
 
-def normalize_universal_chinese_base(document: Document) -> Document:
+def normalize_universal_chinese_base(
+    document: Document,
+    config: UniversalChineseBaseConfig = DEFAULT_CHINESE_BASE_CONFIG,
+) -> Document:
     """Normalize a python-docx Document into a clean universal Chinese academic baseline.
 
     Cleans Office/python-docx default theme font language (ja-JP -> zh-CN),
     replaces Japanese/Western theme fonts (MS Mincho / MS Gothic / Cambria / Calibri)
-    in theme1.xml with 宋体 / Times New Roman, neutralizes theme accent1/accent2 blue
-    colors (#365F91 / #4F81BD) in styles.xml, and standardizes docDefaults, Normal,
-    Heading 1..3, toc 1..3, header, and footer styles.
+    in theme1.xml with ``config.east_asia_body_font`` / ``config.latin_font``, neutralizes
+    theme accent1/accent2 blue colors (#365F91 / #4F81BD) in styles.xml, and standardizes
+    docDefaults, Normal, Heading 1..9, Title, Bibliography, toc 1..9, header, and footer styles.
     """
     from .properties import element, write_font, write_paragraph
+
+    line_spacing_spec = {
+        "kind": "multiple",
+        "value": config.line_spacing_multiple,
+        "unit": "multiple",
+    }
+    legacy_theme_fonts = {"ＭＳ 明朝", "ＭＳ ゴシック", "Cambria", "Calibri"}
+    toc_right_tab_twips = section_content_width_twips(
+        document.sections[0] if document.sections else None
+    )
 
     # 1. settings.xml: w:themeFontLang -> zh-CN / en-US
     try:
@@ -1378,37 +1380,41 @@ def normalize_universal_chinese_base(document: Document) -> Document:
     except AttributeError:
         pass
 
-    # 2. theme1.xml: replace ja-JP MS Mincho/Gothic and Cambria/Calibri with 宋体 / Times New Roman
+    # 2. theme1.xml: replace ja-JP MS Mincho/Gothic and Cambria/Calibri with configured fonts
     for part in document.part.package.parts:
         if str(part.partname) == "/word/theme/theme1.xml":
             blob_str = part.blob.decode("utf-8")
-            blob_str = re.sub(r'typeface="ＭＳ 明朝"', 'typeface="宋体"', blob_str)
-            blob_str = re.sub(r'typeface="ＭＳ ゴシック"', 'typeface="宋体"', blob_str)
-            blob_str = re.sub(r'typeface="Cambria"', 'typeface="Times New Roman"', blob_str)
-            blob_str = re.sub(r'typeface="Calibri"', 'typeface="Times New Roman"', blob_str)
+            blob_str = re.sub(
+                r'typeface="ＭＳ 明朝"', f'typeface="{config.east_asia_body_font}"', blob_str
+            )
+            blob_str = re.sub(
+                r'typeface="ＭＳ ゴシック"', f'typeface="{config.east_asia_body_font}"', blob_str
+            )
+            blob_str = re.sub(r'typeface="Cambria"', f'typeface="{config.latin_font}"', blob_str)
+            blob_str = re.sub(r'typeface="Calibri"', f'typeface="{config.latin_font}"', blob_str)
             blob_str = re.sub(
                 r'(<a:font\s+script="Hans"\s+typeface=")[^"]*(")',
-                r"\g<1>宋体\2",
+                rf"\g<1>{config.east_asia_body_font}\2",
                 blob_str,
             )
             blob_str = re.sub(
                 r'(<a:font\s+script="Jpan"\s+typeface=")[^"]*(")',
-                r"\g<1>宋体\2",
+                rf"\g<1>{config.east_asia_body_font}\2",
                 blob_str,
             )
             part._blob = blob_str.encode("utf-8")
             if hasattr(document.part, "_wfm_theme_part"):
                 delattr(document.part, "_wfm_theme_part")
 
-    # 3. styles.xml: docDefaults -> 宋体 + Times New Roman, 12pt (小四), black
+    # 3. styles.xml: docDefaults -> configured body font, size, color, and line spacing
     styles_el = document.styles.element
     doc_defaults = element(styles_el, "docDefaults")
     rpr_default = element(doc_defaults, "rPrDefault")
     rpr_def_inner = element(rpr_default, "rPr")
-    write_font(rpr_def_inner, "font_east_asia", "宋体")
-    write_font(rpr_def_inner, "font_latin", "Times New Roman")
-    write_font(rpr_def_inner, "font_size_pt", 12.0)
-    write_font(rpr_def_inner, "color", "000000")
+    write_font(rpr_def_inner, "font_east_asia", config.east_asia_body_font)
+    write_font(rpr_def_inner, "font_latin", config.latin_font)
+    write_font(rpr_def_inner, "font_size_pt", config.body_font_size_pt)
+    write_font(rpr_def_inner, "color", config.text_color)
     lang_def = element(rpr_def_inner, "lang")
     lang_def.set(qn("w:val"), "en-US")
     lang_def.set(qn("w:eastAsia"), "zh-CN")
@@ -1417,92 +1423,88 @@ def normalize_universal_chinese_base(document: Document) -> Document:
     ppr_def_inner = element(ppr_default, "pPr")
     write_paragraph(ppr_def_inner, "space_before_pt", 0.0)
     write_paragraph(ppr_def_inner, "space_after_pt", 0.0)
-    write_paragraph(
-        ppr_def_inner,
-        "line_spacing",
-        {"kind": "multiple", "value": 1.25, "unit": "multiple"},
-    )
+    write_paragraph(ppr_def_inner, "line_spacing", line_spacing_spec)
 
     # 4. Neutralize themefonts, blue colors, and tblStylePr shading across all styles in styles.xml
     for st in styles_el.findall(qn("w:style")):
         for rpr in st.iter(qn("w:rPr")):
             rf = rpr.find(qn("w:rFonts"))
             if rf is not None:
-                for attr in (
-                    "asciiTheme",
-                    "hAnsiTheme",
-                    "eastAsiaTheme",
-                    "cstheme",
-                ):
+                for attr in ("asciiTheme", "hAnsiTheme", "eastAsiaTheme", "cstheme"):
                     rf.attrib.pop(qn("w:" + attr), None)
-                rf.set(qn("w:ascii"), "Times New Roman")
-                rf.set(qn("w:hAnsi"), "Times New Roman")
-                if not rf.get(qn("w:eastAsia")) or rf.get(qn("w:eastAsia")) in {
-                    "ＭＳ 明朝",
-                    "ＭＳ ゴシック",
-                    "Cambria",
-                    "Calibri",
-                }:
-                    rf.set(qn("w:eastAsia"), "宋体")
+                rf.set(qn("w:ascii"), config.latin_font)
+                rf.set(qn("w:hAnsi"), config.latin_font)
+                if not rf.get(qn("w:eastAsia")) or rf.get(qn("w:eastAsia")) in legacy_theme_fonts:
+                    rf.set(qn("w:eastAsia"), config.east_asia_body_font)
             col = rpr.find(qn("w:color"))
             if col is not None:
                 for attr in ("themeColor", "themeTint", "themeShade"):
                     col.attrib.pop(qn("w:" + attr), None)
-                col.set(qn("w:val"), "000000")
+                col.set(qn("w:val"), config.text_color)
         for tbl_style_pr in list(st.findall(qn("w:tblStylePr"))):
             for shd in list(tbl_style_pr.iter(qn("w:shd"))):
                 shd.getparent().remove(shd)
 
-    # 5. Configure Normal, Heading 1..3, toc 1..3, header, footer
+    # 5. Configure Normal, Heading 1..9, Title, Bibliography, toc 1..9, header, footer
     normal_st = get_or_create_paragraph_style(document, "Normal")
     normal_rpr = element(normal_st.element, "rPr")
-    write_font(normal_rpr, "font_east_asia", "宋体")
-    write_font(normal_rpr, "font_latin", "Times New Roman")
-    write_font(normal_rpr, "font_size_pt", 12.0)
-    write_font(normal_rpr, "color", "000000")
+    write_font(normal_rpr, "font_east_asia", config.east_asia_body_font)
+    write_font(normal_rpr, "font_latin", config.latin_font)
+    write_font(normal_rpr, "font_size_pt", config.body_font_size_pt)
+    write_font(normal_rpr, "color", config.text_color)
     normal_ppr = element(normal_st.element, "pPr")
     write_paragraph(normal_ppr, "alignment", "justify")
     write_paragraph(normal_ppr, "space_before_pt", 0.0)
     write_paragraph(normal_ppr, "space_after_pt", 0.0)
-    write_paragraph(
-        normal_ppr,
-        "line_spacing",
-        {"kind": "multiple", "value": 1.25, "unit": "multiple"},
-    )
+    write_paragraph(normal_ppr, "line_spacing", line_spacing_spec)
 
-    heading_specs = {
-        "Heading 1": ("黑体", 15.0, True, "center", 0),
-        "Heading 2": ("黑体", 14.0, True, "left", 1),
-        "Heading 3": ("黑体", 12.0, True, "left", 2),
+    heading_specs: dict[str, tuple[str, float, bool, str, int]] = {
+        "Heading 1": (config.east_asia_heading_font, config.h1_font_size_pt, True, "center", 0),
+        "Heading 2": (config.east_asia_heading_font, config.h2_font_size_pt, True, "left", 1),
+        "Heading 3": (config.east_asia_heading_font, config.h3_plus_font_size_pt, True, "left", 2),
     }
-    heading_specs.update({f"Heading {level}": ("黑体", 12.0, True, "left", level - 1)
-                          for level in range(4, 10)})
+    heading_specs.update(
+        {
+            f"Heading {level}": (
+                config.east_asia_heading_font,
+                config.h3_plus_font_size_pt,
+                True,
+                "left",
+                level - 1,
+            )
+            for level in range(4, 10)
+        }
+    )
     for h_name, (ea_font, sz_pt, is_bold, align, out_lvl) in heading_specs.items():
         st = get_or_create_paragraph_style(document, h_name)
         rpr = element(st.element, "rPr")
         write_font(rpr, "font_east_asia", ea_font)
-        write_font(rpr, "font_latin", "Times New Roman")
+        write_font(rpr, "font_latin", config.latin_font)
         write_font(rpr, "font_size_pt", sz_pt)
         write_font(rpr, "bold", is_bold)
         write_font(rpr, "italic", False)
-        write_font(rpr, "color", "000000")
+        write_font(rpr, "color", config.text_color)
         ppr = element(st.element, "pPr")
         write_paragraph(ppr, "alignment", align)
         write_paragraph(ppr, "space_before_pt", 0.0)
         write_paragraph(ppr, "space_after_pt", 0.0)
-        write_paragraph(
-            ppr, "line_spacing", {"kind": "multiple", "value": 1.25, "unit": "multiple"}
-        )
+        write_paragraph(ppr, "line_spacing", line_spacing_spec)
         write_paragraph(ppr, "first_line_indent", {"value": 0, "unit": "chars"})
         write_paragraph(ppr, "left_indent", {"value": 0, "unit": "chars"})
         write_paragraph(ppr, "outline_level", out_lvl)
 
-    for style_name, east_asia, size in (("Title", "黑体", 16.0),
-                                        ("Bibliography", "宋体", 10.5)):
+    for style_name, east_asia, size in (
+        ("Title", config.east_asia_heading_font, config.title_font_size_pt),
+        (STYLE_BIBLIOGRAPHY, config.east_asia_body_font, config.reference_font_size_pt),
+    ):
         style = get_or_create_paragraph_style(document, style_name)
         rpr = element(style.element, "rPr")
-        for name, value in (("font_east_asia", east_asia), ("font_latin", "Times New Roman"),
-                            ("font_size_pt", size), ("color", "000000")):
+        for name, value in (
+            ("font_east_asia", east_asia),
+            ("font_latin", config.latin_font),
+            ("font_size_pt", size),
+            ("color", config.text_color),
+        ):
             write_font(rpr, name, value)
         language = element(rpr, "lang")
         language.set(qn("w:val"), "en-US")
@@ -1510,7 +1512,7 @@ def normalize_universal_chinese_base(document: Document) -> Document:
         if style_name == "Title":
             ppr = element(style.element, "pPr")
             write_paragraph(ppr, "alignment", "center")
-            write_paragraph(ppr, "first_line_indent", {"value":0, "unit":"chars"})
+            write_paragraph(ppr, "first_line_indent", {"value": 0, "unit": "chars"})
             border = ppr.find(qn("w:pBdr"))
             if border is not None:
                 ppr.remove(border)
@@ -1527,27 +1529,34 @@ def normalize_universal_chinese_base(document: Document) -> Document:
             st = document.styles.add_style(f"toc {lvl}", WD_STYLE_TYPE.PARAGRAPH, builtin=True)
             st.base_style = normal_st
         rpr = element(st.element, "rPr")
-        write_font(rpr, "font_east_asia", "宋体")
-        write_font(rpr, "font_latin", "Times New Roman")
-        write_font(rpr, "font_size_pt", 12.0)
+        write_font(rpr, "font_east_asia", config.east_asia_body_font)
+        write_font(rpr, "font_latin", config.latin_font)
+        write_font(rpr, "font_size_pt", config.body_font_size_pt)
         write_font(rpr, "bold", False)
         write_font(rpr, "italic", False)
-        write_font(rpr, "color", "000000")
+        write_font(rpr, "color", config.text_color)
         ppr = element(st.element, "pPr")
         write_paragraph(ppr, "alignment", "left")
         write_paragraph(ppr, "space_before_pt", 0.0)
         write_paragraph(ppr, "space_after_pt", 0.0)
-        write_paragraph(
-            ppr, "line_spacing", {"kind": "multiple", "value": 1.25, "unit": "multiple"}
-        )
+        write_paragraph(ppr, "line_spacing", line_spacing_spec)
         write_paragraph(ppr, "first_line_indent", {"value": 0, "unit": "chars"})
         write_paragraph(
-            ppr, "left_indent", {"value": float((lvl - 1) * 2), "unit": "chars"}
+            ppr,
+            "left_indent",
+            {"value": float((lvl - 1) * config.toc_indent_step_chars), "unit": "chars"},
         )
         write_paragraph(
             ppr,
             "tabs",
-            [{"alignment": "right", "position": 8306, "unit": "twips", "leader": "dot"}],
+            [
+                {
+                    "alignment": "right",
+                    "position": toc_right_tab_twips,
+                    "unit": "twips",
+                    "leader": "dot",
+                }
+            ],
         )
 
     for hf_name in ("Header", "Footer", "header", "footer"):
@@ -1556,10 +1565,10 @@ def normalize_universal_chinese_base(document: Document) -> Document:
         except KeyError:
             continue
         rpr = element(st.element, "rPr")
-        write_font(rpr, "font_east_asia", "宋体")
-        write_font(rpr, "font_latin", "Times New Roman")
-        write_font(rpr, "font_size_pt", 9.0)
-        write_font(rpr, "color", "000000")
+        write_font(rpr, "font_east_asia", config.east_asia_body_font)
+        write_font(rpr, "font_latin", config.latin_font)
+        write_font(rpr, "font_size_pt", config.header_footer_font_size_pt)
+        write_font(rpr, "color", config.text_color)
 
     return document
 

@@ -5,6 +5,17 @@ from __future__ import annotations
 import copy
 import re
 
+from .constants import (
+    ALL_DEFAULT_CAPTION_RE,
+    NUMERIC_TOLERANCE,
+    STYLE_ID_WFM_PAGE_NUMBER,
+    STYLE_WFM_TOC_BREAK,
+    STYLE_WFM_TOC_FIELD,
+    STYLE_WFM_TOC_HEADING,
+    TOC_MANAGED_STYLES,
+    is_toc_entry_style,
+    wfm_header_footer_style_id,
+)
 from .contracts import FormatError
 from .keywords import keyword_separator_spans
 from .namespaces import qn
@@ -45,19 +56,17 @@ def read_complex_state(index, name):
                 if str(part.partname).startswith("/word/" + kind) and hasattr(part, "element"):
                     for p in part.element.iter(qn("w:p")):
                         ps = p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle"))
-                        if (ps is not None and ps.get(qn("w:val")) == "WFM" + kind.title()) or (
+                        if (
+                            ps is not None
+                            and ps.get(qn("w:val")) == wfm_header_footer_style_id(kind)
+                        ) or (
                             kind == "header"
                             and p.get("{urn:word-format-master}managed-header") == "true"
                         ):
                             state["managed"][kind].append(
                                 "".join(n.text or "" for n in p.iter(qn("w:t")))
                             )
-                            from .properties import (
-                                FONT_TAGS,
-                                PARAGRAPH_TAGS,
-                                read_font,
-                                read_paragraph,
-                            )
+                            from .properties import read_font, read_paragraph
 
                             state["formats"][kind].append(
                                 {
@@ -94,7 +103,7 @@ def read_complex_state(index, name):
         managed = sum(
             p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")) is not None
             and p.find("./" + qn("w:pPr") + "/" + qn("w:pStyle")).get(qn("w:val"))
-            == "WFMPageNumber"
+            == STYLE_ID_WFM_PAGE_NUMBER
             and any(re.search(r"\bPAGE\b", n.text or "", re.I) for n in p.iter(qn("w:instrText")))
             for part in doc.part.package.parts
             if hasattr(part, "element")
@@ -116,24 +125,19 @@ def read_complex_state(index, name):
         from .toc import entry_styles, headings, is_trailing_break, result_status
 
         managed = [
-            p for p in doc.paragraphs if paragraph_style_name(doc, p._p).startswith("WFM TOC")
+            p for p in doc.paragraphs if paragraph_style_name(doc, p._p) in TOC_MANAGED_STYLES
         ]
         native_entries = [
-            p
-            for p in doc.paragraphs
-            if re.fullmatch(
-                r"(?:toc|目录)[1-9]",
-                paragraph_style_name(doc, p._p).lower().replace(" ", ""),
-            )
+            p for p in doc.paragraphs if is_toc_entry_style(paragraph_style_name(doc, p._p))
         ]
         trailing = [
             p
             for p in managed
-            if paragraph_style_name(doc, p._p) == "WFM TOC Break"
+            if paragraph_style_name(doc, p._p) == STYLE_WFM_TOC_BREAK
             and is_trailing_break(p._p)
         ]
         title_paragraphs = [
-            p for p in managed if paragraph_style_name(doc, p._p) == "WFM TOC Heading"
+            p for p in managed if paragraph_style_name(doc, p._p) == STYLE_WFM_TOC_HEADING
         ]
         font_keys = ("font_east_asia", "font_latin", "font_size_pt", "bold", "italic", "color")
         paragraph_keys = (
@@ -186,7 +190,7 @@ def read_complex_state(index, name):
             "titles": [p.text for p in title_paragraphs],
             "title_formats": formats(title_paragraphs),
             "field_formats": formats(
-                [p for p in managed if p.style.name == "WFM TOC Field"] or native_entries
+                [p for p in managed if p.style.name == STYLE_WFM_TOC_FIELD] or native_entries
             ),
             "entry_formats": formats(native_entries),
             "entry_style_formats": entry_style_formats,
@@ -314,11 +318,7 @@ def read_complex_state(index, name):
 
         states = []
         for p in doc.paragraphs:
-            if re.match(
-                r"^\s*(?:图|表|Figure|Fig\.|Table)\s*(?:\d|[一二三四五六七八九十]+[\s.．\-－—_]*\d|[A-Za-z]\s*[.．\-－—_]\s*\d)",
-                p.text,
-                re.I,
-            ):
+            if ALL_DEFAULT_CAPTION_RE.match(p.text):
                 before = _neighboring_content_element(doc, p._p, -1)
                 after = _neighboring_content_element(doc, p._p, 1)
                 states.append(
@@ -553,7 +553,8 @@ def verify_complex_state(actual, params, name):
         for key in ("left_indent", "hanging_indent"):
             if key + "_mm" in params:
                 matches = matches and all(
-                    r[key]["unit"] == "mm" and abs(r[key]["value"] - params[key + "_mm"]) <= 0.025
+                    r[key]["unit"] == "mm"
+                    and abs(r[key]["value"] - params[key + "_mm"]) <= NUMERIC_TOLERANCE
                     for r in items
                 )
         return matches
@@ -604,10 +605,8 @@ def atomic_projection(document, index, refs, cap):
             if r["kind"] == "paragraph" and index.records.get(r["id"], {}).get("role") == "toc":
                 p_elem = index.elements.get(r["id"])
                 style = paragraph_style(document, p_elem) if p_elem is not None else None
-                if style is not None:
-                    norm = (style.name or "").lower().replace(" ", "")
-                    if re.fullmatch(r"(?:toc|目录)[1-9]", norm):
-                        targets.setdefault(style.element, {"kind": "style", "id": "style:" + style.name})
+                if style is not None and is_toc_entry_style(style.name):
+                    targets.setdefault(style.element, {"kind": "style", "id": "style:" + style.name})
     new_style_names = {
         r["id"][6:].casefold() for r in refs if r["kind"] == "style" and r.get("xml_sha256") is None
     }
@@ -793,11 +792,6 @@ def atomic_projection(document, index, refs, cap):
                             if not len(cellpr) and not cellpr.attrib:
                                 cell.remove(cellpr)
             return (xml_value(clone), dimensions) if dimensions is not None else xml_value(clone)
-        # Newly created styles from assigning a name are not unrelated changes.
-        if node.tag == qn("w:style") and node.find(qn("w:name")) is not None:
-            name = node.find(qn("w:name")).get(qn("w:val"))
-            if name.casefold() in new_style_names:
-                return None
         if node not in ancestors:
             # C-level serialization covers every untouched subtree on both sides.
             # Avoid a dirty cache: an unexpected handler mutation must still fail.
@@ -1023,21 +1017,6 @@ def structural_snapshot(index, cap, params, refs):
                         and child.tag in {qn("w:pgNumType"), qn("w:titlePg")}
                     ):
                         sect.remove(child)
-        if cap.property == "citations":
-            objects = [
-                xml_value(n)
-                for n in clone.iter()
-                if n.tag
-                in {
-                    qn("w:bookmarkStart"),
-                    qn("w:bookmarkEnd"),
-                    qn("w:drawing"),
-                    qn("w:instrText"),
-                    qn("w:fldChar"),
-                }
-            ]
-            paragraphs.append((p, text, repr(objects)))
-            continue
         if cap.property in {"heading_numbering", "numbered"} or (
             cap.property == "reference_numbering" and p in reference_nodes
         ):
@@ -1158,17 +1137,6 @@ def verify_structural_preservation(index, cap, params, refs, before):
             if re.fullmatch(
                 r"\s*(?:第[一二三四五六七八九十百千零〇0-9]+章|\d+(?:\.\d+){0,2}[、.．]?|\[\d+\]|［\d+］)\s*",
                 removed,
-            ):
-                continue
-        if cap.property == "citations":
-            placements = params.get("placements", [])
-            old_index = next(
-                (i for i, p in enumerate(index.document.paragraphs) if p._p is node), None
-            )
-            matches = [p for p in placements if p["paragraph_index"] == old_index]
-            if (
-                len(matches) == 1
-                and new_text.replace(matches[0]["citation_text"], "", 1).strip() == text.strip()
             ):
                 continue
         raise FormatError(

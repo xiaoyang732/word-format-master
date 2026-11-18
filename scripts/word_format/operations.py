@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import re
-
 from docx.enum.style import WD_STYLE_TYPE
 from docx.table import Table
 
+from .constants import (
+    is_builtin_paragraph_style,
+    is_toc_entry_style,
+    mm_to_twips,
+)
 from .contracts import FormatError
 from .namespaces import qn
 from .properties import (
@@ -19,29 +22,6 @@ from .properties import (
     write_paragraph,
     write_style_font,
 )
-
-
-BUILTIN_PARAGRAPH_STYLES = frozenset(
-    {
-        "normal",
-        "title",
-        "subtitle",
-        "header",
-        "footer",
-        "caption",
-        "bibliography",
-        "list paragraph",
-        "list number",
-        "list bullet",
-        "toc heading",
-        *(f"heading {i}" for i in range(1, 10)),
-        *(f"toc {i}" for i in range(1, 10)),
-    }
-)
-
-
-def is_builtin_paragraph_style(name: str) -> bool:
-    return (name or "").strip().casefold() in BUILTIN_PARAGRAPH_STYLES
 
 
 def ensure_style(index, ref):
@@ -71,17 +51,12 @@ def _sync_toc_style_element(index, ref):
     from .properties import paragraph_style
 
     style = paragraph_style(index.document, index.elements[ref["id"]])
-    if style is None:
-        return None
-    normalized = (style.name or "").lower().replace(" ", "")
-    if re.fullmatch(r"(?:toc|目录)[1-9]", normalized):
+    if style is not None and is_toc_entry_style(style.name):
         return style
     return None
 
 
 def set_font_property(index, ref, params, name):
-    import re
-
     if ref["kind"] == "style":
         style = ensure_style(index, ref)
         write_style_font(index.document, style, name, params["value"])
@@ -265,7 +240,7 @@ def set_page_property(index, ref, params, attr):
     tag = "pgSz" if attr in {"w", "h", "orient"} else "pgMar"
     value = params["value"]
     element(node, tag).set(
-        qn("w:" + attr), value if attr == "orient" else str(int(round(value * 1440 / 25.4)))
+        qn("w:" + attr), value if attr == "orient" else str(mm_to_twips(value))
     )
 
 

@@ -11,19 +11,6 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable
 
-MODULE_ORDER = (
-    "cover",
-    "declaration",
-    "abstract",
-    "keywords",
-    "toc",
-    "symbols",
-    "chapters",
-    "references",
-    "acknowledgements",
-    "appendix",
-)
-
 _ABSTRACT_LABEL_RE = r"(?:摘\s*要|中文摘要|英文摘要|内容摘要|提\s*要|abstracts?)"
 _KEYWORDS_LABEL_RE = r"(?:关\s*键\s*词|主\s*题\s*词|key\s*words?|index\s+terms?)"
 

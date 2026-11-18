@@ -16,6 +16,7 @@ from docx.opc.part import Part
 from docx.oxml import OxmlElement
 from docx.shared import Mm
 
+from .constants import EMU_PER_TWIP
 from .contracts import FormatError, text_value
 from .doc_loader import SUPPORTED_WORD_SUFFIXES, open_word_document
 from .namespaces import qn
@@ -229,12 +230,6 @@ _FIELD_ALIASES = {
     "日期": "date",
     "完成日期": "date",
     "提交日期": "date",
-}
-
-# Backwards-compatible mapping of canonical keys to inline regex strings.
-_COVER_FIELD_PATTERNS = {
-    alias: rf"^(?:{_FIELD_LABEL_CORES[canonical]}){_SP}[:：]"
-    for alias, canonical in _FIELD_ALIASES.items()
 }
 
 _STANDALONE_DATE_RE = re.compile(
@@ -983,7 +978,7 @@ def _extract_cover_nodes(
     if use_section_break:
         if not found_sect:
             # Remove redundant trailing page break before synthesizing nextPage sectPr.
-            if cloned[-1].tag == qn("w:p") and _has_top_level_page_breaks_in(cloned[-1]):
+            if cloned[-1].tag == qn("w:p") and _has_top_level_page_break(cloned[-1]):
                 _strip_top_level_page_breaks(cloned[-1])
                 if len(cloned) > 1 and _is_empty_paragraph(cloned[-1]):
                     cloned.pop()
@@ -1012,10 +1007,6 @@ def _extract_cover_nodes(
             br_p.append(br_r)
             cloned.append(br_p)
     return cloned
-
-
-def _has_top_level_page_breaks_in(p) -> bool:
-    return _has_top_level_page_break(p)
 
 
 def _remove_existing_cover_from_target(
@@ -1249,17 +1240,22 @@ def clone_template_cover(
             all_paragraphs.append(node)
         all_paragraphs.extend(p for p in node.iter(qn("w:p")) if p is not node)
 
-    from .properties import read_font, read_paragraph
-
     centered_sizes = {
-        p: max((read_font(src_doc, p, run, "font_size_pt") or 0
-                for run in p.findall(qn("w:r"))), default=0)
-        for p in all_paragraphs if read_paragraph(src_doc, p, "alignment") == "center"
+        p: max(
+            (read_font(src_doc, p, run, "font_size_pt") or 0 for run in p.findall(qn("w:r"))),
+            default=0,
+        )
+        for p in all_paragraphs
+        if read_paragraph(src_doc, p, "alignment") == "center"
     }
     largest_size = max(centered_sizes.values(), default=0)
     source_section = src_doc.sections[0]
-    title_width = ((source_section.page_width - source_section.left_margin
-                    - source_section.right_margin - (source_section.gutter or 0)) / 635)
+    title_width = (
+        source_section.page_width
+        - source_section.left_margin
+        - source_section.right_margin
+        - (source_section.gutter or 0)
+    ) / EMU_PER_TWIP
 
     inline_fields = sorted(compiled_fields, key=lambda item: (item[2] is not None,))
     labeled_date = re.compile(

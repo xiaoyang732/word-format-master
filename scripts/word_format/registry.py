@@ -10,6 +10,7 @@ from . import headers, section_breaks, numbering_order
 from . import numbering as template_numbering
 from . import operations as op
 from .citation_display import DISPLAY_VALUES, read_citation_display, set_citation_display
+from .constants import NUMERIC_TOLERANCE
 from .contracts import FormatError, boolean, number, require_keys, text_value
 from .inspect import _style_paragraph
 from .keywords import (
@@ -34,6 +35,7 @@ class Capability:
     parameters: dict
     structural: bool = False
     effects: tuple = ()
+    shifts_ids: bool = False
 
     def public(self):
         return {
@@ -84,8 +86,6 @@ def scalar(kind, low=None, high=None, unit=None, enum=None):
             and abs(value * 2 - round(value * 2)) > 1e-9
         ):
             raise FormatError("Word font sizes require half-point precision")
-        if kind == "text" and not enum and "color" in validate.__name__:
-            pass
         return {"value": value, **({"unit": unit} if unit else {})}
 
     return validate
@@ -287,7 +287,7 @@ def read_atomic(index, ref, cap):
     raise FormatError(f"No reader for {cap.property}")
 
 
-def equal_value(actual, expected, tolerance=0.025):
+def equal_value(actual, expected, tolerance=NUMERIC_TOLERANCE):
     if isinstance(actual, dict) and isinstance(expected, dict):
         return actual.keys() == expected.keys() and all(
             equal_value(actual[k], expected[k], tolerance) for k in actual
@@ -316,7 +316,7 @@ def verify_atomic(actual, params, cap):
     if isinstance(actual, list):
         return bool(actual) and all(equal_value(v, expected) for v in actual)
     if cap.property.endswith("indent") and isinstance(actual, dict) and params["value"] == 0:
-        return abs(actual["value"]) < 0.025
+        return abs(actual["value"]) < NUMERIC_TOLERANCE
     return equal_value(actual, expected)
 
 
@@ -583,13 +583,14 @@ def verify_complex(actual, params, cap):
     return verify_complex_state(actual, params, cap.property)
 
 
-for action, prop, handler, section, effects in (
+for action, prop, handler, section, effects, shifts_ids in (
     (
         "header_footer.configure",
         "headers_footers",
         op.configure_headers,
         "headers_footers",
         ("selected header/footer content", "first/odd-even page flags"),
+        False,
     ),
     (
         "page_number.configure",
@@ -597,6 +598,7 @@ for action, prop, handler, section, effects in (
         op.configure_page_numbers,
         "page_numbers",
         ("managed/reused PAGE fields", "scoped standalone front-matter PAGE removal", "first-page flag", "decimal page numbering start and continuation"),
+        True,
     ),
     (
         "toc.configure",
@@ -609,6 +611,7 @@ for action, prop, handler, section, effects in (
             "field update setting",
             "confirmed heading outline levels",
         ),
+        True,
     ),
     (
         "heading.numbering.configure",
@@ -616,6 +619,7 @@ for action, prop, handler, section, effects in (
         op.configure_heading_numbering,
         "heading_numbering",
         ("heading styles and numbering", "explicit manual number prefixes"),
+        True,
     ),
     (
         "list.numbering.configure",
@@ -623,6 +627,7 @@ for action, prop, handler, section, effects in (
         op.configure_lists,
         "numbered",
         ("existing numbered lists and definitions",),
+        False,
     ),
     (
         "reference.numbering.convert",
@@ -630,6 +635,7 @@ for action, prop, handler, section, effects in (
         op.convert_reference_numbering,
         "reference_numbering",
         ("reference numbering and explicit prefixes",),
+        False,
     ),
     (
         "caption.position.set",
@@ -637,6 +643,7 @@ for action, prop, handler, section, effects in (
         op.set_caption_position,
         "caption_position",
         ("adjacent top-level caption order", "keepNext on a proven caption/object pair"),
+        True,
     ),
     (
         "citation.insert",
@@ -644,6 +651,7 @@ for action, prop, handler, section, effects in (
         op.insert_citations,
         "citations",
         ("dynamic REF citation fields", "reference bookmarks", "native bibliography numbering"),
+        False,
     ),
 ):
     REGISTRY[action] = Capability(
@@ -671,6 +679,7 @@ for action, prop, handler, section, effects in (
         },
         True,
         effects,
+        shifts_ids,
     )
 
 
@@ -709,6 +718,7 @@ REGISTRY["heading.scheme.configure"] = Capability(
     {"levels": "explicit Word numbering level definitions"},
     True,
     ("chapter heading styles and numbering; established manual prefixes",),
+    True,
 )
 
 
@@ -736,6 +746,7 @@ REGISTRY["section.break.next_page.insert"] = Capability(
     {},
     True,
     ("next-page section boundary after selected top-level paragraph; pagination changes",),
+    True,
 )
 
 

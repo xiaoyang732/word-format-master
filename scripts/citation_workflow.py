@@ -9,12 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from docx.document import Document as DocumentType
-from docx.text.paragraph import Paragraph
 
 
-REFERENCE_HEADING_RE = re.compile(
-    r"^\s*(?:references|bibliography|works cited|参考文献|参考资料)\s*$", re.I
-)
 TERMINAL_PUNCTUATION = set(".。!！?？;；:：,，、")
 
 
@@ -24,11 +20,6 @@ def normalized_text(text: str) -> str:
 
 def paragraph_sha256(text: str) -> str:
     return hashlib.sha256(normalized_text(text).encode("utf-8")).hexdigest()
-
-
-def _is_heading(paragraph: Paragraph) -> bool:
-    style = (paragraph.style.name or "").lower() if paragraph.style else ""
-    return style.startswith("heading")
 
 
 def extract_citation_data(document: DocumentType, *, index_data=None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

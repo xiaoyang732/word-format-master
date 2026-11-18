@@ -628,24 +628,6 @@ def _text_outside_fields(root: ET.Element) -> str:
     return "\n".join(chunks)
 
 
-def extract_document_text(path: str | Path, limit: int = 15000) -> str:
-    """Extract literal text for conversational semantic analysis."""
-    package, inventory = package_inventory(Path(path).resolve())
-    try:
-        names = {item["path"] for item in inventory}
-        chunks: list[str] = []
-        for name in sorted(names):
-            if name == "word/document.xml" or is_content_part(name):
-                root = read_xml(package, name)
-                if root is not None:
-                    text = _text_outside_fields(root)
-                    if text:
-                        chunks.append(text)
-        return "\n\n".join(chunks)[:limit]
-    finally:
-        package.close()
-
-
 def infer_visual_paragraph_alignment(
     paragraph: ET.Element,
     effective_ppr: dict[str, Any],
